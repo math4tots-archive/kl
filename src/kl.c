@@ -3,15 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define INVALID_TYPE     0
 #define NIL_TYPE         1
 #define BOOL_TYPE        2
 #define SYMBOL_TYPE      3
 #define NUMBER_TYPE      4
-#define FUNCTION_TYPE    5
-#define OBJECT_TYPE      6
+#define OBJECT_TYPE      5
 
-#define STRING_TYPE      7
-#define LIST_TYPE        8
+#define STRING_TYPE      6
+#define LIST_TYPE        7
+#define SCOPE_TYPE       8
+#define FUNCTION_TYPE    9
 
 #define NIL (g.nil_value)
 #define TRUE (g.true_value)
@@ -23,7 +25,9 @@ typedef struct Value Value;
 typedef struct Object Object;
 typedef struct String String;
 typedef struct List List;
-typedef Value (*Function)(int, Value*);
+typedef struct Scope Scope;
+typedef struct Function Function;
+typedef Value (*Implementation)(void*, int, Value*);
 
 struct Value {
   Type type;
@@ -31,7 +35,6 @@ struct Value {
     int b;
     Symbol s;
     double n;
-    Function f;
     Object *o;
   } u;
 };
@@ -52,6 +55,21 @@ struct List {
   size_t size;
   size_t capacity;
   Value *buffer;
+};
+
+struct Scope {
+  Object header;
+  Value parent;
+  size_t size;
+  size_t capacity;
+  Value *buffer;
+};
+
+struct Function {
+  Object header;
+  char *name;
+  Implementation implementation;
+  Value data;
 };
 
 struct Globals {
@@ -90,8 +108,10 @@ void init() {
   g.false_value.u.b = 0;
 }
 
-static const char *nameOfType(Value v) {
-  switch (v.type) {
+static const char *typeToName(Type t) {
+  switch (t) {
+    case INVALID_TYPE:
+      return "INVALID";
     case NIL_TYPE:
       return "NIL";
     case BOOL_TYPE:
@@ -100,20 +120,93 @@ static const char *nameOfType(Value v) {
       return "SYMBOL";
     case NUMBER_TYPE:
       return "NUMBER";
+    case OBJECT_TYPE:
+      return "OBJECT";
+    case STRING_TYPE:
+      return "STRING";
+    case LIST_TYPE:
+      return "LIST";
+    case SCOPE_TYPE:
+      return "SCOPE";
     case FUNCTION_TYPE:
       return "FUNCTION";
-    case OBJECT_TYPE:
-      switch (v.u.o->type) {
-        case STRING_TYPE:
-          return "STRING";
-        case LIST_TYPE:
-          return "LIST";
-        default:
-          errorf("Invalid object type: %d", v.u.o->type);
-      }
   }
-  errorf("Invalid value type: %d", v.type);
+  errorf("typeToName: invalid type code: %d", t);
   return NULL;
+}
+
+static Type getType(Value v) {
+  return v.type == OBJECT_TYPE ? v.u.o->type : v.type;
+}
+
+static const char *nameOfType(Value v) {
+  return typeToName(getType(v));
+}
+
+static int isType(Value v, Type t) {
+  return getType(v) == t;
+}
+
+static void expectType(const char *fname, Value v, Type t) {
+  if (!isType(v, t)) {
+    errorf("%s: expected type %s but got %s",
+           fname, typeToName(t), nameOfType(v));
+  }
+}
+
+static void retain(Value v) {
+  if (v.type == OBJECT_TYPE) {
+    v.u.o->refcnt++;
+  }
+}
+
+static void release(Value v) {
+  if (v.type == OBJECT_TYPE) {
+    /* TODO: Do this in a way that won't cause stackoverflow */
+    Object *o = v.u.o;
+    if (o->refcnt > 1) {
+      o->refcnt--;
+    } else {
+      switch (o->type) {
+        case STRING_TYPE:
+          free(((String*) o)->buffer);
+          break;
+        case LIST_TYPE:
+          {
+            size_t i;
+            List *list = (List*) o;
+            for (i = 0; i < list->size; i++) {
+              release(list->buffer[i]);
+            }
+            free(list->buffer);
+          }
+          break;
+        case SCOPE_TYPE:
+          {
+            size_t i;
+            Scope *scope = (Scope*) o;
+            release(scope->parent);
+            for (i = 0; i < scope->capacity; i++) {
+              if (scope->buffer[i].type != INVALID_TYPE) {
+                release(scope->buffer[i]);
+              }
+            }
+            free(scope->buffer);
+          }
+          break;
+        case FUNCTION_TYPE:
+          {
+            Function *f = (Function*) o;
+            free(f->name);
+            release(f->data);
+          }
+          break;
+        default:
+          errorf("release: Invalid object type: %d", o->type);
+      }
+      free(o);
+    }
+  }
 }
 
 static Value newSymbol(const char *s) {
@@ -146,13 +239,6 @@ static Value newNumber(double n) {
   return ret;
 }
 
-static Value newFunction(Function f) {
-  Value ret;
-  ret.type = FUNCTION_TYPE;
-  ret.u.f = f;
-  return ret;
-}
-
 static void initObject(Object *object, Type type) {
   object->type = type;
   object->refcnt = 1;
@@ -164,26 +250,14 @@ static Value newString(const char *s) {
   size_t len;
 
   len = strlen(s);
-  ret.type = OBJECT_TYPE;
   str = (String*) malloc(sizeof(String));
-  ret.u.o = (Object*) str;
-  initObject(ret.u.o, STRING_TYPE);
   str->size = len;
   str->buffer = (char*) malloc(sizeof(char) * (len + 1));
   strcpy(str->buffer, s);
 
-  return ret;
-}
-
-static Value newList() {
-  Value ret;
-  List *list;
-
   ret.type = OBJECT_TYPE;
-  list = (List*) malloc(sizeof(List));
-  list->size = list->capacity = 0;
-  list->buffer = NULL;
-  ret.u.o = (Object*) list;
+  ret.u.o = (Object*) str;
+  initObject(ret.u.o, STRING_TYPE);
 
   return ret;
 }
@@ -198,6 +272,61 @@ static const char *cstr(Value v) {
 
   errorf("cstr: expected SYMBOL or STRING but got %s", nameOfType(v));
   return NULL;
+}
+
+static Value newList() {
+  Value ret;
+  List *list;
+
+  list = (List*) malloc(sizeof(List));
+  list->size = list->capacity = 0;
+  list->buffer = NULL;
+
+  ret.type = OBJECT_TYPE;
+  ret.u.o = (Object*) list;
+  initObject(ret.u.o, LIST_TYPE);
+
+  return ret;
+}
+
+static size_t ListSize(Value v) {
+  expectType("ListSize", v, LIST_TYPE);
+  return ((List*) v.u.o)->size;
+}
+
+static Value newScope(Value parent) {
+  Value ret;
+  Scope *scope;
+
+  scope = (Scope*) malloc(sizeof(Scope));
+  scope->size = scope->capacity = 0;
+  scope->buffer = NULL;
+  scope->parent = parent;
+
+  retain(parent);
+
+  ret.type = OBJECT_TYPE;
+  ret.u.o = (Object*) scope;
+  initObject(ret.u.o, SCOPE_TYPE);
+
+  return ret;
+}
+
+static Value newFunction(const char *name, Implementation i, Value data) {
+  Value ret;
+  Function *f;
+
+  f = (Function*) malloc(sizeof(Function));
+  f->name = (char*) malloc(sizeof(char) * (strlen(name) + 1));
+  strcpy(f->name, name);
+  f->implementation = i;
+  f->data = data;
+
+  ret.type = OBJECT_TYPE;
+  ret.u.o = (Object*) f;
+  initObject(ret.u.o, FUNCTION_TYPE);
+
+  return ret;
 }
 
 int main() {
