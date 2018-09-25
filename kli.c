@@ -19,6 +19,7 @@ typedef struct Object Object;
 typedef struct FieldEntry FieldEntry;
 typedef struct Globals Globals;
 typedef int Status;
+typedef size_t Symbol;
 
 struct Object {
   size_t refcnt;
@@ -40,12 +41,14 @@ struct Object {
 };
 
 struct FieldEntry {
-  char *key;
+  Symbol key;
   Object *value;
 };
 
 struct Globals {
   int initialized;
+  size_t nsymbols;
+  char **symbol_to_string;
   Object *nil;
   Object *bool_proto;
   Object *tru;
@@ -66,11 +69,31 @@ static char *copystr(const char *str) {
   return ret;
 }
 
+static Symbol string_to_symbol(const char *s) {
+  size_t i;
+  for (i = 0; i < g.nsymbols; i++) {
+    if (strcmp(g.symbol_to_string[i], s) == 0) {
+      return i;
+    }
+  }
+  i = g.nsymbols++;
+  g.symbol_to_string =
+    (char**) realloc(g.symbol_to_string, sizeof(char*) * g.nsymbols);
+  g.symbol_to_string[i] = copystr(s);
+  return i;
+}
+
+static const char *symbol_to_string(Symbol s) {
+  return g.symbol_to_string[s];
+}
+
 static void init() {
   if (g.initialized) {
     return;
   }
   g.initialized = 1;
+  g.nsymbols = 0;
+  g.symbol_to_string = NULL;
   g.nil = mkobj(NULL);
   g.bool_proto = mkobj(NULL);
   g.tru = mkobj(g.bool_proto);
@@ -151,22 +174,28 @@ static Object *mkstr(const char *str) {
   return ret;
 }
 
-static FieldEntry *findattr(Object *obj, const char *attr) {
+static FieldEntry *findattr(Object *obj, Symbol attr) {
   size_t i;
   for (i = 0; i < obj->nfields; i++) {
-    if (strcmp(obj->fields[i].key, attr) == 0) {
+    if (obj->fields[i].key == attr) {
       return obj->fields + i;
     }
   }
   return NULL;
 }
 
-static Object *getattr(Object *obj, const char *attr) {
-  FieldEntry *entry = findattr(obj, attr);
-  return entry ? retain(entry->value) : NULL;
+static Object *getattr(Object *obj, Symbol attr) {
+  while (obj) {
+    FieldEntry *entry = findattr(obj, attr);
+    if (entry) {
+      return retain(entry->value);
+    }
+    obj = obj->proto;
+  }
+  return NULL;
 }
 
-static void setattr(Object *obj, const char *attr, Object *value) {
+static void setattr(Object *obj, Symbol attr, Object *value) {
   FieldEntry *entry = findattr(obj, attr);
   retain(value);
   if (entry) {
@@ -176,7 +205,7 @@ static void setattr(Object *obj, const char *attr, Object *value) {
     obj->nfields++;
     obj->fields =
       (FieldEntry*) realloc(obj->fields, sizeof(FieldEntry) * obj->nfields);
-    obj->fields[obj->nfields - 1].key = copystr(attr);
+    obj->fields[obj->nfields - 1].key = attr;
     obj->fields[obj->nfields - 1].value = value;
   }
 }
