@@ -59,6 +59,13 @@ static Object *mkobj(Object*);
 
 static Globals g;
 
+static char *copystr(const char *str) {
+  size_t len = strlen(str);
+  char *ret = (char*) malloc(sizeof(char) * (len + 1));
+  strcpy(ret, str);
+  return ret;
+}
+
 static void init() {
   if (g.initialized) {
     return;
@@ -131,10 +138,9 @@ static Object *mkobj(Object *proto) {
   return ret;
 }
 
-static char *copystr(const char *str) {
-  size_t len = strlen(str);
-  char *ret = (char*) malloc(sizeof(char) * (len + 1));
-  strcpy(ret, str);
+static Object *mknum(double value) {
+  Object *ret = mkobj(g.number_proto);
+  ret->n = value;
   return ret;
 }
 
