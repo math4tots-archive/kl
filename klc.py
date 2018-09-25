@@ -218,6 +218,14 @@ class VariableDeclaration(Node):
     def proto(self):
         return '%s %s' % (_ctype(self.type), _cname(self.name))
 
+    def translate(self, scope, src, depth):
+        src += '  ' * depth + self.proto + ' = '
+        if self.type in primitive_types:
+            src += '0'
+        else:
+            src += 'NULL'
+        src += ';\n'
+
 
 class Block(Statement):
     fields = (
@@ -226,16 +234,25 @@ class Block(Statement):
     )
 
     def translate(self, parent_scope, src, depth):
+        src += '  ' * depth + '{\n'
         scope = dict(parent_scope)
         for d in self.variables:
+            # This is necessary to ensure that releases are done properly
+            if any(loc.name == d.name for loc in scope['@locals']):
+                raise TypeError('Shadowed local variable %r' % (d.name, ))
             scope['@locals'].append(d)
             scope[d.name] = d
+            d.translate(scope, src, depth + 1)
 
         for statement in self.statements:
             statement.translate(scope, src, depth + 1)
 
-        for _ in range(len(self.variables)):
-            scope['@locals'].pop()
+        for d in reversed(self.variables):
+            assert d is scope['@locals'].pop()
+            if d.type not in primitive_types:
+                src += '  ' * (depth + 1) + 'KLC_release()'
+
+        src += '  ' * depth + '}\n'
 
 
 class FunctionDefinition(TopLevelNode):
@@ -285,7 +302,9 @@ print(Program(
             None, 'void', 'main', [],
             Block(
                 None,
-                [],
+                [
+                    VariableDeclaration(None, 'int', 'x'),
+                ],
                 [
                 ],
             )
