@@ -2,9 +2,9 @@
 KL interpreter
 
 cls && \
-gcc -Werror -Wpedantic -Wall -Wno-unused-function kli.c && \
+gcc -std=c89 -Werror -Wpedantic -Wall -Wno-unused-function kli.c && \
 cp kli.{c,cc} \
-&& gcc -Werror -Wpedantic -Wall -Wno-unused-function kli.cc && \
+&& g++ -std=c++98 -Werror -Wpedantic -Wall -Wno-unused-function kli.cc && \
 ./a.out && \
 rm a.out kli.cc
 */
@@ -212,4 +212,5 @@ static void setattr(Object *obj, Symbol attr, Object *value) {
 
 int main() {
   init();
+  return 0;
 }
