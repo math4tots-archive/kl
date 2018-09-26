@@ -52,20 +52,24 @@ struct KLC_typeinfo {
 };
 
 void KLC_retain(KLC_header *obj) {
-  obj->refcnt++;
+  if (obj) {
+    obj->refcnt++;
+  }
 }
 
 void KLC_partial_release(KLC_header* obj, KLC_header** delete_queue) {
-  if (obj->refcnt) {
-    obj->refcnt--;
-  } else {
-    obj->next = *delete_queue;
-    *delete_queue = obj;
+  if (obj) {
+    if (obj->refcnt) {
+      obj->refcnt--;
+    } else {
+      obj->next = *delete_queue;
+      *delete_queue = obj;
+    }
   }
 }
 
 void KLC_release(KLC_header *obj) {
-  KLC_header* delete_queue;
+  KLC_header* delete_queue = NULL;
   KLC_partial_release(obj, &delete_queue);
   while (delete_queue) {
     obj = delete_queue;
