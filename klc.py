@@ -13,6 +13,7 @@ from typing import NamedTuple, Tuple, List, Union, Optional, Callable, Iterable
 import abc
 import re
 import typing
+import contextlib
 
 
 SYMBOLS = [
@@ -348,6 +349,36 @@ def lex(source):
     return _lexer.lex(source)
 
 
+class FractalStringBuilder(object):
+    def __init__(self):
+        self.parts = []
+
+    def __str__(self):
+        parts = []
+        self._dump(parts)
+        return ''.join(parts)
+
+    def _dump(self, parts):
+        for part in self.parts:
+            if isinstance(part, FractalStringBuilder):
+                part._dump(parts)
+            else:
+                parts.append(str(part))
+
+    def __iadd__(self, s):
+        self.parts.append(s)
+        return self
+
+    def __call__(self, s):
+        self += s
+        return self
+
+    def spawn(self):
+        child = FractalStringBuilder()
+        self.parts.append(child)
+        return child
+
+
 def translate(*sources):
     i = tokens = None
 
@@ -355,12 +386,14 @@ def translate(*sources):
 
     todo = []  # list of callbacks to invoke after scope is populated
 
-    fwdparts = []  # forward decls
-    hdrparts = []  # header
-    dltparts = []  # deleter functions
-    tpiparts = []  # typeinfo definitions
-    cstparts = []  # constructor functions
-    srcparts = []  # function definitions
+    out = FractalStringBuilder()
+    out += PRELUDE
+    fwd = out.spawn()  # forward decls
+    hdr = out.spawn()  # header
+    dlt = out.spawn()  # deleter functions
+    tpi = out.spawn()  # typeinfo definitions
+    cst = out.spawn()  # constructor functions
+    src = out.spawn()  # function definitions
 
     def _cdecltype(name):
         if name in PRIMITIVE_TYPES:
@@ -397,24 +430,6 @@ def translate(*sources):
         if not at(token_type):
             throw(f'Expected {token_type} but got {peek()}')
         return gettok()
-
-    def fwd(s):
-        fwdparts.append(s)
-
-    def hdr(s):
-        hdrparts.append(s)
-
-    def dlt(s):
-        dltparts.append(s)
-
-    def tpi(s):
-        tpiparts.append(s)
-
-    def cst(s):
-        cstparts.append(s)
-
-    def src(s):
-        srcparts.append(s)
 
     hdr('\n/* header */\n')
     dlt('\n/* deleters */\n')
@@ -511,6 +526,23 @@ def translate(*sources):
         else:
             throw('Expected statement')
 
+    class ExpressionContext:
+        def __init__(self, depth):
+            self.tempvars = []
+            self.depth = depth
+
+    @contextlib.contextmanager
+    def expression_context(depth):
+        ec = ExpressionContext(depth)
+        yield ec
+
+        for tempvar in reversed(ec.tempvars):
+            indent(depth)
+            src(f'KLC_release((KLC_header*) {tempvar})')
+
+    def translate_expression(ec, depth):
+        pass
+
     def indent(depth):
         src('  ' * depth)
 
@@ -543,12 +575,7 @@ def translate(*sources):
     for callback in todo:
         callback()
 
-    return (
-        PRELUDE +
-        ''.join(''.join(parts) for parts in [
-            fwdparts, hdrparts, dltparts, tpiparts, cstparts, srcparts,
-        ])
-    )
+    return str(out)
 
 
 # print(lex(Source('<string>', 'abc + def')))
