@@ -521,12 +521,18 @@ class Node(object):
         )
 
 
-def _crelease(cname):
-    return f'KLC_release((KLC_header*) {cname});'
+def _crelease(ctx, type_, cname):
+    if type_ in PRIMITIVE_TYPES:
+        return ''
+    else:
+        return f'KLC_release((KLC_header*) {cname});'
 
 
-def _cretain(cname):
-    return f'KLC_retain((KLC_header*) {cname});'
+def _cretain(ctx, type_, cname):
+    if type_ in PRIMITIVE_TYPES:
+        return ''
+    else:
+        return f'KLC_retain((KLC_header*) {cname});'
 
 
 class BaseVariableDefinition(Node):
@@ -545,6 +551,12 @@ class BaseVariableDefinition(Node):
 
     def cname(self, ctx):
         return ctx.cname(self.name)
+
+    def crelease(self, ctx):
+        return _crelease(ctx, self.type, self.cname(ctx))
+
+    def cretain(self, ctx):
+        return _cretain(ctx, self.type, self.cname(ctx))
 
 
 class Parameter(BaseVariableDefinition):
@@ -614,7 +626,7 @@ class Name(Expression):
         etype = defn.type
         tempvar = ctx.mktemp(etype)
         ctx.src += f'{tempvar} = {ctx.cname(self.name)};'
-        ctx.src += _cretain(tempvar)
+        ctx.src += _cretain(ctx, etype, tempvar)
         return (etype, tempvar)
 
 
@@ -731,7 +743,7 @@ def _release_for_return(ctx, src):
     while scope:
         for vdef in reversed(scope.local_definitions):
             if isinstance(vdef, VariableDefinition):
-                src += _crelease(vdef.cname(ctx))
+                src += vdef.crelease(ctx)
         scope = scope.parent
 
 
@@ -771,7 +783,7 @@ class Block(Statement):
             # We should also release in LIFO order
             for vdef in reversed(ctx.scope.local_definitions):
                 if vdef.type not in PRIMITIVE_TYPES:
-                    epilogue += _crelease(vdef.cname(ctx))
+                    epilogue += vdef.crelease(ctx)
 
 
 class GlobalTranslationContext(TranslationContext):
@@ -844,8 +856,8 @@ class ExpressionTranslationContext(TranslationContext):
         Variables are released in LIFO order
         """
         for type_, cname in reversed(self.tempdecls):
-            if type_ not in PRIMITIVE_TYPES and cname != keepvar:
-                self.src += _crelease(cname)
+            if cname != keepvar:
+                self.src += _crelease(self, type_, cname)
 
 
 class Program(Node):
