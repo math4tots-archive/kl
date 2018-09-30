@@ -1023,12 +1023,22 @@ class ClassDefinition(TypeDefinition):
     )
 
     def translate(self, ctx: GlobalTranslationContext):
-        if self.extern:
-            return
-
         name = self.name
         cname = ctx.cname(name)
         cdecltype = ctx.cdecltype(name)
+
+        del_name = f'KLC_delete{name}'
+        malloc_name = f'KLC_malloc{name}'
+
+        delete_proto = f'void {del_name}(KLC_header* robj, KLC_header** dq)'
+        malloc_proto = f'{cdecltype} {malloc_name}()'
+
+        ctx.hdr += delete_proto + ';'
+        ctx.hdr += malloc_proto + ';'
+
+        if self.extern:
+            return
+
         ctx.fwd += f'typedef struct {cname} {cname};'
 
         ctx.hdr += f'struct {cname} ' '{'
@@ -1037,16 +1047,11 @@ class ClassDefinition(TypeDefinition):
             ctx.hdr += f'  {field.cproto(ctx)};'
         ctx.hdr += '};'
 
-        del_name = f'KLC_delete{name}'
-        malloc_name = f'KLC_malloc{name}'
-
         ctx.src += f'KLC_typeinfo KLC_type{name} = ' '{'
         ctx.src += f'  "{name}",'
         ctx.src += f'  &{del_name}'
         ctx.src += '};'
 
-        delete_proto = f'void {del_name}(KLC_header* robj, KLC_header** dq)'
-        ctx.hdr += delete_proto + ';'
         ctx.src += delete_proto + '{'
         objfields = [f for f in self.fields if f.type not in PRIMITIVE_TYPES]
         if objfields:
@@ -1059,8 +1064,6 @@ class ClassDefinition(TypeDefinition):
                     ctx.src += f'  KLC_partial_release((KLC_header*) obj->{cfname}, dq);'
         ctx.src += '}'
 
-        malloc_proto = f'{cdecltype} {malloc_name}()'
-        ctx.hdr += malloc_proto + ';'
         ctx.src += malloc_proto + '{'
         ctx.src += f'  {cdecltype} obj = ({cdecltype}) malloc(sizeof({cname}));'
         for field in self.fields:
