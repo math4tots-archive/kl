@@ -1017,10 +1017,13 @@ class TypeDefinition(GlobalDefinition):
 
 class ClassDefinition(TypeDefinition):
     fields = (
-        ('extern', bool),
         ('name', str),
-        ('fields', List[Field]),
+        ('fields', Optional[List[Field]]),
     )
+
+    @property
+    def extern(self):
+        return self.fields is None
 
     def translate(self, ctx: GlobalTranslationContext):
         name = self.name
@@ -1276,8 +1279,8 @@ def translate(*sources):
 tok = lex(Source('<dummy>', 'dummy'))[0]
 
 node = Program(tok, [
-    ClassDefinition(tok, True, 'String', []),
-    ClassDefinition(tok, False, 'Foo', [
+    ClassDefinition(tok, 'String', None),
+    ClassDefinition(tok, 'Foo', [
         Field(tok, 'var', 'v'),
         Field(tok, 'int', 'i'),
         Field(tok, 'String', 's'),
