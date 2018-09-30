@@ -50,7 +50,9 @@ typedef struct KLC_methodinfo KLC_methodinfo;
 typedef struct KLC_methodlist KLC_methodlist;
 typedef struct KLC_typeinfo KLC_typeinfo;
 typedef struct KLC_var KLC_var;
-typedef KLC_var (*KLC_function)(int, KLC_var*);
+typedef KLC_var (*KLC_fp)(int, KLC_var*); /* untyped function pointer */
+typedef struct KLC_functioninfo KLC_functioninfo;
+typedef KLC_functioninfo* KLC_function;
 
 struct KLC_header {
   KLC_typeinfo* type;
@@ -60,12 +62,17 @@ struct KLC_header {
 
 struct KLC_methodinfo {
   const char* name;
-  KLC_function body;
+  KLC_fp body;
 };
 
 struct KLC_methodlist {
   size_t size;
   KLC_methodinfo* methods;
+};
+
+struct KLC_functioninfo {
+  const char* name;
+  KLC_fp body;
 };
 
 struct KLC_typeinfo {
@@ -187,7 +194,7 @@ KLC_var KLC_var_call(KLC_var f, int argc, KLC_var* argv) {
     KLC_errorf("Not a function\n");
   }
 
-  result = f.u.f(argc, argv);
+  result = f.u.f->body(argc, argv);
 
   return result;
 }
@@ -246,8 +253,18 @@ KLCNString* KLCNstr(KLC_var v) {
       sprintf(buffer, "%f", v.u.d);
       return KLC_mkstr(buffer);
     }
-    case KLC_TAG_FUNCTION:
-      return KLC_mkstr("<function>");
+    case KLC_TAG_FUNCTION: {
+      size_t namelen = strlen(v.u.f->name);
+      size_t len = namelen + 50;
+      char* buffer = (char*) malloc(sizeof(char) * len);
+      KLCNString* ret;
+      strcpy(buffer, "<function ");
+      strcpy(buffer + strlen(buffer), v.u.f->name);
+      strcpy(buffer + strlen(buffer), ">");
+      ret = KLC_mkstr(buffer);
+      free(buffer);
+      return ret;
+    }
     case KLC_TAG_OBJECT:
       if (v.u.obj->type == &KLC_typeString) {
         KLC_retain(v.u.obj);
@@ -813,7 +830,7 @@ class Name(Expression):
             return (etype, tempvar)
         elif isinstance(defn, FunctionDefinition):
             tempvar = ctx.mktemp('var')
-            ctx.src += f'{tempvar} = KLC_function_to_var(KLC_untyped{defn.name});'
+            ctx.src += f'{tempvar} = KLC_function_to_var(&KLC_functioninfo{defn.name});'
             return ('var', tempvar)
         else:
             raise Error([self.token, defn.token],
@@ -1134,7 +1151,12 @@ class FunctionDefinition(GlobalDefinition):
             self.body.translate(ctx)
 
     def _translate_untyped(self, ctx):
+        name = self.name
         ctx.hdr += self.untyped_cproto(ctx) + ';'
+        ctx.hdr += f'KLC_functioninfo KLC_functioninfo{name} = ' '{'
+        ctx.hdr += f'  "{name}",'
+        ctx.hdr += f'  KLC_untyped{self.name},'
+        ctx.hdr += '};'
         ctx.src += self.untyped_cproto(ctx) + '{'
         src = ctx.src.spawn(1)
         ctx.src += '}'
