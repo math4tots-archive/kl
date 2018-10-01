@@ -199,6 +199,34 @@ KLC_var KLC_var_call(KLC_var f, int argc, KLC_var* argv) {
   return result;
 }
 
+KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {
+  if (argc == 0) {
+    KLC_errorf("mcall requires at least 1 arg");
+  }
+  if (argv[0].tag != KLC_TAG_OBJECT || !argv[0].u.obj) {
+    KLC_errorf("mcall only supports non-null objects");
+  }
+  {
+    KLC_typeinfo* type = argv[0].u.obj->type;
+    KLC_methodlist* mlist = type->methods;
+    size_t len = mlist->size;
+    KLC_methodinfo* mbuf = mlist->methods;
+    KLC_methodinfo* m = NULL;
+    size_t i;
+    /* TODO: Faster method dispatch mechanism */
+    for (i = 0; i < len; i++) {
+      if (strcmp(mbuf[i].name, name) == 0) {
+        m = mbuf + i;
+        break;
+      }
+    }
+    if (!m) {
+      KLC_errorf("No such method '%s' for type '%s'", name, type->name);
+    }
+    return m->body(argc, argv);
+  }
+}
+
 typedef struct KLCNString KLCNString;
 struct KLCNString {
   KLC_header header;
@@ -867,6 +895,7 @@ class FunctionCall(Expression):
                 argtype, argtempvar = arg.translate(ctx)
                 if argtype != 'void' and param.type == 'var':
                     argtempvar = ctx.varify(argtype, argtempvar)
+                    argtype = 'var'
                 if argtype != param.type:
                     raise Error([param.token, arg.token],
                                 f'Expected {param.type} but got {argtype}')
@@ -876,7 +905,7 @@ class FunctionCall(Expression):
                             f'{len(defn.params)} args expected '
                             f'but got {len(self.args)}')
             argsstr = ', '.join(argtempvars)
-            if defn.return_type is 'void':
+            if defn.return_type == 'void':
                 ctx.src += f'{ctx.cname(defn.name)}({argsstr});'
                 return ('void', None)
             else:
@@ -905,6 +934,67 @@ class FunctionCall(Expression):
 
         raise Error([self.token, defn.token],
                     f'{self.function} is not a function')
+
+
+class MethodCall(Expression):
+    fields = (
+        ('owner', Expression),
+        ('name', str),
+        ('args', List[Expression]),
+    )
+
+    def translate(self, ctx):
+        ownertype, ownertempvar = self.owner.translate(ctx)
+        if ownertype == 'void':
+            raise Error([self.token], f'Cannot call method on void type')
+        if ownertype == 'var':
+            argtempvars = []
+            for arg in self.args:
+                argtype, argtempvar = arg.translate(ctx)
+                if argtype == 'void':
+                    raise Error(
+                        [arg.token],
+                        'void expression cannot be used as an argument')
+                argtempvar = ctx.varify(argtype, argtempvar)
+                argtempvars.append(argtempvar)
+            tarr = ctx.mktemparr(len(self.args) + 1)
+            tv = ctx.mktemp('var')
+            ctx.src += f'{tarr}[0] = {ownertempvar};'
+            for i, argtempvar in enumerate(argtempvars, 1):
+                ctx.src += f'{tarr}[{i}] = {argtempvar};'
+            ctx.src += f'{tv} = KLC_mcall("{self.name}", {len(self.args) + 1}, {tarr});'
+            return ('var', tv)
+        else:
+            fname = f'{ownertype}_m{self.name}'
+            # TODO: Consider looking up from global context
+            # to avoid coincidental names that shadow method names
+            defn = ctx.scope.get(fname, [self.token])
+            if not isinstance(defn, FunctionDefinition):
+                raise Error([self.token], f'FUBAR: shadowed method {fname}')
+            argdata = [(ownertype, ownertempvar)] + [
+                arg.translate(ctx) for arg in self.args
+            ]
+            argtempvars = []
+            for param, (argtype, argtempvar) in zip(defn.params, argdata):
+                if argtype != 'void' and param.type == 'var':
+                    argtempvar = ctx.varify(argtype, argtempvar)
+                    argtype = 'var'
+                if argtype != param.type:
+                    raise Error([param.token, arg.token],
+                                f'Expected {param.type} but got {argtype}')
+                argtempvars.append(argtempvar)
+            if len(defn.params) != len(argdata):
+                raise Error([self.token, defn.token],
+                            f'{len(defn.params)} args expected '
+                            f'but got {len(argdata)}')
+            argsstr = ', '.join(argtempvars)
+            if defn.return_type == 'void':
+                ctx.src += f'{ctx.cname(defn.name)}({argsstr});'
+                return ('void', None)
+            else:
+                tempvar = ctx.mktemp(defn.return_type)
+                ctx.src += f'{tempvar} = {ctx.cname(defn.name)}({argsstr});'
+                return (defn.return_type, tempvar)
 
 
 class VariableDefinition(Statement, BaseVariableDefinition):
@@ -1085,6 +1175,8 @@ class ExpressionTranslationContext(TranslationContext):
         return tempvar
 
     def mktemparr(self, n):
+        if n == 0:
+            raise Error([], 'FUBAR: zero-length array')
         tempvar = self._next_tempvar_name()
         self.tmp += f'KLC_var {tempvar}[{n}];'
         return tempvar
@@ -1295,6 +1387,12 @@ node = Program(tok, [
         ])),
         ExpressionStatement(tok, FunctionCall(tok, 'foo', [Name(tok, 'puts')])),
         ExpressionStatement(tok, FunctionCall(tok, 'print', [Name(tok, 'foo')])),
+        ExpressionStatement(tok, FunctionCall(tok, 'print', [
+            MethodCall(tok, Name(tok, 'v'), 'size', []),
+        ])),
+        ExpressionStatement(tok, FunctionCall(tok, 'print', [
+            MethodCall(tok, Name(tok, 's'), 'size', []),
+        ])),
     ])),
 ])
 
