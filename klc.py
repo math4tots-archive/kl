@@ -223,10 +223,25 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {
     const KLC_methodinfo* m = NULL;
     size_t i;
     /* TODO: Faster method dispatch mechanism */
-    for (i = 0; i < len; i++) {
-      if (strcmp(mbuf[i].name, name) == 0) {
-        m = mbuf + i;
-        break;
+    if (len) {
+      int cmp = strcmp(name, mbuf[0].name);
+      if (cmp == 0) {
+        m = mbuf;
+      } else if (cmp > 0) {
+        size_t lower = 0;
+        size_t upper = len;
+        while (lower + 1 < upper) {
+          size_t mid = (lower + upper) / 2;
+          cmp = strcmp(name, mbuf[mid].name);
+          if (cmp == 0) {
+            m = mbuf + mid;
+            break;
+          } else if (cmp < 0) {
+            upper = mid;
+          } else {
+            lower = mid;
+          }
+        }
       }
     }
     if (!m) {
@@ -1326,6 +1341,8 @@ class ClassDefinition(TypeDefinition):
 
         if self.methods:
             ctx.src += f'static KLC_methodinfo KLC_methodarray{name}[] = ' '{'
+            # NOTE: This has to be sorted by because mcall
+            # does binary search on method list to dispatch.
             for mname in sorted(self.methods):
                 mfname = f'{name}_m{mname}'
                 ctx.src += '  {' f'"{mname}", KLC_untyped{mfname}' '},'
