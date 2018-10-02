@@ -1283,6 +1283,9 @@ class ClassDefinition(TypeDefinition):
         super().__init__(*args, **kwargs)
         if '_' in self.name:
             raise Error([self.token], 'Class names cannot have underscores')
+        if self.name[:1].lower() == self.name[:1]:
+            raise Error([self.token],
+                        'Class names must start with uppercase letter')
 
     @property
     def extern(self):
