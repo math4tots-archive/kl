@@ -61,24 +61,24 @@ struct KLC_header {
 };
 
 struct KLC_methodinfo {
-  const char* name;
-  KLC_fp body;
+  const char* const name;
+  const KLC_fp body;
 };
 
 struct KLC_methodlist {
-  size_t size;
-  KLC_methodinfo* methods;
+  const size_t size;
+  const KLC_methodinfo* const methods;
 };
 
 struct KLC_functioninfo {
-  const char* name;
-  KLC_fp body;
+  const char* const name;
+  const KLC_fp body;
 };
 
 struct KLC_typeinfo {
-  const char* name;
-  void (*deleter)(KLC_header*, KLC_header**);
-  KLC_methodlist* methods;
+  const char* const name;
+  void (*const deleter)(KLC_header*, KLC_header**);
+  const KLC_methodlist* const methods;
 };
 
 struct KLC_var {
@@ -208,10 +208,10 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {
   }
   {
     KLC_typeinfo* type = argv[0].u.obj->type;
-    KLC_methodlist* mlist = type->methods;
+    const KLC_methodlist* mlist = type->methods;
     size_t len = mlist->size;
-    KLC_methodinfo* mbuf = mlist->methods;
-    KLC_methodinfo* m = NULL;
+    const KLC_methodinfo* mbuf = mlist->methods;
+    const KLC_methodinfo* m = NULL;
     size_t i;
     /* TODO: Faster method dispatch mechanism */
     for (i = 0; i < len; i++) {
@@ -239,13 +239,7 @@ void KLC_deleteString(KLC_header* robj, KLC_header** dq) {
   free(obj->buffer);
 }
 
-extern KLC_methodlist KLC_methodlistString;
-
-KLC_typeinfo KLC_typeString = {
-  "String",
-  KLC_deleteString,
-  &KLC_methodlistString,
-};
+extern KLC_typeinfo KLC_typeString;
 
 KLCNString* KLC_mkstr(const char *str) {
   KLCNString* obj = (KLCNString*) malloc(sizeof(KLCNString));
@@ -1305,21 +1299,30 @@ class ClassDefinition(TypeDefinition):
         ctx.hdr += delete_proto + ';'
         ctx.hdr += malloc_proto + ';'
 
+        ctx.hdr += f'extern KLC_typeinfo KLC_type{name};'
+
         if self.methods:
-            ctx.src += f'KLC_methodinfo KLC_methodarray{name}[] = ' '{'
+            ctx.src += f'static KLC_methodinfo KLC_methodarray{name}[] = ' '{'
             for mname in sorted(self.methods):
                 mfname = f'{name}_m{mname}'
                 ctx.src += '  {' f'"{mname}", KLC_untyped{mfname}' '},'
             ctx.src += '};'
 
-        ctx.src += f'KLC_methodlist KLC_methodlist{name} = ' '{'
+        ctx.src += f'static KLC_methodlist KLC_methodlist{name} = ' '{'
         ctx.src += f'  {len(self.methods)},'
         ctx.src += f'  KLC_methodarray{name},' if self.methods else '  NULL,'
+        ctx.src += '};'
+
+        ctx.src += f'KLC_typeinfo KLC_type{name} = ' '{'
+        ctx.src += f'  "{name}",'
+        ctx.src += f'  &{del_name},'
+        ctx.src += f'  &KLC_methodlist{name},'
         ctx.src += '};'
 
         if self.extern:
             return
 
+        # if extern, this typedef should already exist
         ctx.fwd += f'typedef struct {cname} {cname};'
 
         ctx.hdr += f'struct {cname} ' '{'
@@ -1328,12 +1331,7 @@ class ClassDefinition(TypeDefinition):
             ctx.hdr += f'  {field.cproto(ctx)};'
         ctx.hdr += '};'
 
-        ctx.src += f'KLC_typeinfo KLC_type{name} = ' '{'
-        ctx.src += f'  "{name}",'
-        ctx.src += f'  &{del_name}'
-        ctx.src += '};'
-
-        ctx.src += delete_proto + '{'
+        ctx.src += delete_proto + ' {'
         objfields = [f for f in self.fields if f.type not in PRIMITIVE_TYPES]
         if objfields:
             ctx.src += f'  {cdecltype} obj = ({cdecltype}) robj;'
@@ -1345,7 +1343,7 @@ class ClassDefinition(TypeDefinition):
                     ctx.src += f'  KLC_partial_release((KLC_header*) obj->{cfname}, dq);'
         ctx.src += '}'
 
-        ctx.src += malloc_proto + '{'
+        ctx.src += malloc_proto + ' {'
         ctx.src += f'  {cdecltype} obj = ({cdecltype}) malloc(sizeof({cname}));'
         for field in self.fields:
             cfname = ctx.cname(field.name)
