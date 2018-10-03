@@ -23,7 +23,10 @@ SYMBOLS = [
     '>', '<=', '>=', '(', ')', '{', '}', '[', ']',
 ]
 
-KEYWORDS = {'class', 'trait', 'if', 'else', 'while', 'break', 'continue'}
+KEYWORDS = {
+    'extern',
+    'class', 'trait', 'if', 'else', 'while', 'break', 'continue', 'return'
+}
 
 PRIMITIVE_TYPES = {
     'void',
@@ -1392,6 +1395,195 @@ class ClassDefinition(TypeDefinition):
         ctx.src += '}'
 
 
+
+def parse(source):
+    tokens = lex(source)
+    i = 0
+
+    def peek(j=0):
+        return tokens[min(i + j, len(tokens) - 1)]
+
+    def at(type, j=0):
+        return peek(j).type == type
+
+    def gettok():
+        nonlocal i
+        i += 1
+        return tokens[i - 1]
+
+    def consume(type):
+        if at(type):
+            return gettok()
+
+    def expect(type):
+        if not at(type):
+            raise Error([peek()], f'Expected {type} but got {peek()}')
+        return gettok()
+
+    def parse_program():
+        token = peek()
+        defs = []
+        while not at('EOF'):
+            parse_global_definition(defs)
+        return Program(token, defs)
+
+    def parse_global_definition(defs):
+        if at('class') or at('extern') and at('class', 1):
+            parse_class_definition(defs)
+            return
+
+        if at('NAME') and at('NAME', 1) and at('(', 2):
+            parse_function_definition(defs)
+            return
+
+        raise Error([peek()], f'Expected class, function or variable definition')
+
+    def parse_function_definition(defs):
+        token = peek()
+        return_type = expect('NAME').value
+        name = expect('NAME').value
+        params = parse_params()
+        if at('{'):
+            body = parse_block()
+        else:
+            body = None
+            expect(';')
+        defs.append(FunctionDefinition(token, return_type, name, params, body))
+
+    def parse_class_definition(defs):
+        token = peek()
+        extern = bool(consume('extern'))
+        expect('class')
+        name = expect('NAME').value
+        method_to_token_table = dict()
+        fields = None if extern else []
+        expect('{')
+        while not consume('}'):
+            if at('NAME') and at('NAME', 1) and at(';', 2):
+                if extern:
+                    raise Error(
+                        [peek()],
+                        'Extern classes cannot declare fields '
+                        f'(in definition of class {name})')
+                ftoken = peek()
+                ftype = expect('NAME').value
+                fname = expect('NAME').value
+                fields.append(Field(ftoken, ftype, fname))
+            else:
+                mtoken = peek()
+                rtype = expect('NAME').value
+                mname = expect('NAME').value
+                params = parse_params()
+                if extern:
+                    body = None
+                    expect(';')
+                else:
+                    body = parse_block()
+
+                # A method is mapped to a function with a special name,
+                # and an implicit first parameter.
+                fname = f'{name}_m{mname}'
+                params = [Parameter(mtoken, name, 'this')] + params
+
+                if mname in method_to_token_table:
+                    raise Error([method_to_token_table[mname], mtoken],
+                                f'Duplicate method {name}.{mname}')
+
+                method_to_token_table[mname] = mtoken
+
+                defs.append(FunctionDefinition(mtoken, rtype, fname, params, body))
+
+        method_names = sorted(method_to_token_table)
+        defs.append(ClassDefinition(token, name, fields, method_names))
+
+    def parse_block():
+        token = expect('{')
+        statements = []
+        while not consume('}'):
+            statements.append(parse_statement())
+        return Block(token, statements)
+
+    def parse_statement():
+        token = peek()
+
+        if at('{'):
+            return parse_block()
+
+        if at('NAME') and at('NAME', 1):
+            return parse_variable_definition()
+
+        if consume('return'):
+            expression = None if at(';') else parse_expression()
+            expect(';')
+            return Return(token, expression)
+
+        expression = parse_expression()
+        expect(';')
+        return ExpressionStatement(token, expression)
+
+    def parse_expression():
+        return parse_postfix()
+
+    def parse_postfix():
+        token = peek()
+        expr = parse_primary()
+        while True:
+            if consume('.'):
+                name = expect('NAME').value
+                args = parse_args()
+                return MethodCall(token, expr, name, args)
+            break
+        return expr
+
+    def parse_primary():
+        token = peek()
+        if at('NAME'):
+            name = expect('NAME').value
+            if at('('):
+                args = parse_args()
+                return FunctionCall(token, name, args)
+            else:
+                return Name(token, name)
+
+        if at('STRING'):
+            return StringLiteral(token, expect('STRING').value)
+
+        raise Error([token], 'Expected expression')
+
+    def parse_variable_definition():
+        token = peek()
+        vartype = expect('NAME').value
+        name = expect('NAME').value
+        value = parse_expression() if consume('=') else None
+        expect(';')
+        return VariableDefinition(token, vartype, name, value)
+
+    def parse_args():
+        args = []
+        expect('(')
+        while not consume(')'):
+            args.append(parse_expression())
+            if not consume(','):
+                expect(')')
+                break
+        return args
+
+    def parse_params():
+        params = []
+        expect('(')
+        while not consume(')'):
+            paramtoken = peek()
+            paramtype = expect('NAME').value
+            paramname = expect('NAME').value
+            params.append(Parameter(paramtoken, paramtype, paramname))
+            if not consume(','):
+                expect(')')
+                break
+        return params
+
+    return parse_program()
+
+
 tok = lex(Source('<dummy>', 'dummy'))[0]
 
 node = Program(tok, [
@@ -1437,8 +1629,33 @@ node = Program(tok, [
     ])),
 ])
 
-print(node.translate())
+node = parse(Source('<builtin>', """
 
+extern class String {
+  int size();
+}
+
+String str(var x);
+void puts(String s);
+
+void print(var x) {
+  puts(str(x));
+}
+
+void main() {
+  String s = 'String s variable';
+  var v = 'var v variable';
+  print('Hello world!');
+  print('Hello world!'.size());
+  print(s);
+  print(s.size());
+  print(v);
+  print(v.size());
+}
+
+"""))
+
+print(node.translate())
 
 # print(lex(Source('<string>', 'abc + def')))
 # print(translate(Source('<string>', """
