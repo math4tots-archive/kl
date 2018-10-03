@@ -1583,7 +1583,12 @@ def parse(source):
     def parse_function_definition(defs):
         token = peek()
         return_type = expect('NAME').value
+        nametoken = peek()
         name = expect('NAME').value
+        if name[:1].lower() != name[:1]:
+            raise Error(
+                [nametoken],
+                f'Function names should not start with uppercase letters')
         params = parse_params()
         if at('{'):
             body = parse_block()
@@ -1882,6 +1887,10 @@ int ff() {
   return 184;
 }
 
+String _f() {
+  return 'result of _f';
+}
+
 void main() {
   String s = 'String s variable';
   var v = 'var v variable';
@@ -1898,6 +1907,7 @@ void main() {
   print(81 + 5);
   print(i - 5);
   print(81 == 81);
+  print(_f());
 }
 
 """))
