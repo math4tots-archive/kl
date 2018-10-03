@@ -33,6 +33,7 @@ PRIMITIVE_TYPES = {
     'int',
     'double',
     'function',
+    'type',
 }
 
 
@@ -151,6 +152,29 @@ void KLC_release_var(KLC_var v) {
   }
 }
 
+extern KLC_typeinfo KLC_typenull;
+extern KLC_typeinfo KLC_typeint;
+extern KLC_typeinfo KLC_typedouble;
+extern KLC_typeinfo KLC_typefunction;
+extern KLC_typeinfo KLC_typetype;
+
+KLC_typeinfo* KLCNtype(KLC_var v) {
+  switch (v.tag) {
+    case KLC_TAG_INT:
+      return &KLC_typeint;
+    case KLC_TAG_DOUBLE:
+      return &KLC_typedouble;
+    case KLC_TAG_FUNCTION:
+      return &KLC_typefunction;
+    case KLC_TAG_TYPE:
+      return &KLC_typetype;
+    case KLC_TAG_OBJECT:
+      return v.u.obj ? v.u.obj->type : &KLC_typenull;
+  }
+  KLC_errorf("Unrecognized type tag %d\n", v.tag);
+  return NULL;
+}
+
 KLC_var KLC_int_to_var(KLC_int i) {
   KLC_var ret;
   ret.tag = KLC_TAG_INT;
@@ -215,11 +239,8 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {
   if (argc == 0) {
     KLC_errorf("mcall requires at least 1 arg");
   }
-  if (argv[0].tag != KLC_TAG_OBJECT || !argv[0].u.obj) {
-    KLC_errorf("mcall only supports non-null objects");
-  }
   {
-    KLC_typeinfo* type = argv[0].u.obj->type;
+    KLC_typeinfo* type = KLCNtype(argv[0]);
     const KLC_methodlist* mlist = type->methods;
     size_t len = mlist->size;
     const KLC_methodinfo* mbuf = mlist->methods;
@@ -350,7 +371,7 @@ KLCNString* KLCNstr(KLC_var v) {
 
 void KLCNmain();
 
-static KLC_var KLC_zero = {
+static const KLC_var KLC_null = {
   KLC_TAG_OBJECT,
   { NULL }
 };
@@ -854,10 +875,12 @@ class TranslationContext(object):
         return f'KLCN{name}'
 
     def czero(self, name):
-        if name in PRIMITIVE_TYPES:
+        if name == 'type':
+            return 'NULL'
+        elif name in PRIMITIVE_TYPES:
             return '0'
         elif name == 'var':
-            return 'KLC_zero'
+            return 'KLC_null'
         else:
             return 'NULL'
 
@@ -914,6 +937,30 @@ class StringLiteral(Expression):
             .replace('\n', '\\n'))
         ctx.src += f'{tempvar} = KLC_mkstr("{s}");'
         return ('String', tempvar)
+
+
+class IntLiteral(Expression):
+    fields = (
+        ('value', int),
+    )
+
+    def translate(self, ctx):
+        tempvar = ctx.mktemp('int')
+        # TODO: Warn if size of 'value' is too big
+        ctx.src += f'{tempvar} = {self.value}L;'
+        return ('int', tempvar)
+
+
+class DoubleLiteral(Expression):
+    fields = (
+        ('value', float),
+    )
+
+    def translate(self, ctx):
+        tempvar = ctx.mktemp('double')
+        # TODO: Warn if size of 'value' is too big
+        ctx.src += f'{tempvar} = {self.value};'
+        return ('double', tempvar)
 
 
 class FunctionCall(Expression):
@@ -1233,6 +1280,11 @@ class Program(Node):
 
     def translate(self):
         ctx = GlobalTranslationContext(self)
+        _write_ctypeinfo(ctx.src, 'null', [], use_null_deleter=True)
+        _write_ctypeinfo(ctx.src, 'int', [], use_null_deleter=True)
+        _write_ctypeinfo(ctx.src, 'double', [], use_null_deleter=True)
+        _write_ctypeinfo(ctx.src, 'function', [], use_null_deleter=True)
+        _write_ctypeinfo(ctx.src, 'type', [], use_null_deleter=True)
         for d in self.definitions:
             d.translate(ctx)
         return str(ctx.out)
@@ -1298,13 +1350,40 @@ class FunctionDefinition(GlobalDefinition):
         call = f'{ctx.cname(self.name)}({argsstr})'
         if self.return_type == 'void':
             src += f'{call};'
-            src += 'return KLC_zero;'
+            src += 'return KLC_null;'
         else:
             src += f'return {ctx.varify(self.return_type, call)};'
 
 
 class TypeDefinition(GlobalDefinition):
     pass
+
+
+def _delname(cname):
+    return f'KLC_delete{cname}'
+
+
+def _write_ctypeinfo(src, cname, methods, use_null_deleter=False):
+    # For primitive types, it's silly to have a deleter, so
+    # use_null_deleter allows caller to control this
+    del_name = _delname(cname)
+    if methods:
+        src += f'static KLC_methodinfo KLC_methodarray{cname}[] = ' '{'
+        for mname in sorted(methods):
+            mfname = f'{cname}_m{mname}'
+            src += '  {' f'"{mname}", KLC_untyped{mfname}' '},'
+        src += '};'
+
+    src += f'static KLC_methodlist KLC_methodlist{cname} = ' '{'
+    src += f'  {len(methods)},'
+    src += f'  KLC_methodarray{cname},' if methods else '  NULL,'
+    src += '};'
+
+    src += f'KLC_typeinfo KLC_type{cname} = ' '{'
+    src += f'  "{cname}",'
+    src += '  NULL,' if use_null_deleter else f'  &{del_name},'
+    src += f'  &KLC_methodlist{cname},'
+    src += '};'
 
 
 class ClassDefinition(TypeDefinition):
@@ -1331,7 +1410,7 @@ class ClassDefinition(TypeDefinition):
         cname = ctx.cname(name)
         cdecltype = ctx.cdecltype(name)
 
-        del_name = f'KLC_delete{name}'
+        del_name = _delname(name)
         malloc_name = f'KLC_malloc{name}'
 
         delete_proto = f'void {del_name}(KLC_header* robj, KLC_header** dq)'
@@ -1342,25 +1421,10 @@ class ClassDefinition(TypeDefinition):
 
         ctx.hdr += f'extern KLC_typeinfo KLC_type{name};'
 
-        if self.methods:
-            ctx.src += f'static KLC_methodinfo KLC_methodarray{name}[] = ' '{'
-            # NOTE: This has to be sorted by because mcall
-            # does binary search on method list to dispatch.
-            for mname in sorted(self.methods):
-                mfname = f'{name}_m{mname}'
-                ctx.src += '  {' f'"{mname}", KLC_untyped{mfname}' '},'
-            ctx.src += '};'
-
-        ctx.src += f'static KLC_methodlist KLC_methodlist{name} = ' '{'
-        ctx.src += f'  {len(self.methods)},'
-        ctx.src += f'  KLC_methodarray{name},' if self.methods else '  NULL,'
-        ctx.src += '};'
-
-        ctx.src += f'KLC_typeinfo KLC_type{name} = ' '{'
-        ctx.src += f'  "{name}",'
-        ctx.src += f'  &{del_name},'
-        ctx.src += f'  &KLC_methodlist{name},'
-        ctx.src += '};'
+        _write_ctypeinfo(
+            src=ctx.src,
+            cname=name,
+            methods=self.methods)
 
         if self.extern:
             return
@@ -1468,6 +1532,7 @@ def parse(source):
                 ftoken = peek()
                 ftype = expect('NAME').value
                 fname = expect('NAME').value
+                expect(';')
                 fields.append(Field(ftoken, ftype, fname))
             else:
                 mtoken = peek()
@@ -1537,6 +1602,15 @@ def parse(source):
 
     def parse_primary():
         token = peek()
+
+        if at('INT'):
+            value = expect('INT').value
+            return IntLiteral(token, value)
+
+        if at('FLOAT'):
+            value = expect('FLOAT').value
+            return DoubleLiteral(token, value)
+
         if at('NAME'):
             name = expect('NAME').value
             if at('('):
@@ -1635,11 +1709,25 @@ extern class String {
   int size();
 }
 
+class Foo {}
+class Bar {
+  double d;
+
+  int f() {
+    return 10;
+  }
+}
+
+type type(var x);
 String str(var x);
 void puts(String s);
 
 void print(var x) {
   puts(str(x));
+}
+
+int ff() {
+  return 184;
 }
 
 void main() {
@@ -1651,6 +1739,7 @@ void main() {
   print(s.size());
   print(v);
   print(v.size());
+  print(ff());
 }
 
 """))
