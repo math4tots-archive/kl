@@ -334,9 +334,17 @@ void KLC_init_header(KLC_header* header, KLC_typeinfo* type) {
 
 typedef struct KLCNString KLCNString;
 struct KLCNString {
+  /* TODO: Also keep a UTF32 representation for random access */
   KLC_header header;
-  size_t size;
+  size_t bytesize; /* number of actual bytes in buffer (utf-8 representation) */
+  size_t nchars;   /* number of unicode code points */
   char* buffer;
+  char* utf32;
+    /* In C89, there's no way to get an integer type that guarantees
+     * 32-bits. As such, I want to error on side of correctness and
+     * use chars instead for measuring out the uttf-32 representation.
+     */
+  int is_ascii;
 };
 
 void KLC_deleteString(KLC_header* robj, KLC_header** dq) {
@@ -346,20 +354,51 @@ void KLC_deleteString(KLC_header* robj, KLC_header** dq) {
 
 extern KLC_typeinfo KLC_typeString;
 
-KLCNString* KLC_mkstr(const char *str) {
+int KLC_check_ascii(const char* str) {
+  while (*str) {
+    if (((unsigned) *str) >= 128) {
+      return 0;
+    }
+    str++;
+  }
+  return 1;
+}
+
+KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii) {
   KLCNString* obj = (KLCNString*) malloc(sizeof(KLCNString));
-  size_t len = strlen(str);
-  char* buffer = (char*) malloc(sizeof(char) * (len + 1));
-  strcpy(buffer, str);
+  if (!is_ascii) {
+    KLC_errorf("Non-ascii strings not yet supported");
+  }
   KLC_init_header(&obj->header, &KLC_typeString);
-  obj->size = len;
-  obj->buffer = buffer;
+  obj->bytesize = bytesize;
+  obj->nchars = bytesize; /* only true when is_ascii */
+  obj->buffer = str;
+  obj->utf32 = NULL;
+  obj->is_ascii = is_ascii;
   return obj;
 }
 
-KLC_int KLCNString_msize(KLCNString *s) {
+KLCNString* KLC_mkstr(const char *str) {
+  size_t len = strlen(str);
+  char* buffer = (char*) malloc(sizeof(char) * (len + 1));
+  strcpy(buffer, str);
+  return KLC_mkstr_with_buffer(len, buffer, KLC_check_ascii(buffer));
+}
+
+KLC_int KLCNString_mbytesize(KLCNString* s) {
   /* TODO: This may be lossy. Figure this out */
-  return (KLC_int) s->size;
+  return (KLC_int) s->bytesize;
+}
+
+KLC_int KLCNString_msize(KLCNString* s) {
+  /* TODO: This may be lossy. Figure this out */
+  return (KLC_int) s->nchars;
+}
+
+KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b) {
+  size_t bytesize = a->bytesize + b->bytesize;
+  char* buffer = (char*) malloc(sizeof(char) * (bytesize + 1));
+  return KLC_mkstr_with_buffer(bytesize, buffer, a->is_ascii && b->is_ascii);
 }
 
 void KLCNputs(KLCNString *s) {
@@ -2038,7 +2077,9 @@ int int_mSub(int a, int b);
 bool int_mEq(int a, int b);
 
 extern class String {
+  int bytesize();
   int size();
+  String Add(String b);
 }
 
 trait Tr {
