@@ -24,7 +24,7 @@ SYMBOLS = [
 ]
 
 KEYWORDS = {
-    'is', 'not', 'null', 'true', 'false',
+    'is', 'not', 'null', 'true', 'false', 'new',
     'extern',
     'class', 'trait',
     'if', 'else', 'while', 'break', 'continue', 'return',
@@ -326,6 +326,12 @@ KLC_bool KLCNint_mEq(KLC_int a, KLC_int b) {
   return a == b;
 }
 
+void KLC_init_header(KLC_header* header, KLC_typeinfo* type) {
+  header->type = type;
+  header->refcnt = 0;
+  header->next = NULL;
+}
+
 typedef struct KLCNString KLCNString;
 struct KLCNString {
   KLC_header header;
@@ -345,9 +351,7 @@ KLCNString* KLC_mkstr(const char *str) {
   size_t len = strlen(str);
   char* buffer = (char*) malloc(sizeof(char) * (len + 1));
   strcpy(buffer, str);
-  obj->header.type = &KLC_typeString;
-  obj->header.refcnt = 0;
-  obj->header.next = NULL;
+  KLC_init_header(&obj->header, &KLC_typeString);
   obj->size = len;
   obj->buffer = buffer;
   return obj;
@@ -1038,28 +1042,11 @@ class FunctionCall(Expression):
     def translate(self, ctx):
         defn = ctx.scope.get(self.function, [self.token])
         if isinstance(defn, FunctionDefinition):
-            argtempvars = []
-            for param, arg in zip(defn.params, self.args):
+            argtriples = []
+            for arg in self.args:
                 argtype, argtempvar = arg.translate(ctx)
-                if argtype != 'void' and param.type == 'var':
-                    argtempvar = ctx.varify(argtype, argtempvar)
-                    argtype = 'var'
-                if argtype != param.type:
-                    raise Error([param.token, arg.token],
-                                f'Expected {param.type} but got {argtype}')
-                argtempvars.append(argtempvar)
-            if len(defn.params) != len(self.args):
-                raise Error([self.token, defn.token],
-                            f'{len(defn.params)} args expected '
-                            f'but got {len(self.args)}')
-            argsstr = ', '.join(argtempvars)
-            if defn.return_type == 'void':
-                ctx.src += f'{ctx.cname(defn.name)}({argsstr});'
-                return ('void', None)
-            else:
-                tempvar = ctx.mktemp(defn.return_type)
-                ctx.src += f'{tempvar} = {ctx.cname(defn.name)}({argsstr});'
-                return (defn.return_type, tempvar)
+                argtriples.append((arg.token, argtype, argtempvar))
+            return _translate_fcall(ctx, self.token, defn, argtriples)
 
         if isinstance(defn, BaseVariableDefinition) and defn.type == 'var':
             argtempvars = []
@@ -1080,8 +1067,51 @@ class FunctionCall(Expression):
             ctx.src += f'{tempvar} = KLC_var_call({cfname}, {nargs}, {temparr});'
             return ('var', tempvar)
 
+        if isinstance(defn, ClassDefinition):
+            if defn.extern:
+                raise Error(
+                    [self.token],
+                    f"You can't call new on an extern class")
+            malloc_name = f'KLC_malloc{defn.name}'
+            fname = f'{defn.name}_new'
+            fdefn = ctx.scope.get(fname, [self.token])
+            if not isinstance(fdefn, FunctionDefinition):
+                raise Error([self.token], f'FUBAR: shadowed function name')
+            this_tempvar = ctx.mktemp(defn.name)
+            ctx.src += f'{this_tempvar} = {malloc_name}();'
+            argtriples = [(self.token, defn.name, this_tempvar)]
+            for arg in self.args:
+                argtype, argtempvar = arg.translate(ctx)
+                argtriples.append((arg.token, argtype, argtempvar))
+            _translate_fcall(ctx, self.token, fdefn, argtriples)
+            return (defn.name, this_tempvar)
+
         raise Error([self.token, defn.token],
                     f'{self.function} is not a function')
+
+
+def _translate_fcall(ctx, token, defn, argtriples):
+    argtempvars = []
+    for param, (argtok, argtype, argtempvar) in zip(defn.params, argtriples):
+        if argtype != 'void' and param.type == 'var':
+            argtempvar = ctx.varify(argtype, argtempvar)
+            argtype = 'var'
+        if argtype != param.type:
+            raise Error([param.token, argtok],
+                        f'Expected {param.type} but got {argtype}')
+        argtempvars.append(argtempvar)
+    if len(defn.params) != len(argtriples):
+        raise Error([token, defn.token],
+                    f'{len(defn.params)} args expected '
+                    f'but got {len(argtriples)}')
+    argsstr = ', '.join(argtempvars)
+    if defn.return_type == 'void':
+        ctx.src += f'{ctx.cname(defn.name)}({argsstr});'
+        return ('void', None)
+    else:
+        tempvar = ctx.mktemp(defn.return_type)
+        ctx.src += f'{tempvar} = {ctx.cname(defn.name)}({argsstr});'
+        return (defn.return_type, tempvar)
 
 
 class MethodCall(Expression):
@@ -1137,30 +1167,10 @@ class MethodCall(Expression):
             if not isinstance(defn, FunctionDefinition):
                 raise Error([self.token], f'FUBAR: shadowed method {fname}')
 
-            argdata = [(ownertype, ownertempvar)] + [
-                arg.translate(ctx) for arg in self.args
+            argtriples = [(self.token, ownertype, ownertempvar)] + [
+                (arg.token,) + arg.translate(ctx) for arg in self.args
             ]
-            argtempvars = []
-            for param, (argtype, argtempvar) in zip(defn.params, argdata):
-                if argtype != 'void' and param.type == 'var':
-                    argtempvar = ctx.varify(argtype, argtempvar)
-                    argtype = 'var'
-                if argtype != param.type:
-                    raise Error([param.token, arg.token],
-                                f'Expected {param.type} but got {argtype}')
-                argtempvars.append(argtempvar)
-            if len(defn.params) != len(argdata):
-                raise Error([self.token, defn.token],
-                            f'{len(defn.params)} args expected '
-                            f'but got {len(argdata)}')
-            argsstr = ', '.join(argtempvars)
-            if defn.return_type == 'void':
-                ctx.src += f'{ctx.cname(defn.name)}({argsstr});'
-                return ('void', None)
-            else:
-                tempvar = ctx.mktemp(defn.return_type)
-                ctx.src += f'{tempvar} = {ctx.cname(defn.name)}({argsstr});'
-                return (defn.return_type, tempvar)
+            return _translate_fcall(ctx, self.token, defn, argtriples)
 
 
 class VariableDefinition(Statement, BaseVariableDefinition):
@@ -1626,6 +1636,7 @@ class ClassDefinition(TypeDefinition):
 
         ctx.src += malloc_proto + ' {'
         ctx.src += f'  {cdecltype} obj = ({cdecltype}) malloc(sizeof({cname}));'
+        ctx.src += f'  KLC_init_header(&obj->header, &KLC_type{name});'
         for field in self.fields:
             cfname = ctx.cname(field.name)
             ctx.src += f'  obj->{cfname} = {ctx.czero(field.type)};'
@@ -1705,9 +1716,26 @@ def parse(source):
         traits = parse_trait_list()
         method_to_token_table = dict()
         fields = None if extern else []
+        newdef = None
         expect('{')
         while not consume('}'):
-            if at('NAME') and at('NAME', 1) and at(';', 2):
+            if at('new'):
+                if extern:
+                    raise Error(
+                        [peek()],
+                        f'extern classes cannot define constructors')
+                if newdef is not None:
+                    raise Error(
+                        [newdef.token, peek()],
+                        'Only one constructor definition is allowed for '
+                        'a class')
+                fname = f'{name}_new'
+                mtoken = expect('new')
+                params = [Parameter(mtoken, name, 'this')] + parse_params()
+                body = parse_block()
+                newdef = FunctionDefinition(mtoken, 'void', fname, params, body)
+                defs.append(newdef)
+            elif at('NAME') and at('NAME', 1) and at(';', 2):
                 if extern:
                     raise Error(
                         [peek()],
@@ -1722,7 +1750,7 @@ def parse(source):
                 mtoken = peek()
                 rtype = expect('NAME').value
                 mname = expect('NAME').value
-                params = parse_params()
+                params = [Parameter(mtoken, name, 'this')] + parse_params()
                 if extern:
                     body = None
                     expect(';')
@@ -1732,7 +1760,6 @@ def parse(source):
                 # A method is mapped to a function with a special name,
                 # and an implicit first parameter.
                 fname = f'{name}_m{mname}'
-                params = [Parameter(mtoken, name, 'this')] + params
 
                 if mname in method_to_token_table:
                     raise Error([method_to_token_table[mname], mtoken],
@@ -1741,6 +1768,14 @@ def parse(source):
                 method_to_token_table[mname] = mtoken
 
                 defs.append(FunctionDefinition(mtoken, rtype, fname, params, body))
+
+        if not extern and newdef is None:
+            defs.append(FunctionDefinition(
+                token,
+                'void',
+                f'{name}_new',
+                [Parameter(mtoken, name, 'this')],
+                Block(token, [])))
 
         method_names = sorted(method_to_token_table)
         defs.append(ClassDefinition(token, name, traits, fields, method_names))
@@ -2024,6 +2059,12 @@ class Bar {
   }
 }
 
+class Baz {
+  new(int a) {
+    print('Baz.a');
+  }
+}
+
 type type(var x);
 String str(var x);
 void puts(String s);
@@ -2057,6 +2098,10 @@ void main() {
   print(i - 5);
   print(81 == 81);
   print(_f());
+  Bar bar = Bar();
+  print(bar);
+  Baz baz = Baz(15);
+  print(baz);
 }
 
 """))
