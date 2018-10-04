@@ -777,6 +777,10 @@ class Scope(object):
     def validate_vardef(self, vardef):
         if vardef.type not in PRIMITIVE_TYPES and vardef.type != 'var':
             typenode = self.get(vardef.type, [vardef.token])
+            if isinstance(typenode, TraitDefinition):
+                raise Error(
+                    [vardef.token],
+                    f'Using trait types variable type not supported')
             if not isinstance(typenode, TypeDefinition):
                 raise Error([vardef.token], f'{vardef.type} is not a type')
 
@@ -1119,20 +1123,19 @@ class MethodCall(Expression):
             if ownertype in PRIMITIVE_TYPES:
                 if self.name not in _primitive_method_names[ownertype]:
                     raise self._no_such_method_error(ownertype)
+                fname = f'{ownertype}_m{self.name}'
             else:
                 cdef = ctx.scope.get(ownertype, [self.token])
                 assert isinstance(cdef, ClassDefinition), cdef
-                if self.name not in cdef.methods:
+                if self.name not in cdef.method_map(ctx):
                     raise self._no_such_method_error(ownertype)
+                fname = cdef.method_map(ctx)[self.name]
 
-            fname = f'{ownertype}_m{self.name}'
             # TODO: Consider looking up from global context
             # to avoid coincidental names that shadow method names
             defn = ctx.scope.get(fname, [self.token])
             if not isinstance(defn, FunctionDefinition):
                 raise Error([self.token], f'FUBAR: shadowed method {fname}')
-
-
 
             argdata = [(ownertype, ownertempvar)] + [
                 arg.translate(ctx) for arg in self.args
@@ -1273,6 +1276,7 @@ class Block(Statement):
 class GlobalTranslationContext(TranslationContext):
     def __init__(self, program):
         super().__init__(Scope(None))
+        self.gctx = self
         for d in program.definitions:
             self.scope.add(d)
         self.out = FractalStringBuilder(0)
@@ -1400,6 +1404,16 @@ class FunctionDefinition(GlobalDefinition):
     def translate(self, gctx: GlobalTranslationContext):
         ctx = gctx.fctx(self)
 
+        rt = self.return_type
+        if rt not in PRIMITIVE_TYPES and rt != 'var':
+            rtnode = ctx.scope.get(self.return_type, [self.token])
+            if isinstance(rtnode, TraitDefinition):
+                raise Error(
+                    [vardef.token],
+                    f'Declaring trait as return type not supported')
+            if not isinstance(rtnode, TypeDefinition):
+                raise Error([vardef.token], f'{vardef.type} is not a type')
+
         self._translate_untyped(ctx)
 
         ctx.hdr += self.cproto(ctx) + ';'
@@ -1444,11 +1458,13 @@ def _delname(cname):
 def _write_ctypeinfo(src, cname, methods, use_null_deleter=False):
     # For primitive types, it's silly to have a deleter, so
     # use_null_deleter allows caller to control this
+    if isinstance(methods, list):
+        methods = {mname: f'{cname}_m{mname}' for mname in methods}
+
     del_name = _delname(cname)
     if methods:
         src += f'static KLC_methodinfo KLC_methodarray{cname}[] = ' '{'
-        for mname in sorted(methods):
-            mfname = f'{cname}_m{mname}'
+        for mname, mfname in sorted(methods.items()):
             src += '  {' f'"{mname}", KLC_untyped{mfname}' '},'
         src += '};'
 
@@ -1464,26 +1480,106 @@ def _write_ctypeinfo(src, cname, methods, use_null_deleter=False):
     src += '};'
 
 
+def _check_type_name(token, name):
+    if '_' in name:
+        raise Error([token], 'Class and trait names cannot have underscores')
+    if name[:1].lower() == name[:1]:
+        raise Error([token],
+                    'Class and trait names must start with uppercase letter')
+
+
+def _check_all_are_traits(token, traits, ctx):
+    for trait_name in traits:
+        trait_defn = ctx.scope.get(trait_name, [token])
+        if not isinstance(trait_defn, TraitDefinition):
+            raise Error([token, trait_defn.token],
+                        f'{trait_name} is not a trait')
+
+
+class TraitDefinition(GlobalDefinition):
+    # Trait kind of defines a type, but TraitDefinition not inheriting
+    # TypeDefinition is on purpose. Right now, there's no real support
+    # for declaring a variable as a trait type.
+    fields = (
+        ('name', str),
+        ('traits', List[str]),
+        ('methods', List[str]),
+    )
+
+    _trait_method_map = None
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _check_type_name(self.token, self.name)
+
+    def translate(self, ctx: GlobalTranslationContext):
+        # Verify that there's no circular trait inheritance,
+        # and in the process, also verify all entries listed in 'traits'
+        # are actually defined and are traits.
+        self.trait_method_map(ctx)
+
+    def trait_method_map(self, ctx, stack=None):
+        if self._trait_method_map is None:
+            self._trait_method_map = _compute_method_map(
+                token=self.token,
+                cname=self.name,
+                method_names=self.methods,
+                trait_names=self.traits,
+                ctx=ctx,
+                stack=stack)
+
+        return self._trait_method_map
+
+
+def _compute_method_map(token, cname, method_names, trait_names, ctx, stack=None):
+    ctx = ctx.gctx  # double check that this is the global context
+    stack = [] if stack is None else stack
+    if cname in stack:
+        raise Error([tdef.token for tdef in stack],
+                    f'Circular trait inheritance')
+    _check_all_are_traits(token, trait_names, ctx)
+    method_map = {mname: f'{cname}_m{mname}' for mname in method_names}
+    traits = [ctx.scope.get(n, [token]) for n in trait_names]
+    stack.append(cname)
+    # MRO is DFS
+    for trait in traits:
+        for mname, mfname in trait.trait_method_map(ctx, stack).items():
+            if mname not in method_map:
+                method_map[mname] = mfname
+    stack.pop()
+    return method_map
+
+
 class ClassDefinition(TypeDefinition):
     fields = (
         ('name', str),
+        ('traits', List[str]),
         ('fields', Optional[List[Field]]),
         ('methods', List[str]),
     )
 
+    _method_map = None
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if '_' in self.name:
-            raise Error([self.token], 'Class names cannot have underscores')
-        if self.name[:1].lower() == self.name[:1]:
-            raise Error([self.token],
-                        'Class names must start with uppercase letter')
+        _check_type_name(self.token, self.name)
 
     @property
     def extern(self):
         return self.fields is None
 
+    def method_map(self, ctx):
+        if self._method_map is None:
+            self._method_map = _compute_method_map(
+                token=self.token,
+                cname=self.name,
+                method_names=self.methods,
+                trait_names=self.traits,
+                ctx=ctx)
+        return self._method_map
+
     def translate(self, ctx: GlobalTranslationContext):
+        _check_all_are_traits(self.token, self.traits, ctx)
         name = self.name
         cname = ctx.cname(name)
         cdecltype = ctx.cdecltype(name)
@@ -1502,7 +1598,7 @@ class ClassDefinition(TypeDefinition):
         _write_ctypeinfo(
             src=ctx.src,
             cname=name,
-            methods=self.methods)
+            methods=self.method_map(ctx))
 
         if self.extern:
             return
@@ -1570,6 +1666,10 @@ def parse(source):
         return Program(token, defs)
 
     def parse_global_definition(defs):
+        if at('trait'):
+            parse_trait_definition(defs)
+            return
+
         if at('class') or at('extern') and at('class', 1):
             parse_class_definition(defs)
             return
@@ -1602,6 +1702,7 @@ def parse(source):
         extern = bool(consume('extern'))
         expect('class')
         name = expect('NAME').value
+        traits = parse_trait_list()
         method_to_token_table = dict()
         fields = None if extern else []
         expect('{')
@@ -1642,7 +1743,46 @@ def parse(source):
                 defs.append(FunctionDefinition(mtoken, rtype, fname, params, body))
 
         method_names = sorted(method_to_token_table)
-        defs.append(ClassDefinition(token, name, fields, method_names))
+        defs.append(ClassDefinition(token, name, traits, fields, method_names))
+
+    def parse_trait_definition(defs):
+        token = expect('trait')
+        name = expect('NAME').value
+        method_to_token_table = dict()
+        traits = parse_trait_list()
+        expect('{')
+        while not consume('}'):
+            mtoken = peek()
+            rtype = expect('NAME').value
+            mname = expect('NAME').value
+            params = parse_params()
+            body = parse_block()
+
+            # A method is mapped to a function with a special name,
+            # and an implicit first parameter.
+            fname = f'{name}_m{mname}'
+            params = [Parameter(mtoken, 'var', 'this')] + params
+
+            if mname in method_to_token_table:
+                raise Error([method_to_token_table[mname], mtoken],
+                            f'Duplicate method {name}.{mname}')
+
+            method_to_token_table[mname] = mtoken
+
+            defs.append(FunctionDefinition(mtoken, rtype, fname, params, body))
+
+        method_names = sorted(method_to_token_table)
+        defs.append(TraitDefinition(token, name, traits, method_names))
+
+    def parse_trait_list():
+        traits = []
+        if consume('('):
+            while not consume(')'):
+                traits.append(expect('NAME').value)
+                if not consume(','):
+                    expect(')')
+                    break
+        return traits
 
     def parse_block():
         token = expect('{')
@@ -1808,48 +1948,48 @@ def parse(source):
 
 tok = lex(Source('<dummy>', 'dummy'))[0]
 
-node = Program(tok, [
-    ClassDefinition(tok, 'String', None, ['size']),
-    FunctionDefinition(tok, 'String', 'str', [Parameter(tok, 'var', 'v')], None),
-    FunctionDefinition(tok, 'int', 'String_msize',
-                       [Parameter(tok, 'String', 's')], None),
-    ClassDefinition(tok, 'Foo', [
-        Field(tok, 'var', 'v'),
-        Field(tok, 'int', 'i'),
-        Field(tok, 'String', 's'),
-    ], []),
-    FunctionDefinition(tok, 'void', 'foo', [Parameter(tok, 'var', 'callback')], Block(tok, [
-        ExpressionStatement(tok, FunctionCall(tok, 'callback', [StringLiteral(tok, 'hi')])),
-    ])),
-    FunctionDefinition(tok, 'void', 'puts', [Parameter(tok, 'String', 'x')], None),
-    FunctionDefinition(tok, 'String', 'id', [Parameter(tok, 'String', 'x')], Block(tok, [
-        Return(tok, StringLiteral(tok, 'id-result')),
-    ])),
-    FunctionDefinition(tok, 'void', 'print', [Parameter(tok, 'var', 'v')], Block(tok, [
-        ExpressionStatement(tok, FunctionCall(tok, 'puts', [
-            FunctionCall(tok, 'str', [Name(tok, 'v')]),
-        ])),
-    ])),
-    FunctionDefinition(tok, 'void', 'main', [], Block(tok, [
-        ExpressionStatement(tok, FunctionCall(
-            tok, 'puts', [StringLiteral(tok, 'Hello world!')]
-        )),
-        VariableDefinition(tok, "String", "s", StringLiteral(tok, "Hello world2")),
-        VariableDefinition(tok, "var", "v", StringLiteral(tok, "Hello world2")),
-        ExpressionStatement(tok, FunctionCall(tok, 'puts', [Name(tok, 's')])),
-        ExpressionStatement(tok, FunctionCall(tok, 'puts', [
-            FunctionCall(tok, 'id', [StringLiteral(tok, 'id-arg')]),
-        ])),
-        ExpressionStatement(tok, FunctionCall(tok, 'foo', [Name(tok, 'puts')])),
-        ExpressionStatement(tok, FunctionCall(tok, 'print', [Name(tok, 'foo')])),
-        ExpressionStatement(tok, FunctionCall(tok, 'print', [
-            MethodCall(tok, Name(tok, 'v'), 'size', []),
-        ])),
-        ExpressionStatement(tok, FunctionCall(tok, 'print', [
-            MethodCall(tok, Name(tok, 's'), 'size', []),
-        ])),
-    ])),
-])
+# node = Program(tok, [
+#     ClassDefinition(tok, 'String', None, ['size']),
+#     FunctionDefinition(tok, 'String', 'str', [Parameter(tok, 'var', 'v')], None),
+#     FunctionDefinition(tok, 'int', 'String_msize',
+#                        [Parameter(tok, 'String', 's')], None),
+#     ClassDefinition(tok, 'Foo', [
+#         Field(tok, 'var', 'v'),
+#         Field(tok, 'int', 'i'),
+#         Field(tok, 'String', 's'),
+#     ], []),
+#     FunctionDefinition(tok, 'void', 'foo', [Parameter(tok, 'var', 'callback')], Block(tok, [
+#         ExpressionStatement(tok, FunctionCall(tok, 'callback', [StringLiteral(tok, 'hi')])),
+#     ])),
+#     FunctionDefinition(tok, 'void', 'puts', [Parameter(tok, 'String', 'x')], None),
+#     FunctionDefinition(tok, 'String', 'id', [Parameter(tok, 'String', 'x')], Block(tok, [
+#         Return(tok, StringLiteral(tok, 'id-result')),
+#     ])),
+#     FunctionDefinition(tok, 'void', 'print', [Parameter(tok, 'var', 'v')], Block(tok, [
+#         ExpressionStatement(tok, FunctionCall(tok, 'puts', [
+#             FunctionCall(tok, 'str', [Name(tok, 'v')]),
+#         ])),
+#     ])),
+#     FunctionDefinition(tok, 'void', 'main', [], Block(tok, [
+#         ExpressionStatement(tok, FunctionCall(
+#             tok, 'puts', [StringLiteral(tok, 'Hello world!')]
+#         )),
+#         VariableDefinition(tok, "String", "s", StringLiteral(tok, "Hello world2")),
+#         VariableDefinition(tok, "var", "v", StringLiteral(tok, "Hello world2")),
+#         ExpressionStatement(tok, FunctionCall(tok, 'puts', [Name(tok, 's')])),
+#         ExpressionStatement(tok, FunctionCall(tok, 'puts', [
+#             FunctionCall(tok, 'id', [StringLiteral(tok, 'id-arg')]),
+#         ])),
+#         ExpressionStatement(tok, FunctionCall(tok, 'foo', [Name(tok, 'puts')])),
+#         ExpressionStatement(tok, FunctionCall(tok, 'print', [Name(tok, 'foo')])),
+#         ExpressionStatement(tok, FunctionCall(tok, 'print', [
+#             MethodCall(tok, Name(tok, 'v'), 'size', []),
+#         ])),
+#         ExpressionStatement(tok, FunctionCall(tok, 'print', [
+#             MethodCall(tok, Name(tok, 's'), 'size', []),
+#         ])),
+#     ])),
+# ])
 
 node = parse(Source('<builtin>', """
 // These are explicit function names for primitive types
@@ -1866,7 +2006,16 @@ extern class String {
   int size();
 }
 
-class Foo {}
+trait Tr {
+  String f() {
+    return 'From Tr.f()';
+  }
+}
+class Foo(Tr) {
+  String g(int x) {
+    return str(x);
+  }
+}
 class Bar {
   double d;
 
