@@ -272,7 +272,7 @@ KLC_int KLC_var_to_int(KLC_var v) {
   return v.u.i;
 }
 
-KLC_int KLC_var_to_double(KLC_var v) {
+double KLC_var_to_double(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_DOUBLE) {
     KLC_errorf("var_to_double: expected double (tag %d) but got tag %d\n",
