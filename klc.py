@@ -19,6 +19,20 @@ import sys
 import typing
 
 
+_special_method_prefixes = [
+    'GET',
+    'SET',
+]
+
+_special_method_names = {
+    'Add',
+    'Sub',
+    'Mul',
+    'Div',
+    'Eq',
+    'Ne',
+}
+
 SYMBOLS = [
     ';', '#',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
@@ -446,7 +460,9 @@ KLCNString* KLCNstr(KLC_var v) {
       return ret;
     }
     case KLC_TAG_OBJECT:
-      if (v.u.obj->type == &KLC_typeString) {
+      if (!v.u.obj) {
+        return KLC_mkstr("null");
+      } else if (v.u.obj->type == &KLC_typeString) {
         KLC_retain(v.u.obj);
         return (KLCNString*) v.u.obj;
       } else {
@@ -739,7 +755,9 @@ class FractalStringBuilder(object):
     def __iadd__(self, line):
         if '\n' in line:
             raise TypeError()
-        self('  ' * self.depth + line + '\n')
+        # Ignore empty lines
+        if line:
+            self('  ' * self.depth + line + '\n')
         return self
 
     def __call__(self, s):
@@ -1657,6 +1675,8 @@ class ClassDefinition(TypeDefinition):
         if self.extern:
             return
 
+        self._translate_field_implementations(ctx)
+
         # if extern, this typedef should already exist
         ctx.fwd += f'typedef struct {cname} {cname};'
 
@@ -1687,6 +1707,39 @@ class ClassDefinition(TypeDefinition):
         ctx.src += '  return obj;'
         ctx.src += '}'
 
+    def _translate_field_implementations(self, ctx):
+        this_proto = f"{ctx.cdecltype(self.name)} {ctx.cname('this')}"
+        for field in self.fields:
+            field_ref = f'KLCNthis->{ctx.cname(field.name)}'
+            ctype = ctx.cdecltype(field.type)
+
+            ## GETTER
+            getter_name = f'{self.name}_mGET{field.name}'
+            getter_cname = ctx.cname(getter_name)
+            getter_proto = f'{ctype} {getter_cname}({this_proto})'
+            ctx.src += getter_proto + '{'
+            sp = ctx.src.spawn(1)
+            ctx.src += '}'
+            sp += _cretain(ctx, field.type, f'({field_ref})')
+            sp += f'return {field_ref};'
+
+            # SETTER
+            setter_name = f'{self.name}_mSET{field.name}'
+            setter_cname = ctx.cname(setter_name)
+            setter_proto = f'{ctype} {setter_cname}({this_proto}, {ctype} v)'
+            ctx.src += setter_proto + '{'
+            sp = ctx.src.spawn(1)
+            ctx.src += '}'
+            # We have to retain 'v' twice:
+            #  once for returning this value, and
+            #  once more for attaching it to a field of this object.
+            sp += _cretain(ctx, ctype, 'v')
+            sp += _cretain(ctx, ctype, 'v')
+            sp += _crelease(ctx, ctype, f'({field_ref})')
+            sp += f'{field_ref} = v;'
+            sp += 'return v;'
+
+
 
 
 def parse(source):
@@ -1697,6 +1750,23 @@ def parse(source):
     for lib_node in cache.values():
         defs.extend(lib_node.definitions)
     return Program(main_node.token, defs)
+
+
+def _has_lower(s):
+    return s.upper() != s
+
+def _has_upper(s):
+    return s.lower() != s
+
+def _is_special_method_name(name):
+    return (name in _special_method_names or
+            any(name.startswith(p) for p in _special_method_prefixes))
+
+def _check_method_name(token, name):
+    if _has_upper(name[0]) and not _is_special_method_name(name):
+        raise Error(
+            [token],
+            f'Only special method names may start with an upper case letter')
 
 
 def parse_one_source(source, cache, stack):
@@ -1848,10 +1918,32 @@ def parse_one_source(source, cache, stack):
                 fname = expect('NAME').value
                 expect(';')
                 fields.append(Field(ftoken, ftype, fname))
+
+                # GET and SET methods are implemented specially
+                # during the class translation
+                getter_name = f'{name}_mGET{fname}'
+                setter_name = f'{name}_mSET{fname}'
+                defs.append(FunctionDefinition(
+                    ftoken,
+                    ftype,
+                    getter_name,
+                    [Parameter(ftoken, name, 'this')],
+                    None))
+                defs.append(FunctionDefinition(
+                    ftoken,
+                    ftype,
+                    setter_name,
+                    [Parameter(ftoken, name, 'this'),
+                     Parameter(ftoken, ftype, 'value')],
+                    None))
+                method_to_token_table[f'GET{fname}'] = ftoken
+                method_to_token_table[f'SET{fname}'] = ftoken
+
             else:
                 mtoken = peek()
                 rtype = expect('NAME').value
                 mname = expect('NAME').value
+                _check_method_name(mtoken, mname)
                 params = [Parameter(mtoken, name, 'this')] + parse_params()
                 if extern:
                     body = None
@@ -1894,6 +1986,7 @@ def parse_one_source(source, cache, stack):
             mname = expect('NAME').value
             params = parse_params()
             body = parse_block()
+            _check_method_name(mtoken, mname)
 
             # A method is mapped to a function with a special name,
             # and an implicit first parameter.

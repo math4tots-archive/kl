@@ -3,6 +3,7 @@
 
 class Bar {
   double d;
+  String s;
 
   int f() {
     return 10;
@@ -48,4 +49,11 @@ void main() {
   print(bar);
   Baz baz = Baz(15);
   print(baz);
+
+  bar.d = 10.;
+  print(bar.d);
+
+  print(bar.s);
+  bar.s = 'bar.s content';
+  print(bar.s);
 }
