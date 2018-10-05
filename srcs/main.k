@@ -28,6 +28,7 @@ String _f() {
   return 'result of _f';
 }
 
+
 void main() {
   String s = 'String s variable';
   var v = 'var v variable';
@@ -56,4 +57,9 @@ void main() {
   print(bar.s);
   bar.s = 'bar.s content';
   print(bar.s);
+
+  {
+    String vs = v.(String);
+    print('vs = ' + vs);
+  }
 }
