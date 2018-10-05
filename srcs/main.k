@@ -1,13 +1,6 @@
-trait Tr {
-  String f() {
-    return 'From Tr.f()';
-  }
-}
-class Foo(Tr) {
-  String g(int x) {
-    return str(x);
-  }
-}
+#include "./a.k"
+#include "./b.k"
+
 class Bar {
   double d;
 
@@ -21,10 +14,6 @@ class Baz {
     print('Baz.a');
   }
 }
-
-type type(var x);
-String str(var x);
-void puts(String s);
 
 void print(var x) {
   puts(str(x));

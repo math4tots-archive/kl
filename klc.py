@@ -11,15 +11,16 @@ g++ -std=c++98 -Werror -Wpedantic -Wall -Wno-unused-function -Wno-unused-variabl
 """
 from typing import NamedTuple, Tuple, List, Union, Optional, Callable, Iterable
 import abc
-import re
-import typing
-import contextlib
-import sys
 import argparse
+import contextlib
+import os
+import re
+import sys
+import typing
 
 
 SYMBOLS = [
-    ';',
+    ';', '#',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
     '>', '<=', '>=', '(', ')', '{', '}', '[', ']',
 ]
@@ -1689,8 +1690,20 @@ class ClassDefinition(TypeDefinition):
 
 
 def parse(source):
+    cache = dict()
+    stack = []
+    main_node = parse_one_source(source, cache, stack)
+    defs = list(main_node.definitions)
+    for lib_node in cache.values():
+        defs.extend(lib_node.definitions)
+    return Program(main_node.token, defs)
+
+
+def parse_one_source(source, cache, stack):
     tokens = lex(source)
     i = 0
+    cache = dict() if cache is None else cache
+    stack = [] if stack is None else stack
 
     def peek(j=0):
         return tokens[min(i + j, len(tokens) - 1)]
@@ -1712,6 +1725,12 @@ def parse(source):
             raise Error([peek()], f'Expected {type} but got {peek()}')
         return gettok()
 
+    def expect_name(name):
+        token = expect('NAME')
+        if token.value != name:
+            raise Error([token], f'Expected name {name} but got {token.value}')
+        return token
+
     def parse_program():
         token = peek()
         defs = []
@@ -1720,6 +1739,10 @@ def parse(source):
         return Program(token, defs)
 
     def parse_global_definition(defs):
+        if at('#'):
+            parse_macro(defs)
+            return
+
         if at('trait'):
             parse_trait_definition(defs)
             return
@@ -1733,6 +1756,37 @@ def parse(source):
             return
 
         raise Error([peek()], f'Expected class, function or variable definition')
+
+    def parse_macro(defs):
+        token = expect('#')
+        expect_name('include')
+        upath = expect('STRING').value
+        if not upath.startswith('./'):
+            raise Error([token], 'Absolute paths not supported yet')
+
+        if upath in [p for p, _ in stack]:
+            toks = [t for _, t in stack]
+            raise Error(toks + [token], '#include cycle')
+
+        if upath in cache:
+            return
+
+        parts = upath.split('/')
+        assert parts[0] == '.'
+        dirpath = os.path.dirname(source.filename)
+        path = os.path.join(dirpath, *parts[1:])
+        abspath = os.path.abspath(os.path.realpath(path))
+        if not os.path.isfile(abspath):
+            raise Error([token], f'File {upath} ({abspath}) does not exist')
+
+        with open(abspath) as f:
+            data = f.read()
+
+        try:
+            stack.append((upath, token))
+            cache[upath] = parse_one_source(Source(abspath, data), cache, stack)
+        finally:
+            stack.pop()
 
     def parse_function_definition(defs):
         token = peek()
@@ -2085,6 +2139,11 @@ extern class String {
   int size();
   String Add(String b);
 }
+
+type type(var x);
+String str(var x);
+void puts(String s);
+
 """
 
 builtins_node = parse(Source('<builtin>', BUILTINS))
