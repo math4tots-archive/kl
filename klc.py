@@ -414,6 +414,8 @@ KLC_int KLCNString_mGETsize(KLCNString* s) {
 KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b) {
   size_t bytesize = a->bytesize + b->bytesize;
   char* buffer = (char*) malloc(sizeof(char) * (bytesize + 1));
+  strcpy(buffer, a->buffer);
+  strcpy(buffer + a->bytesize, b->buffer);
   return KLC_mkstr_with_buffer(bytesize, buffer, a->is_ascii && b->is_ascii);
 }
 

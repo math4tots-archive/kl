@@ -51,7 +51,7 @@ void main() {
   print(baz);
 
   bar.d = 10.;
-  print(bar.d);
+  print('bard.d = ' + str(bar.d));
 
   print(bar.s);
   bar.s = 'bar.s content';
