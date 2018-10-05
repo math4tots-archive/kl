@@ -135,12 +135,11 @@ KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii);
 KLCNString* KLC_mkstr(const char *str);
 
 void KLC_errorf(const char* fmt, ...) {
-  int* i = NULL;
   va_list args;
   va_start(args, fmt);
   vfprintf(stderr, fmt, args);
   va_end(args);
-  printf("%d\n", *i);
+  exit(1);
 }
 
 void KLC_retain(KLC_header *obj) {

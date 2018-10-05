@@ -1,1 +1,4 @@
 *.pyc
+a.out
+main.c
+main.cc
