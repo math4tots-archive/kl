@@ -31,11 +31,11 @@ void main() {
   String s = 'String s variable';
   var v = 'var v variable';
   print('Hello world!');
-  print('Hello world!'.size());
+  print('Hello world!'.size);
   print(s);
-  print(s.size());
+  print(s.size);
   print(v);
-  print(v.size());
+  print(v.size);
   print(ff());
   print(15 + 17);
   var i = 81;

@@ -392,7 +392,7 @@ KLC_int KLCNString_mbytesize(KLCNString* s) {
   return (KLC_int) s->bytesize;
 }
 
-KLC_int KLCNString_msize(KLCNString* s) {
+KLC_int KLCNString_mGETsize(KLCNString* s) {
   /* TODO: This may be lossy. Figure this out */
   return (KLC_int) s->nchars;
 }
@@ -1713,8 +1713,13 @@ def parse_one_source(source, cache, stack):
 
     def gettok():
         nonlocal i
+        token = tokens[i]
+        if token.type == 'NAME' and '__' in token.value:
+            raise Error(
+                [token],
+                'Double underscores are not allowed in identifiers')
         i += 1
-        return tokens[i - 1]
+        return token
 
     def consume(type):
         if at(type):
@@ -2010,8 +2015,14 @@ def parse_one_source(source, cache, stack):
         while True:
             if consume('.'):
                 name = expect('NAME').value
-                args = parse_args()
-                return MethodCall(token, expr, name, args)
+                if at('('):
+                    args = parse_args()
+                    return MethodCall(token, expr, name, args)
+                elif consume('='):
+                    val = parse_expression()
+                    return MethodCall(token, expr, f'SET{name}', [val])
+                else:
+                    return MethodCall(token, expr, f'GET{name}', [])
             break
         return expr
 
@@ -2136,8 +2147,8 @@ bool int_mEq(int a, int b);
 
 extern class String {
   int bytesize();
-  int size();
   String Add(String b);
+  int GETsize();
 }
 
 type type(var x);
