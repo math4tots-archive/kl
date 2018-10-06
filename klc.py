@@ -40,6 +40,7 @@ _special_method_names = {
 }
 
 SYMBOLS = [
+    '\n',
     ';', '#',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
     '>', '<=', '>=', '(', ')', '{', '}', '[', ']',
@@ -627,7 +628,7 @@ class RegexPattern(Pattern):
 
 
 def _make_lexer():
-    whitespace_and_comment_pattern = RegexPattern(r'(?:\s|//.*\n)+')
+    whitespace_and_comment_pattern = RegexPattern(r'(?:[ \t\r]|//.*\n)+')
 
     class Lexer:
         def __init__(
@@ -1855,16 +1856,30 @@ def parse_one_source(source, cache, stack):
     i = 0
     cache = dict() if cache is None else cache
     stack = [] if stack is None else stack
+    indent_stack = []
 
     def peek(j=0):
+        nonlocal i
+        if should_skip_newlines():
+            while i < len(tokens) and tokens[i] == '\n':
+                i += 1
         return tokens[min(i + j, len(tokens) - 1)]
 
     def at(type, j=0):
         return peek(j).type == type
 
+    def should_skip_newlines():
+        return indent_stack and indent_stack[-1]
+
+    @contextlib.contextmanager
+    def skipping_newlines(skipping):
+        indent_stack.append(skipping)
+        yield
+        indent_stack.pop()
+
     def gettok():
         nonlocal i
-        token = tokens[i]
+        token = peek()
         if token.type == 'NAME' and '__' in token.value:
             raise Error(
                 [token],
@@ -1887,7 +1902,23 @@ def parse_one_source(source, cache, stack):
             raise Error([token], f'Expected name {name} but got {token.value}')
         return token
 
+    def expect_delim():
+        token = peek()
+        if not consume(';'):
+            expect('\n')
+        while consume(';') or consume('\n'):
+            pass
+        return token
+
+    def consume_delim():
+        if at_delim():
+            return expect_delim()
+
+    def at_delim(j=0):
+        return at(';', j) or at('\n', j)
+
     def parse_program():
+        consume_delim()
         token = peek()
         defs = []
         while not at('EOF'):
@@ -1917,6 +1948,7 @@ def parse_one_source(source, cache, stack):
         token = expect('#')
         expect_name('include')
         upath = expect('STRING').value
+        consume_delim()
         if not upath.startswith('./'):
             raise Error([token], 'Absolute paths not supported yet')
 
@@ -1958,7 +1990,7 @@ def parse_one_source(source, cache, stack):
             body = parse_block()
         else:
             body = None
-            expect(';')
+            expect_delim()
         defs.append(FunctionDefinition(token, return_type, name, params, body))
 
     def parse_class_definition(defs):
@@ -1971,6 +2003,7 @@ def parse_one_source(source, cache, stack):
         fields = None if extern else []
         newdef = None
         expect('{')
+        consume_delim()
         while not consume('}'):
             if at('new'):
                 if extern:
@@ -1988,7 +2021,7 @@ def parse_one_source(source, cache, stack):
                 body = parse_block()
                 newdef = FunctionDefinition(mtoken, 'void', fname, params, body)
                 defs.append(newdef)
-            elif at('NAME') and at('NAME', 1) and at(';', 2):
+            elif at('NAME') and at('NAME', 1) and at_delim(2):
                 if extern:
                     raise Error(
                         [peek()],
@@ -1997,7 +2030,7 @@ def parse_one_source(source, cache, stack):
                 ftoken = peek()
                 ftype = expect('NAME').value
                 fname = expect('NAME').value
-                expect(';')
+                expect_delim()
                 fields.append(Field(ftoken, ftype, fname))
 
                 # GET and SET methods are implemented specially
@@ -2026,7 +2059,7 @@ def parse_one_source(source, cache, stack):
                 mname = expect('NAME').value
                 _check_method_name(mtoken, mname)
                 params = [Parameter(mtoken, name, 'this')] + parse_params()
-                body = None if consume(';') else parse_block()
+                body = None if consume_delim() else parse_block()
 
                 # A method is mapped to a function with a special name,
                 # and an implicit first parameter.
@@ -2039,6 +2072,8 @@ def parse_one_source(source, cache, stack):
                 method_to_token_table[mname] = mtoken
 
                 defs.append(FunctionDefinition(mtoken, rtype, fname, params, body))
+
+        consume_delim()
 
         if not extern and newdef is None:
             defs.append(FunctionDefinition(
@@ -2057,6 +2092,7 @@ def parse_one_source(source, cache, stack):
         method_to_token_table = dict()
         traits = parse_trait_list()
         expect('{')
+        consume_delim()
         while not consume('}'):
             mtoken = peek()
             rtype = expect('NAME').value
@@ -2077,6 +2113,7 @@ def parse_one_source(source, cache, stack):
             method_to_token_table[mname] = mtoken
 
             defs.append(FunctionDefinition(mtoken, rtype, fname, params, body))
+        consume_delim()
 
         method_names = sorted(method_to_token_table)
         defs.append(TraitDefinition(token, name, traits, method_names))
@@ -2095,9 +2132,11 @@ def parse_one_source(source, cache, stack):
 
     def parse_block():
         token = expect('{')
+        consume_delim()
         statements = []
         while not consume('}'):
             statements.append(parse_statement())
+        consume_delim()
         return Block(token, statements)
 
     def parse_statement():
@@ -2111,8 +2150,9 @@ def parse_one_source(source, cache, stack):
 
         if consume('if'):
             expect('(')
-            condition = parse_expression()
-            expect(')')
+            with skipping_newlines(True):
+                condition = parse_expression()
+                expect(')')
             body = parse_block()
             if consume('else'):
                 other = parse_statement()
@@ -2121,12 +2161,12 @@ def parse_one_source(source, cache, stack):
             return If(token, condition, body, other)
 
         if consume('return'):
-            expression = None if at(';') else parse_expression()
-            expect(';')
+            expression = None if at_delim() else parse_expression()
+            expect_delim()
             return Return(token, expression)
 
         expression = parse_expression()
-        expect(';')
+        expect_delim()
         return ExpressionStatement(token, expression)
 
     def parse_expression():
@@ -2252,7 +2292,7 @@ def parse_one_source(source, cache, stack):
         vartype = expect('NAME').value
         name = expect('NAME').value
         value = parse_expression() if consume('=') else None
-        expect(';')
+        expect_delim()
         return VariableDefinition(token, vartype, name, value)
 
     def parse_args():
