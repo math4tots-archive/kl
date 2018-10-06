@@ -2407,61 +2407,61 @@ BUILTINS = """
 // TODO: Implement a more elegant mechanism for enumerating
 // primitive type methods.
 String null_mRepr(var x) {
-  return 'null';
+  return 'null'
 }
 
 String bool_mRepr(bool b) {
   if (b) {
-    return 'true';
+    return 'true'
   } else {
-    return 'false';
+    return 'false'
   }
 }
 
-int int_mAdd(int a, int b);
-int int_mSub(int a, int b);
-bool int_mEq(int a, int b);
-bool int_mLt(int a, int b);
-String int_mRepr(int a);
+int int_mAdd(int a, int b)
+int int_mSub(int a, int b)
+bool int_mEq(int a, int b)
+bool int_mLt(int a, int b)
+String int_mRepr(int a)
 
-String double_mRepr(double d);
+String double_mRepr(double d)
 
-String function_mGETname(function f);
+String function_mGETname(function f)
 String function_mRepr(function f) {
-  return '<function ' + f.name + '>';
+  return '<function ' + f.name + '>'
 }
 
-String type_mGETname(type t);
+String type_mGETname(type t)
 String type_mRepr(type t) {
-  return '<type ' + t.name + '>';
+  return '<type ' + t.name + '>'
 }
 
 trait Object() {
   String Repr() {
-    type t = type(this);
-    return '<' + t.name + ' instance>';
+    type t = type(this)
+    return '<' + t.name + ' instance>'
   }
   String Str() {
-    return this.Repr().(String);
+    return this.Repr().(String)
   }
 }
 
 extern class String {
-  int bytesize();
-  String Add(String b);
-  int GETsize();
-  String Str();
+  int bytesize()
+  String Add(String b)
+  int GETsize()
+  String Str()
 }
 
-type type(var x);
-void puts(String s);
+type type(var x)
+void puts(String s)
 
 String str(var x) {
-  return x.Str().(String);
+  return x.Str().(String)
 }
 
 String repr(var x) {
-  return x.Repr().(String);
+  return x.Repr().(String)
 }
 
 """
