@@ -16,10 +16,6 @@ class Baz {
   }
 }
 
-void print(var x) {
-  puts(str(x))
-}
-
 int ff() {
   return 184
 }

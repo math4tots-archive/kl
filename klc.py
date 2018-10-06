@@ -2481,6 +2481,10 @@ extern class String {
 type type(var x)
 void puts(String s)
 
+void print(var x) {
+  puts(str(x))
+}
+
 String str(var x) {
   return x.Str().(String)
 }
