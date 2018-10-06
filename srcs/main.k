@@ -73,4 +73,12 @@ void main() {
 
   v = '"result-of-new-v"'
   print('v = ' + str(v))
+
+  {
+    int j = 0
+    while (j < 10) {
+      print('j = ' + str(j))
+      j = j + 1
+    }
+  }
 }

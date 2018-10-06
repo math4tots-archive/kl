@@ -1450,6 +1450,23 @@ class If(Statement):
         ctx.src += '}'
 
 
+class While(Statement):
+    fields = (
+        ('condition', Expression),
+        ('body', Block),
+    )
+
+    def translate(self, ctx):
+        ctx.src += 'while (1) {'
+        ctx.src += 'KLC_bool b;'
+        ectx = ctx.ectx()
+        rtype, tempvar = self.condition.translate(ectx)
+        ectx.src += f'b = {_ctruthy(ctx, rtype, tempvar)};'
+        ectx.release_tempvars()
+        ctx.src += 'if (!b) { break; }'
+        self.body.translate(ctx)
+        ctx.src += '}'
+
 
 class GlobalTranslationContext(TranslationContext):
     def __init__(self, program):
@@ -2177,6 +2194,14 @@ def parse_one_source(source, cache, stack):
 
         if at('NAME') and at('NAME', 1):
             return parse_variable_definition()
+
+        if consume('while'):
+            expect('(')
+            with skipping_newlines(True):
+                condition = parse_expression()
+                expect(')')
+            body = parse_block()
+            return While(token, condition, body)
 
         if consume('if'):
             expect('(')
