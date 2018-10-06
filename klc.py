@@ -1991,11 +1991,7 @@ def parse_one_source(source, cache, stack):
                 mname = expect('NAME').value
                 _check_method_name(mtoken, mname)
                 params = [Parameter(mtoken, name, 'this')] + parse_params()
-                if extern:
-                    body = None
-                    expect(';')
-                else:
-                    body = parse_block()
+                body = None if consume(';') else parse_block()
 
                 # A method is mapped to a function with a special name,
                 # and an implicit first parameter.
