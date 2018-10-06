@@ -1481,7 +1481,13 @@ class Program(Node):
     def translate(self):
         ctx = GlobalTranslationContext(self)
         for ptype, mnames in sorted(_primitive_method_names.items()):
-            _write_ctypeinfo(ctx.src, ptype, mnames, use_null_deleter=True)
+            methodmap = _compute_method_map(
+                token=self.token,
+                cname=ptype,
+                method_names=mnames,
+                trait_names=['Object'],
+                ctx=ctx)
+            _write_ctypeinfo(ctx.src, ptype, methodmap, use_null_deleter=True)
         for d in self.definitions:
             d.translate(ctx)
         return str(ctx.out)
@@ -1570,22 +1576,19 @@ def _delname(cname):
     return f'KLC_delete{cname}'
 
 
-def _write_ctypeinfo(src, cname, methods, use_null_deleter=False):
+def _write_ctypeinfo(src, cname, methodmap, use_null_deleter=False):
     # For primitive types, it's silly to have a deleter, so
     # use_null_deleter allows caller to control this
-    if isinstance(methods, list):
-        methods = {mname: f'{cname}_m{mname}' for mname in methods}
-
     del_name = _delname(cname)
-    if methods:
+    if methodmap:
         src += f'static KLC_methodinfo KLC_methodarray{cname}[] = ' '{'
-        for mname, mfname in sorted(methods.items()):
+        for mname, mfname in sorted(methodmap.items()):
             src += '  {' f'"{mname}", KLC_untyped{mfname}' '},'
         src += '};'
 
     src += f'static KLC_methodlist KLC_methodlist{cname} = ' '{'
-    src += f'  {len(methods)},'
-    src += f'  KLC_methodarray{cname},' if methods else '  NULL,'
+    src += f'  {len(methodmap)},'
+    src += f'  KLC_methodarray{cname},' if methodmap else '  NULL,'
     src += '};'
 
     src += f'KLC_typeinfo KLC_type{cname} = ' '{'
@@ -1713,7 +1716,7 @@ class ClassDefinition(TypeDefinition):
         _write_ctypeinfo(
             src=ctx.src,
             cname=name,
-            methods=self.method_map(ctx))
+            methodmap=self.method_map(ctx))
 
         if self.extern:
             return
