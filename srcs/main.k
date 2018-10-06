@@ -70,4 +70,7 @@ void main() {
   } else {
     print('1 < 10 is false, or something')
   }
+
+  v = '"result-of-new-v"'
+  print('v = ' + str(v))
 }

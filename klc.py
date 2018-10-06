@@ -1082,6 +1082,34 @@ class Name(Expression):
                         f'{name} is not a variable')
 
 
+class SetName(Expression):
+    fields = (
+        ('name', str),
+        ('expression', Expression),
+    )
+
+    def translate(self, ctx):
+        defn = ctx.scope.get(self.name, [self.token])
+        if isinstance(defn, BaseVariableDefinition):
+            etype = defn.type
+            tempvar = ctx.mktemp(etype)
+            etype, evar = self.expression.translate(ctx)
+            ctx.src += _cretain(ctx, etype, evar)
+            ctx.src += defn.crelease(ctx)
+            if etype != defn.type:
+                if defn.type == 'var':
+                    evar = ctx.varify(etype, evar)
+                else:
+                    raise Error([param.token, argtok],
+                                f'Tried to set {self.name} of type '
+                                f'to {etype}')
+            ctx.src += f'{ctx.cname(self.name)} = {evar};'
+            return (etype, tempvar)
+        else:
+            raise Error([self.token, defn.token],
+                        f'{name} is not a variable')
+
+
 class Cast(Expression):
     fields = (
         ('expression', Expression),
@@ -1112,7 +1140,9 @@ class StringLiteral(Expression):
         s = (self.value
             .replace('\\', '\\\\')
             .replace('\t', '\\t')
-            .replace('\n', '\\n'))
+            .replace('\n', '\\n')
+            .replace('"', '\\"')
+            .replace("'", "\\'"))
         ctx.src += f'{tempvar} = KLC_mkstr("{s}");'
         return ('String', tempvar)
 
@@ -2276,7 +2306,10 @@ def parse_one_source(source, cache, stack):
 
         if at('NAME'):
             name = expect('NAME').value
-            if at('('):
+            if consume('='):
+                expr = parse_expression()
+                return SetName(token, name, expr)
+            elif at('('):
                 args = parse_args()
                 return FunctionCall(token, name, args)
             else:
