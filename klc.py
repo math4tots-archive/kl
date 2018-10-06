@@ -1413,6 +1413,7 @@ class Conditional(Expression):
         xvar = ctx.mktemp(xtype)
         lsrc += f'{xvar} = {lvar};'
         rsrc += f'{xvar} = {rvar};'
+        ctx.src += _cretain(ctx, xtype, xvar)
         return (xtype, xvar)
 
 
@@ -2583,11 +2584,7 @@ String null_mRepr(var x) {
 }
 
 String bool_mRepr(bool b) {
-  if (b) {
-    return 'true'
-  } else {
-    return 'false'
-  }
+  return b ? 'true' : 'false'
 }
 
 int int_mAdd(int a, int b)
