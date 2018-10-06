@@ -37,11 +37,13 @@ _special_method_names = {
     'Gt',
     'Str',
     'Repr',
+    'Bool',
 }
 
 SYMBOLS = [
     '\n',
-    ';', '#',
+    '||', '&&',
+    ';', '#', '?', ':',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
     '>', '<=', '>=', '(', ')', '{', '}', '[', ']',
 ]
@@ -140,6 +142,7 @@ struct KLC_var {
 KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii);
 KLCNString* KLC_mkstr(const char *str);
 KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
+KLC_bool KLC_truthy(KLC_var v);
 
 void KLC_errorf(const char* fmt, ...) {
   va_list args;
@@ -201,6 +204,10 @@ extern KLC_typeinfo KLC_typeint;
 extern KLC_typeinfo KLC_typedouble;
 extern KLC_typeinfo KLC_typefunction;
 extern KLC_typeinfo KLC_typetype;
+
+KLC_bool KLCNbool(KLC_var v) {
+  return KLC_truthy(v);
+}
 
 KLC_type KLCNtype(KLC_var v) {
   switch (v.tag) {
@@ -283,7 +290,7 @@ KLC_bool KLC_truthy(KLC_var v) {
     case KLC_TAG_TYPE:
       return 1;
     case KLC_TAG_OBJECT:
-      return KLC_var_to_bool(KLC_mcall("Bool", 0, NULL));
+      return KLC_var_to_bool(KLC_mcall("Bool", 1, &v));
   }
   KLC_errorf("truthy: invalid tag %d\n", v.tag);
   return 0;
@@ -1129,6 +1136,26 @@ class Cast(Expression):
         return (self.type, tempvar)
 
 
+class NullLiteral(Expression):
+    fields = ()
+
+    def translate(self, ctx):
+        tempvar = ctx.mktemp('var')
+        ctx.src += f'{tempvar} = KLC_null;'
+        return ('var', tempvar)
+
+
+class BoolLiteral(Expression):
+    fields = (
+        ('value', bool),
+    )
+
+    def translate(self, ctx):
+        tempvar = ctx.mktemp('bool')
+        ctx.src += f'{tempvar} = {1 if self.value else 0};'
+        return ('bool', tempvar)
+
+
 class StringLiteral(Expression):
     fields = (
         ('value', str),
@@ -1309,6 +1336,85 @@ class MethodCall(Expression):
                 (arg.token,) + arg.translate(ctx) for arg in self.args
             ]
             return _translate_fcall(ctx, self.token, defn, argtriples)
+
+
+class LogicalOr(Expression):
+    fields = (
+        ('left', Expression),
+        ('right', Expression),
+    )
+
+    def translate(self, ctx):
+        ltype, lvar = self.left.translate(ctx)
+        xvar = ctx.mktemp('bool')
+        ctx.src += f'if (!{_ctruthy(ctx, ltype, lvar)})'
+        ctx.src += '{'
+        rtype, rvar = self.right.translate(ctx)
+        ctx.src += f'{xvar} = {_ctruthy(ctx, rtype, rvar)};'
+        ctx.src += '} else {'
+        ctx.src += f'{xvar} = 1;'
+        ctx.src += '}'
+        if 'void' in (ltype, rtype):
+            raise Erorr([self.token], 'void type in or operator')
+        return ('bool', xvar)
+
+
+class LogicalAnd(Expression):
+    fields = (
+        ('left', Expression),
+        ('right', Expression),
+    )
+
+    def translate(self, ctx):
+        ltype, lvar = self.left.translate(ctx)
+        xvar = ctx.mktemp('bool')
+        ctx.src += f'if ({_ctruthy(ctx, ltype, lvar)})'
+        ctx.src += '{'
+        rtype, rvar = self.right.translate(ctx)
+        ctx.src += f'{xvar} = {_ctruthy(ctx, rtype, rvar)};'
+        ctx.src += '} else {'
+        ctx.src += f'{xvar} = 0;'
+        ctx.src += '}'
+        if 'void' in (ltype, rtype):
+            raise Erorr([self.token], 'void type in and operator')
+        return ('bool', xvar)
+
+
+class Conditional(Expression):
+    fields = (
+        ('condition', Expression),
+        ('left', Expression),
+        ('right', Expression),
+    )
+
+    def translate(self, ctx):
+        ctype, cvar = self.condition.translate(ctx)
+        ctx.src += f'if ({_ctruthy(ctx, ctype, cvar)})'
+        ctx.src += '{'
+        ltype, lvar = self.left.translate(ctx)
+        lsrc = ctx.src.spawn()
+        ctx.src += '} else {'
+        rtype, rvar = self.right.translate(ctx)
+        rsrc = ctx.src.spawn()
+        ctx.src += '}'
+        if 'void' in (ltype, rtype):
+            raise Error([self.token], 'void type in conditional operator')
+        if 'var' in (ltype, rtype):
+            xtype = 'var'
+            lvar = ctx.varify(lvar)
+            rvar = ctx.varify(rvar)
+        elif ltype != rtype:
+            raise Error(
+                [self.token],
+                'conditional operator requires result types to be the same')
+        else:
+            xtype = ltype
+
+        xvar = ctx.mktemp(xtype)
+        lsrc += f'{xvar} = {lvar};'
+        rsrc += f'{xvar} = {rvar};'
+        return (xtype, xvar)
+
 
 
 class VariableDefinition(Statement, BaseVariableDefinition):
@@ -2225,7 +2331,39 @@ def parse_one_source(source, cache, stack):
         return ExpressionStatement(token, expression)
 
     def parse_expression():
-        return parse_relational()
+        return parse_conditional()
+
+    def parse_conditional():
+        expr = parse_or()
+        token = peek()
+        if consume('?'):
+            left = parse_expression()
+            expect(':')
+            right = parse_conditional()
+            return Conditional(token, expr, left, right)
+        return expr
+
+    def parse_or():
+        expr = parse_and()
+        while True:
+            token = peek()
+            if consume('||'):
+                right = parse_and()
+                expr = LogicalOr(token, expr, right)
+            else:
+                break
+        return expr
+
+    def parse_and():
+        expr = parse_relational()
+        while True:
+            token = peek()
+            if consume('&&'):
+                right = parse_relational()
+                expr = LogicalAnd(token, expr, right)
+            else:
+                break
+        return expr
 
     def parse_relational():
         expr = parse_additive()
@@ -2320,6 +2458,15 @@ def parse_one_source(source, cache, stack):
             expr = parse_expression()
             expect(')')
             return expr
+
+        if consume('null'):
+            return NullLiteral(token)
+
+        if consume('true'):
+            return BoolLiteral(token, True)
+
+        if consume('false'):
+            return BoolLiteral(token, False)
 
         if at('INT'):
             value = expect('INT').value
@@ -2476,8 +2623,12 @@ extern class String {
   String Add(String b)
   int GETsize()
   String Str()
+  bool Bool() {
+    return bool(this.size)
+  }
 }
 
+bool bool(var x)
 type type(var x)
 void puts(String s)
 

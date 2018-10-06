@@ -77,4 +77,15 @@ void main() {
       j = j + 1
     }
   }
+
+  print(1 || 2)
+  print(1 && 2)
+  print(0 && 1)
+  print(0 || 1)
+  print(0.0 || 0)
+  print('' && '')
+  print('a' || '')
+  print(0 ? 1 : 2)
+  print(true ? 1 : 2)
+  print(null)
 }
