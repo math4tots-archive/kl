@@ -62,4 +62,12 @@ void main() {
     String vs = v.(String);
     print('vs = ' + vs);
   }
+
+  if (1 < 10) {
+    print('1 < 10 is true');
+  } else if (1 == 10) {
+    print('1 == 10 10 is true');
+  } else {
+    print('1 < 10 is false, or something');
+  }
 }

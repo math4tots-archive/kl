@@ -64,7 +64,7 @@ PRIMITIVE_TYPES = {
 _primitive_method_names = {
     'null': ['Repr'],
     'bool': ['Repr'],
-    'int': ['Add', 'Sub', 'Eq', 'Repr'],
+    'int': ['Add', 'Sub', 'Eq', 'Repr', 'Lt'],
     'double': ['Repr'],
     'function': ['GETname', 'Repr'],
     'type': ['GETname', 'Repr'],
@@ -93,6 +93,7 @@ typedef struct KLC_var KLC_var;
 typedef KLC_var (*KLC_fp)(int, KLC_var*); /* untyped function pointer */
 typedef struct KLC_functioninfo KLC_functioninfo;
 typedef KLC_functioninfo* KLC_function;
+typedef KLC_typeinfo* KLC_type;
 
 typedef struct KLCNString KLCNString;
 
@@ -131,12 +132,13 @@ struct KLC_var {
     KLC_int i;
     double d;
     KLC_function f;
-    KLC_typeinfo* t;
+    KLC_type t;
   } u;
 };
 
 KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii);
 KLCNString* KLC_mkstr(const char *str);
+KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
 
 void KLC_errorf(const char* fmt, ...) {
   va_list args;
@@ -199,7 +201,7 @@ extern KLC_typeinfo KLC_typedouble;
 extern KLC_typeinfo KLC_typefunction;
 extern KLC_typeinfo KLC_typetype;
 
-KLC_typeinfo* KLCNtype(KLC_var v) {
+KLC_type KLCNtype(KLC_var v) {
   switch (v.tag) {
     case KLC_TAG_BOOL:
       return &KLC_typebool;
@@ -246,7 +248,7 @@ KLC_var KLC_function_to_var(KLC_function f) {
   return ret;
 }
 
-KLC_var KLC_type_to_var(KLC_typeinfo* t) {
+KLC_var KLC_type_to_var(KLC_type t) {
   KLC_var ret;
   ret.tag = KLC_TAG_TYPE;
   ret.u.t = t;
@@ -267,6 +269,23 @@ KLC_bool KLC_var_to_bool(KLC_var v) {
                KLC_TAG_BOOL, v.tag);
   }
   return v.u.i ? 1 : 0;
+}
+
+KLC_bool KLC_truthy(KLC_var v) {
+  switch (v.tag) {
+    case KLC_TAG_BOOL:
+    case KLC_TAG_INT:
+      return v.u.i;
+    case KLC_TAG_DOUBLE:
+      return v.u.d;
+    case KLC_TAG_FUNCTION:
+    case KLC_TAG_TYPE:
+      return 1;
+    case KLC_TAG_OBJECT:
+      return KLC_var_to_bool(KLC_mcall("Bool", 0, NULL));
+  }
+  KLC_errorf("truthy: invalid tag %d\n", v.tag);
+  return 0;
 }
 
 KLC_int KLC_var_to_int(KLC_var v) {
@@ -295,7 +314,7 @@ if (v.tag != KLC_TAG_FUNCTION) {
 return v.u.f;
 }
 
-KLC_typeinfo* KLC_var_to_type(KLC_var v) {
+KLC_type KLC_var_to_type(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_TYPE) {
     KLC_errorf("var_to_type: expected type (tag %d) but got tag %d\n",
@@ -304,7 +323,7 @@ KLC_typeinfo* KLC_var_to_type(KLC_var v) {
   return v.u.t;
 }
 
-KLC_header* KLC_var_to_object(KLC_var v, KLC_typeinfo* ti) {
+KLC_header* KLC_var_to_object(KLC_var v, KLC_type ti) {
   /* TODO: Better error message */
   KLC_header* ret;
   if (v.tag != KLC_TAG_OBJECT) {
@@ -334,7 +353,7 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {
     KLC_errorf("mcall requires at least 1 arg");
   }
   {
-    KLC_typeinfo* type = KLCNtype(argv[0]);
+    KLC_type type = KLCNtype(argv[0]);
     const KLC_methodlist* mlist = type->methods;
     size_t len = mlist->size;
     const KLC_methodinfo* mbuf = mlist->methods;
@@ -369,10 +388,6 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {
   }
 }
 
-KLCNString* KLCNbool_mRepr(KLC_bool b) {
-  return KLC_mkstr(b ? "true" : "false");
-}
-
 KLC_int KLCNint_mAdd(KLC_int a, KLC_int b) {
   return a + b;
 }
@@ -405,11 +420,11 @@ KLCNString* KLCNfunction_mGETname(KLC_function f) {
   return KLC_mkstr(f->name);
 }
 
-KLCNString* KLCNtype_mGETname(KLC_typeinfo* t) {
+KLCNString* KLCNtype_mGETname(KLC_type t) {
   return KLC_mkstr(t->name);
 }
 
-void KLC_init_header(KLC_header* header, KLC_typeinfo* type) {
+void KLC_init_header(KLC_header* header, KLC_type type) {
   header->type = type;
   header->refcnt = 0;
   header->next = NULL;
@@ -796,7 +811,7 @@ class ListType(FakeType):
 List = ListType(object)
 
 
-class OptionalType(object):
+class OptionalType(FakeType):
     def __init__(self, subtype):
         self.subtype = subtype
 
@@ -927,6 +942,19 @@ def _cretain(ctx, type_, cname):
         return f'KLC_retain((KLC_header*) {cname});'
 
 
+def _ctruthy(ctx, type_, cname):
+    if type_ in ('bool', 'int', 'double'):
+        return cname
+    elif type_ in ('function', 'type'):
+        return '1'
+    elif type_ == 'null':
+        return '0'
+    elif type_ == 'var':
+        return f'KLC_truthy({cname})'
+    else:
+        return f'KLC_truthy(KLC_object_to_var((KLC_header*) {cname}))'
+
+
 class BaseVariableDefinition(Node):
     fields = (
         ('type', str),
@@ -993,7 +1021,7 @@ class TranslationContext(object):
         if name in ('function', 'int', 'bool'):
             return f'KLC_{name}'
         elif name == 'type':
-            return f'KLC_typeinfo*'
+            return f'KLC_type'
         if name in PRIMITIVE_TYPES:
             return name
         elif name == 'var':
@@ -1360,6 +1388,36 @@ class Block(Statement):
             for vdef in reversed(ctx.scope.local_definitions):
                 if vdef.type not in PRIMITIVE_TYPES:
                     epilogue += vdef.crelease(ctx)
+
+
+class If(Statement):
+    fields = (
+        ('condition', Expression),
+        ('body', Block),
+        ('other', Optional[Statement]),
+    )
+
+    def __init__(self, *args ,**kwargs):
+        super().__init__(*args, **kwargs)
+        if not isinstance(self.other, (type(None), If, Block)):
+            raise Error(
+                [self.other.token],
+                f"Expected block or if statement")
+
+    def translate(self, ctx):
+        ctx.src += '{'
+        ctx.src += 'KLC_bool b;'
+        ectx = ctx.ectx()
+        rtype, tempvar = self.condition.translate(ectx)
+        ectx.src += f'b = {_ctruthy(ctx, rtype, tempvar)};'
+        ectx.release_tempvars()
+        ctx.src += 'if (b)'
+        self.body.translate(ctx)
+        if self.other is not None:
+            ctx.src += 'else'
+            self.other.translate(ctx)
+        ctx.src += '}'
+
 
 
 class GlobalTranslationContext(TranslationContext):
@@ -2051,6 +2109,17 @@ def parse_one_source(source, cache, stack):
         if at('NAME') and at('NAME', 1):
             return parse_variable_definition()
 
+        if consume('if'):
+            expect('(')
+            condition = parse_expression()
+            expect(')')
+            body = parse_block()
+            if consume('else'):
+                other = parse_statement()
+            else:
+                other = None
+            return If(token, condition, body, other)
+
         if consume('return'):
             expression = None if at(';') else parse_expression()
             expect(';')
@@ -2268,7 +2337,13 @@ String null_mRepr(var x) {
   return 'null';
 }
 
-String bool_mRepr(bool b);
+String bool_mRepr(bool b) {
+  if (b) {
+    return 'true';
+  } else {
+    return 'false';
+  }
+}
 
 int int_mAdd(int a, int b);
 int int_mSub(int a, int b);
