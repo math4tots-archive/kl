@@ -78,6 +78,9 @@ _primitive_method_names = {
 with open(os.path.join(_scriptdir, 'klprelude.c')) as f:
     CPRELUDE = f.read()
 
+with open(os.path.join(_scriptdir, 'builtins.k')) as f:
+    BUILTINS = f.read()
+
 
 class Source(NamedTuple):
     filename: str
@@ -2074,52 +2077,6 @@ def parse_one_source(source, cache, stack):
 
 
 tok = lex(Source('<dummy>', 'dummy'))[0]
-
-# node = Program(tok, [
-#     ClassDefinition(tok, 'String', None, ['size']),
-#     FunctionDefinition(tok, 'String', 'str', [Parameter(tok, 'var', 'v')], None),
-#     FunctionDefinition(tok, 'int', 'String_msize',
-#                        [Parameter(tok, 'String', 's')], None),
-#     ClassDefinition(tok, 'Foo', [
-#         Field(tok, 'var', 'v'),
-#         Field(tok, 'int', 'i'),
-#         Field(tok, 'String', 's'),
-#     ], []),
-#     FunctionDefinition(tok, 'void', 'foo', [Parameter(tok, 'var', 'callback')], Block(tok, [
-#         ExpressionStatement(tok, FunctionCall(tok, 'callback', [StringLiteral(tok, 'hi')])),
-#     ])),
-#     FunctionDefinition(tok, 'void', 'puts', [Parameter(tok, 'String', 'x')], None),
-#     FunctionDefinition(tok, 'String', 'id', [Parameter(tok, 'String', 'x')], Block(tok, [
-#         Return(tok, StringLiteral(tok, 'id-result')),
-#     ])),
-#     FunctionDefinition(tok, 'void', 'print', [Parameter(tok, 'var', 'v')], Block(tok, [
-#         ExpressionStatement(tok, FunctionCall(tok, 'puts', [
-#             FunctionCall(tok, 'str', [Name(tok, 'v')]),
-#         ])),
-#     ])),
-#     FunctionDefinition(tok, 'void', 'main', [], Block(tok, [
-#         ExpressionStatement(tok, FunctionCall(
-#             tok, 'puts', [StringLiteral(tok, 'Hello world!')]
-#         )),
-#         VariableDefinition(tok, "String", "s", StringLiteral(tok, "Hello world2")),
-#         VariableDefinition(tok, "var", "v", StringLiteral(tok, "Hello world2")),
-#         ExpressionStatement(tok, FunctionCall(tok, 'puts', [Name(tok, 's')])),
-#         ExpressionStatement(tok, FunctionCall(tok, 'puts', [
-#             FunctionCall(tok, 'id', [StringLiteral(tok, 'id-arg')]),
-#         ])),
-#         ExpressionStatement(tok, FunctionCall(tok, 'foo', [Name(tok, 'puts')])),
-#         ExpressionStatement(tok, FunctionCall(tok, 'print', [Name(tok, 'foo')])),
-#         ExpressionStatement(tok, FunctionCall(tok, 'print', [
-#             MethodCall(tok, Name(tok, 'v'), 'size', []),
-#         ])),
-#         ExpressionStatement(tok, FunctionCall(tok, 'print', [
-#             MethodCall(tok, Name(tok, 's'), 'size', []),
-#         ])),
-#     ])),
-# ])
-
-with open(os.path.join(_scriptdir, 'builtins.k')) as f:
-    BUILTINS = f.read()
 
 builtins_node = parse(Source('<builtin>', BUILTINS))
 
