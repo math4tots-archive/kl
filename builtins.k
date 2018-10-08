@@ -51,9 +51,10 @@ String type_mGETname(type t)
 String type_mRepr(type t) {
   return '<type ' + t.name + '>'
 }
-bool type_mBool(function f) {
+bool type_mBool(type t) {
   return true
 }
+bool type_mEq(type a, type b)
 
 trait Object() {
   bool Ne(var other) {

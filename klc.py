@@ -79,7 +79,10 @@ _primitive_method_names = {
         'Repr', 'Bool',
     ],
     'function': ['GETname', 'Repr', 'Bool'],
-    'type': ['GETname', 'Repr', 'Bool'],
+    'type': [
+        'Eq',
+        'GETname', 'Repr', 'Bool',
+    ],
 }
 
 
@@ -638,12 +641,16 @@ class Name(Expression):
             tempvar = ctx.mktemp(etype)
             ctx.src += f'{tempvar} = KLC_get_global{defn.name}();'
             return (etype, tempvar)
-        if isinstance(defn, BaseVariableDefinition):
+        elif isinstance(defn, BaseVariableDefinition):
             etype = defn.type
             tempvar = ctx.mktemp(etype)
             ctx.src += f'{tempvar} = {ctx.cname(self.name)};'
             ctx.src += _cretain(ctx, etype, tempvar)
             return (etype, tempvar)
+        elif isinstance(defn, ClassDefinition):
+            tempvar = ctx.mktemp('type')
+            ctx.src += f'{tempvar} = &KLC_type{defn.name};'
+            return 'type', tempvar
         elif isinstance(defn, FunctionDefinition):
             tempvar = ctx.mktemp('var')
             ctx.src += f'{tempvar} = KLC_function_to_var(&KLC_functioninfo{defn.name});'

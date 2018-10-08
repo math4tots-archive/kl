@@ -412,6 +412,10 @@ KLCNString* KLCNtype_mGETname(KLC_type t) {
   return KLC_mkstr(t->name);
 }
 
+KLC_bool KLCNtype_mEq(KLC_type a, KLC_type b) {
+  return a == b;
+}
+
 void KLC_init_header(KLC_header* header, KLC_type type) {
   header->type = type;
   header->refcnt = 0;

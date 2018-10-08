@@ -52,6 +52,10 @@ void main() {
     s = 'new value'
     assert(s == 'new value', 'String local variable update value')
   }
+
+  {
+    assert(String == String, 'type equality')
+  }
 }
 
 void oldmain() {
