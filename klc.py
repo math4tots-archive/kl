@@ -44,7 +44,7 @@ _special_method_names = {
 SYMBOLS = [
     '\n',
     '||', '&&',
-    ';', '#', '?', ':',
+    ';', '#', '?', ':', '!',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
     '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
 ]
@@ -906,6 +906,18 @@ class MethodCall(Expression):
             return _translate_fcall(ctx, self.token, defn, argtriples)
 
 
+class LogicalNot(Expression):
+    fields = (
+        ('expression', Expression),
+    )
+
+    def translate(self, ctx):
+        etype, evar = self.expression.translate(ctx)
+        xvar = ctx.mktemp('bool')
+        ctx.src += f'{xvar} = !{_ctruthy(ctx, etype, evar)};'
+        return 'bool', xvar
+
+
 class LogicalOr(Expression):
     fields = (
         ('left', Expression),
@@ -923,7 +935,7 @@ class LogicalOr(Expression):
         ctx.src += f'{xvar} = 1;'
         ctx.src += '}'
         if 'void' in (ltype, rtype):
-            raise Erorr([self.token], 'void type in or operator')
+            raise Error([self.token], 'void type in or operator')
         return ('bool', xvar)
 
 
@@ -2053,6 +2065,9 @@ def parse_one_source(source, cache, stack):
         if consume('-'):
             expr = parse_pow()
             return MethodCall(token, expr, 'Not', [])
+        if consume('!'):
+            expr = parse_pow()
+            return LogicalNot(token, expr)
         return parse_pow()
 
     def parse_pow():

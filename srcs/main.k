@@ -101,4 +101,6 @@ void main() {
   print(sample_global_string)
   print(sample_global_string)
   print(sample_global_string)
+  print(!true)
+  print(!0)
 }
