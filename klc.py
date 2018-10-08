@@ -277,7 +277,7 @@ def _make_lexer():
     ])
 
     string_pattern = RegexPattern(
-        string_pattern_regex,
+        re.compile(string_pattern_regex, re.DOTALL),
         type='STRING',
         value_callback=string_pattern_value_callback)
 
@@ -625,6 +625,11 @@ class Name(Expression):
 
     def translate(self, ctx):
         defn = ctx.scope.get(self.name, [self.token])
+        if isinstance(defn, GlobalVariableDefinition):
+            etype = defn.type
+            tempvar = ctx.mktemp(etype)
+            ctx.src += f'{tempvar} = KLC_get_global{defn.name}();'
+            return (etype, tempvar)
         if isinstance(defn, BaseVariableDefinition):
             etype = defn.type
             tempvar = ctx.mktemp(etype)
@@ -648,7 +653,11 @@ class SetName(Expression):
 
     def translate(self, ctx):
         defn = ctx.scope.get(self.name, [self.token])
-        if isinstance(defn, BaseVariableDefinition):
+        if isinstance(defn, GlobalVariableDefinition):
+            raise Error(
+                [self.token, defn.token],
+                f'Global variables are final ({defn.name})')
+        elif isinstance(defn, BaseVariableDefinition):
             etype = defn.type
             tempvar = ctx.mktemp(etype)
             etype, evar = self.expression.translate(ctx)
@@ -1234,6 +1243,36 @@ class Program(Node):
         return str(ctx.out)
 
 
+class GlobalVariableDefinition(GlobalDefinition):
+    fields = (
+        ('extern', bool),
+        ('type', str),
+        ('name', str),
+    )
+
+    def translate(self, ctx):
+        ctype = ctx.cdecltype(self.type)
+        ctx.hdr += f'{ctype} KLC_get_global{self.name}();'
+        ctx.src += f'int KLC_initialized_global{self.name} = 0;'
+        ctx.src += f'{ctype} KLC_global{self.name} = {ctx.czero(self.type)};'
+
+        ctx.src += f'{ctype} KLC_get_global{self.name}() ' '{'
+        ctx.src += f'  if (!KLC_initialized_global{self.name}) ' '{'
+        ctx.src += f'    KLC_initialized_global{self.name} = 1;'
+        ctx.src += f'    KLC_global{self.name} = KLCN_init{self.name}();'
+        if self.type in PRIMITIVE_TYPES:
+            pass
+        elif self.type == 'var':
+            ctx.src += f'    KLC_release_var_on_exit(KLC_global{self.name});'
+        else:
+            ctx.src += f'    KLC_release_object_on_exit((KLC_header*) KLC_global{self.name});'
+        ctx.src += '  }'
+        src1 = ctx.src.spawn(1)
+        src1 += _cretain(ctx, self.type, f'KLC_global{self.name}')
+        src1 += f'return KLC_global{self.name};'
+        ctx.src += '}'
+
+
 class FunctionDefinition(GlobalDefinition):
     fields = (
         ('return_type', str),
@@ -1645,6 +1684,10 @@ def parse_one_source(source, cache, stack):
             parse_function_definition(defs)
             return
 
+        if (at('extern') or at('NAME')) and at('NAME', 1):
+            parse_global_variable_definition(defs)
+            return
+
         raise Error([peek()], f'Expected class, function or variable definition')
 
     def parse_macro(defs):
@@ -1678,6 +1721,42 @@ def parse_one_source(source, cache, stack):
             cache[upath] = parse_one_source(Source(abspath, data), cache, stack)
         finally:
             stack.pop()
+
+    def parse_global_variable_definition(defs):
+        token = peek()
+        extern = bool(consume('extern'))
+        vtype = expect('NAME').value
+        vname = expect('NAME').value
+        defs.append(GlobalVariableDefinition(token, extern, vtype, vname))
+        ifname = f'_init{vname}'
+        if extern:
+            initf = FunctionDefinition(
+                token,
+                vtype,
+                ifname,
+                [],
+                None)
+        else:
+            if consume('='):
+                expr = parse_expression()
+                initf = FunctionDefinition(
+                    token,
+                    vtype,
+                    ifname,
+                    [],
+                    Block(token, [Return(token, expr)]))
+            else:
+                initf = FunctionDefinition(
+                    token,
+                    vtype,
+                    ifname,
+                    [],
+                    Block(token, [
+                        VariableDefinition(token, vtype, 'ret'),
+                        Return(token, Name(token, 'ret')),
+                    ]))
+        defs.append(initf)
+        expect_delim()
 
     def parse_function_definition(defs):
         token = peek()

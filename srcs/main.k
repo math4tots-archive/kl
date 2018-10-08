@@ -24,6 +24,10 @@ String _f() {
   return 'result of _f'
 }
 
+String sample_global_string = """
+This is a sample global string
+"""
+
 
 void main() {
   String s = 'String s variable'
@@ -78,6 +82,11 @@ void main() {
     }
   }
 
+  {
+    String ss = 'hi'
+    ss = 'there'
+  }
+
   print(1 || 2)
   print(1 && 2)
   print(0 && 1)
@@ -88,4 +97,8 @@ void main() {
   print(0 ? 1 : 2)
   print(true ? 1 : 2)
   print(null)
+  print(sample_global_string)
+  print(sample_global_string)
+  print(sample_global_string)
+  print(sample_global_string)
 }

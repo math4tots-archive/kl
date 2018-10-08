@@ -68,6 +68,37 @@ KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii);
 KLCNString* KLC_mkstr(const char *str);
 KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
 KLC_bool KLC_truthy(KLC_var v);
+void KLC_release(KLC_header *obj);
+
+size_t KLC_release_on_exit_buffer_cap = 0;
+size_t KLC_release_on_exit_buffer_size = 0;
+KLC_header** KLC_release_on_exit_buffer = NULL;
+
+void KLC_release_object_on_exit(KLC_header* obj) {
+  if (KLC_release_on_exit_buffer_size >= KLC_release_on_exit_buffer_cap) {
+    KLC_release_on_exit_buffer_cap += 10;
+    KLC_release_on_exit_buffer_cap *= 2;
+    KLC_release_on_exit_buffer =
+      (KLC_header**) realloc(
+        KLC_release_on_exit_buffer,
+        sizeof(KLC_header*) * KLC_release_on_exit_buffer_cap);
+  }
+  KLC_release_on_exit_buffer[KLC_release_on_exit_buffer_size++] = obj;
+}
+
+void KLC_release_var_on_exit(KLC_var v) {
+  if (v.tag == KLC_TAG_OBJECT) {
+    KLC_release_object_on_exit(v.u.obj);
+  }
+}
+
+void KLC_release_queued_before_exit() {
+  size_t i = 0;
+  for (; i < KLC_release_on_exit_buffer_size; i++) {
+    KLC_release(KLC_release_on_exit_buffer[i]);
+  }
+  free(KLC_release_on_exit_buffer);
+}
 
 void KLC_errorf(const char* fmt, ...) {
   va_list args;
@@ -451,5 +482,6 @@ static const KLC_var KLC_null = {
 
 int main() {
   KLCNmain();
+  KLC_release_queued_before_exit();
   return 0;
 }
