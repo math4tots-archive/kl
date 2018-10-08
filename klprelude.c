@@ -493,8 +493,18 @@ KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b) {
   return KLC_mkstr_with_buffer(bytesize, buffer, a->is_ascii && b->is_ascii);
 }
 
-void KLCNputs(KLCNString *s) {
+KLC_bool KLCNString_mEq(KLCNString* a, KLCNString* b) {
+  return strcmp(a->buffer, b->buffer) == 0;
+}
+
+void KLCNputs(KLCNString* s) {
   printf("%s\n", s->buffer);
+}
+
+void KLCNassert(KLC_var cond, KLCNString* message) {
+  if (!KLC_truthy(cond)) {
+    KLC_errorf("Assertion failed: %s\n", message->buffer);
+  }
 }
 
 void KLCNmain();

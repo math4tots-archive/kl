@@ -56,6 +56,9 @@ bool type_mBool(function f) {
 }
 
 trait Object() {
+  bool Ne(var other) {
+    return !(this == other)
+  }
   String Repr() {
     type t = type(this)
     return '<' + t.name + ' instance>'
@@ -70,6 +73,7 @@ extern class String {
   String Add(String b)
   int GETsize()
   String Str()
+  bool Eq(String other)
   bool Bool() {
     return bool(this.size)
   }
@@ -78,6 +82,7 @@ extern class String {
 bool bool(var x)
 type type(var x)
 void puts(String s)
+void assert(var x, String message)
 
 void print(var x) {
   puts(str(x))
