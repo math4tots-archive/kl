@@ -364,6 +364,10 @@ KLC_bool KLCNint_mEq(KLC_int a, KLC_int b) {
   return a == b;
 }
 
+KLC_bool KLCNint_mNe(KLC_int a, KLC_int b) {
+  return a != b;
+}
+
 KLC_bool KLCNint_mLt(KLC_int a, KLC_int b) {
   return a < b;
 }
@@ -372,6 +376,26 @@ KLCNString* KLCNint_mRepr(KLC_int i) {
   char buffer[50];
   sprintf(buffer, "%ld", i);
   return KLC_mkstr(buffer);
+}
+
+double KLCNdouble_mAdd(double a, double b) {
+  return a + b;
+}
+
+double KLCNdouble_mSub(double a, double b) {
+  return a - b;
+}
+
+KLC_bool KLCNdouble_mEq(double a, double b) {
+  return a == b;
+}
+
+KLC_bool KLCNdouble_mNe(double a, double b) {
+  return a != b;
+}
+
+KLC_bool KLCNdouble_mLt(double a, double b) {
+  return a < b;
 }
 
 KLCNString* KLCNdouble_mRepr(double d) {

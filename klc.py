@@ -46,7 +46,7 @@ SYMBOLS = [
     '||', '&&',
     ';', '#', '?', ':',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
-    '>', '<=', '>=', '(', ')', '{', '}', '[', ']',
+    '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
 ]
 
 KEYWORDS = {
@@ -66,12 +66,20 @@ PRIMITIVE_TYPES = {
 }
 
 _primitive_method_names = {
-    'null': ['Repr'],
-    'bool': ['Repr'],
-    'int': ['Add', 'Sub', 'Eq', 'Repr', 'Lt'],
-    'double': ['Repr'],
-    'function': ['GETname', 'Repr'],
-    'type': ['GETname', 'Repr'],
+    'null': ['Repr', 'Bool'],
+    'bool': ['Repr', 'Bool'],
+    'int': [
+        'Eq', 'Ne', 'Lt',
+        'Add', 'Sub',
+        'Repr', 'Bool',
+    ],
+    'double': [
+        'Eq', 'Ne', 'Lt',
+        'Add', 'Sub',
+        'Repr', 'Bool',
+    ],
+    'function': ['GETname', 'Repr', 'Bool'],
+    'type': ['GETname', 'Repr', 'Bool'],
 }
 
 
