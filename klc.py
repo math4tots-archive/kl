@@ -1285,8 +1285,8 @@ class GlobalVariableDefinition(GlobalDefinition):
 
         ctx.src += f'{ctype} KLC_get_global{self.name}() ' '{'
         ctx.src += f'  if (!KLC_initialized_global{self.name}) ' '{'
-        ctx.src += f'    KLC_initialized_global{self.name} = 1;'
         ctx.src += f'    KLC_global{self.name} = KLCN_init{self.name}();'
+        ctx.src += f'    KLC_initialized_global{self.name} = 1;'
         if self.type in PRIMITIVE_TYPES:
             pass
         elif self.type == 'var':
