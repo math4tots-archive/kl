@@ -31,11 +31,7 @@ _special_method_names = {
     'Mul',
     'Div',
     'Eq',
-    'Ne',
     'Lt',
-    'Le',
-    'Ge',
-    'Gt',
     'Str',
     'Repr',
     'Bool',
@@ -69,12 +65,12 @@ _primitive_method_names = {
     'null': ['Repr', 'Bool'],
     'bool': ['Repr', 'Bool'],
     'int': [
-        'Eq', 'Ne', 'Lt',
+        'Eq', 'Lt',
         'Add', 'Sub',
         'Repr', 'Bool',
     ],
     'double': [
-        'Eq', 'Ne', 'Lt',
+        'Eq', 'Lt',
         'Add', 'Sub',
         'Repr', 'Bool',
     ],
@@ -208,7 +204,7 @@ class RegexPattern(Pattern):
 
 
 def _make_lexer():
-    whitespace_and_comment_pattern = RegexPattern(r'(?:[ \t\r]|//.*\n)+')
+    whitespace_and_comment_pattern = RegexPattern(r'(?:[ \t\r]|//.*(?=\n))+')
 
     class Lexer:
         def __init__(
@@ -801,22 +797,66 @@ class DoubleLiteral(Expression):
 
 
 class BinaryComparison(Expression):
+    """Base class for binary operations that return bool result.
+    """
     fields = (
         ('left', Expression),
         ('right', Expression),
     )
 
+    method_types = set()
+    fallback_method = None
+
+    # Customizations for when using a fallback method.
+    reverse_method_args = False
+    invert_method_result = False
+
     def translate(self, ctx):
         fast_op_types = type(self).fast_op_types
         fast_op = type(self).fast_op
+        fallback_method = type(self).fallback_method
         fallback_fn = type(self).fallback_fn
+        reverse_method_args = type(self).reverse_method_args
+        invert_method_result = type(self).invert_method_result
 
+        ltok = self.left.token
         ltype, lvar = self.left.translate_value(ctx)
+
+        rtok = self.right.token
         rtype, rvar = self.right.translate_value(ctx)
-        if ltype == rtype and ltype in fast_op_types:
-            xvar = ctx.mktemp('bool')
-            ctx.src += f'{xvar} = ({lvar}) {fast_op} ({rvar});'
-            return 'bool', xvar
+
+        # If the types are the same and not 'var', we might be able to
+        # do some optimizations.
+        if ltype == rtype and ltype != 'var':
+            # If the types are in fast_op_types,
+            # we can just run a single C operation to
+            # compute the result
+            if ltype in fast_op_types:
+                xvar = ctx.mktemp('bool')
+                ctx.src += f'{xvar} = ({lvar}) {fast_op} ({rvar});'
+                return 'bool', xvar
+
+            # If there is a fallback method to call,
+            # try that. Since the types are the same and
+            # the type is not var, a method call is really
+            # a plain typed function call here, so would
+            # be faster than a generic function call
+            # like with the final fallback.
+            if fallback_method:
+                if reverse_method_args:
+                    ltok, ltype, lvar, rtok, rtype, rvar = (
+                        rtok, rtype, rvar, ltok, ltype, lvar)
+
+                argtriples = [
+                    (self.left.token, ltype, lvar),
+                    (self.right.token, rtype, rvar),
+                ]
+                xtype, xvar = _translate_mcall(
+                    ctx, self.token, fallback_method, argtriples)
+                assert xtype == 'bool', xtype
+                if invert_method_result:
+                    ctx.src += f'{xvar} = !{xvar};'
+                return xtype, xvar
 
         # If none of the above match, use the fallback function
         fn = ctx.scope.get(fallback_fn, [self.token])
@@ -842,36 +882,47 @@ class IsNot(BinaryComparison):
 class Equals(BinaryComparison):
     fast_op_types = frozenset(PRIMITIVE_TYPES)
     fast_op = '=='
+    fallback_method = 'Eq'
     fallback_fn = '_Eq'
 
 
 class NotEquals(BinaryComparison):
     fast_op_types = frozenset(PRIMITIVE_TYPES)
     fast_op = '!='
+    fallback_method = 'Eq'
+    invert_method_result = True
     fallback_fn = '_Ne'
 
 
 class LessThan(BinaryComparison):
     fast_op_types = ['int', 'double']
     fast_op = '<'
+    fallback_method = 'Lt'
     fallback_fn = '_Lt'
 
 
 class LessThanOrEqual(BinaryComparison):
     fast_op_types = ['int', 'double']
     fast_op = '<='
+    fallback_method = 'Lt'
+    invert_method_result = True
+    reverse_method_args = True
     fallback_fn = '_Le'
 
 
 class GreaterThan(BinaryComparison):
     fast_op_types = ['int', 'double']
     fast_op = '>'
+    fallback_method = 'Lt'
+    reverse_method_args = True
     fallback_fn = '_Gt'
 
 
 class GreaterThanOrEqual(BinaryComparison):
     fast_op_types = ['int', 'double']
     fast_op = '>='
+    fallback_method = 'Lt'
+    invert_method_result = True
     fallback_fn = '_Ge'
 
 
@@ -907,7 +958,7 @@ class FunctionCall(Expression):
             for i, argtempvar in enumerate(argtempvars):
                 ctx.src += f'{temparr}[{i}] = {argtempvar};'
             ctx.src += f'{tempvar} = KLC_var_call({cfname}, {nargs}, {temparr});'
-            return ('var', tempvar)
+            return 'var', tempvar
 
         if isinstance(defn, ClassDefinition):
             if defn.extern:
@@ -926,7 +977,7 @@ class FunctionCall(Expression):
                 argtype, argtempvar = arg.translate(ctx)
                 argtriples.append((arg.token, argtype, argtempvar))
             _translate_fcall(ctx, self.token, fdefn, argtriples)
-            return (defn.name, this_tempvar)
+            return defn.name, this_tempvar
 
         raise Error([self.token, defn.token],
                     f'{self.function} is not a function')
@@ -957,6 +1008,61 @@ def _translate_fcall(ctx, token, defn, argtriples):
             return defn.return_type, tempvar
 
 
+def _no_such_method_error(token, name, ownertype):
+    return Error(
+        [token],
+        f'Method {name} does not exist for type {ownertype}')
+
+
+def _translate_mcall(ctx, token, name, argtriples):
+    if len(argtriples) < 1:
+        raise Error([token], 'FUBAR: mcall requires at least one arg')
+
+    _, ownertype, ownertempvar = argtriples[0]
+
+    if ownertype == 'void':
+        raise Error([token], f'Cannot call method on void type')
+
+    if ownertype == 'var':
+        argtempvars = []
+        for argtoken, argtype, argtempvar in argtriples:
+            if argtype == 'void':
+                raise Error(
+                    [arg.token],
+                    'void expression cannot be used as an argument')
+            argtempvar = ctx.varify(argtype, argtempvar)
+            argtempvars.append(argtempvar)
+        tarr = ctx.mktemparr(len(argtriples))
+        tv = ctx.mktemp('var')
+        for i, argtempvar in enumerate(argtempvars):
+            ctx.src += f'{tarr}[{i}] = {argtempvar};'
+        with with_frame(ctx, token):
+            ctx.src += (
+                f'{tv} = KLC_mcall("{name}", '
+                f'{len(argtempvars)}, {tarr});'
+            )
+        return 'var', tv
+    else:
+        # Check that this method actually exists on this type
+        if ownertype in PRIMITIVE_TYPES:
+            if name not in _primitive_method_names[ownertype]:
+                raise _no_such_method_error(token, name, ownertype)
+            fname = f'{ownertype}_m{name}'
+        else:
+            cdef = ctx.scope.get(ownertype, [token])
+            assert isinstance(cdef, ClassDefinition), cdef
+            if name not in cdef.method_map(ctx):
+                raise _no_such_method_error(token, name, ownertype)
+            fname = cdef.method_map(ctx)[name]
+
+        # TODO: Consider looking up from global context
+        # to avoid coincidental names that shadow method names
+        defn = ctx.scope.get(fname, [token])
+        if not isinstance(defn, FunctionDefinition):
+            raise Error([token], f'FUBAR: shadowed method {fname}')
+
+        return _translate_fcall(ctx, token, defn, argtriples)
+
 class MethodCall(Expression):
     fields = (
         ('owner', Expression),
@@ -964,60 +1070,13 @@ class MethodCall(Expression):
         ('args', List[Expression]),
     )
 
-    def _no_such_method_error(self, ownertype):
-        return Error(
-            [self.token],
-            f'Method {self.name} does not exist for type {ownertype}')
-
     def translate(self, ctx):
         ownertype, ownertempvar = self.owner.translate(ctx)
-        if ownertype == 'void':
-            raise Error([self.token], f'Cannot call method on void type')
-
-        if ownertype == 'var':
-            argtempvars = []
-            for arg in self.args:
-                argtype, argtempvar = arg.translate(ctx)
-                if argtype == 'void':
-                    raise Error(
-                        [arg.token],
-                        'void expression cannot be used as an argument')
-                argtempvar = ctx.varify(argtype, argtempvar)
-                argtempvars.append(argtempvar)
-            tarr = ctx.mktemparr(len(self.args) + 1)
-            tv = ctx.mktemp('var')
-            ctx.src += f'{tarr}[0] = {ownertempvar};'
-            for i, argtempvar in enumerate(argtempvars, 1):
-                ctx.src += f'{tarr}[{i}] = {argtempvar};'
-            with with_frame(ctx, self.token):
-                ctx.src += (
-                    f'{tv} = KLC_mcall("{self.name}", '
-                    f'{len(self.args) + 1}, {tarr});'
-                )
-            return 'var', tv
-        else:
-            # Check that this method actually exists on this type
-            if ownertype in PRIMITIVE_TYPES:
-                if self.name not in _primitive_method_names[ownertype]:
-                    raise self._no_such_method_error(ownertype)
-                fname = f'{ownertype}_m{self.name}'
-            else:
-                cdef = ctx.scope.get(ownertype, [self.token])
-                assert isinstance(cdef, ClassDefinition), cdef
-                if self.name not in cdef.method_map(ctx):
-                    raise self._no_such_method_error(ownertype)
-                fname = cdef.method_map(ctx)[self.name]
-
-            # TODO: Consider looking up from global context
-            # to avoid coincidental names that shadow method names
-            defn = ctx.scope.get(fname, [self.token])
-            if not isinstance(defn, FunctionDefinition):
-                raise Error([self.token], f'FUBAR: shadowed method {fname}')
-
-            argtriples = [(self.token, ownertype, ownertempvar)] + [
-                (arg.token,) + arg.translate(ctx) for arg in self.args
-            ]
-            return _translate_fcall(ctx, self.token, defn, argtriples)
+        argtriples = [(self.token, ownertype, ownertempvar)]
+        for arg in self.args:
+            argtype, argvar = arg.translate(ctx)
+            argtriples.append((arg.token, argtype, argvar))
+        return _translate_mcall(ctx, self.token, self.name, argtriples)
 
 
 class LogicalNot(Expression):
@@ -1729,7 +1788,7 @@ def _check_method_name(token, name):
     if _has_upper(name[0]) and not _is_special_method_name(name):
         raise Error(
             [token],
-            f'Only special method names may start with an upper case letter')
+            f'Only special methods may start with an upper case letter')
 
 
 def parse_one_source(source, cache, stack):
@@ -2149,6 +2208,11 @@ def parse_one_source(source, cache, stack):
                 expr = GreaterThan(token, expr, parse_additive())
             elif consume('>='):
                 expr = GreaterThanOrEqual(token, expr, parse_additive())
+            elif consume('is'):
+                if consume('not'):
+                    expr = IsNot(token, expr, parse_additive())
+                else:
+                    expr = Is(token, expr, parse_additive())
             else:
                 break
         return expr
@@ -2183,7 +2247,11 @@ def parse_one_source(source, cache, stack):
         token = peek()
         if consume('-'):
             expr = parse_pow()
-            return MethodCall(token, expr, 'Not', [])
+            if isinstance(expr, (IntLiteral, DoubleLiteral)):
+                type_ = type(expr)
+                return type_(expr.token, -expr.value)
+            else:
+                return MethodCall(token, expr, 'Neg', [])
         if consume('!'):
             expr = parse_pow()
             return LogicalNot(token, expr)

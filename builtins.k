@@ -21,6 +21,9 @@ String null_mRepr(var x) {
 bool null_mBool(var x) {
   return false
 }
+bool null_mEq(var a, var b) {
+  return a is b
+}
 
 String bool_mRepr(bool b) {
   return b ? 'true' : 'false'
@@ -28,11 +31,13 @@ String bool_mRepr(bool b) {
 bool bool_mBool(bool b) {
   return b;
 }
+bool bool_mEq(bool a, bool b) {
+  return a is b;
+}
 
 int int_mAdd(int a, int b)
 int int_mSub(int a, int b)
 bool int_mEq(int a, int b)
-bool int_mNe(int a, int b)
 bool int_mLt(int a, int b)
 String int_mRepr(int a)
 bool int_mBool(int x) {
@@ -42,7 +47,6 @@ bool int_mBool(int x) {
 double double_mAdd(double a, double b)
 double double_mSub(double a, double b)
 bool double_mEq(double a, double b)
-bool double_mNe(double a, double b)
 bool double_mLt(double a, double b)
 String double_mRepr(double a)
 bool double_mBool(double x) {
@@ -67,9 +71,6 @@ bool type_mBool(type t) {
 bool type_mEq(type a, type b)
 
 trait Object() {
-  bool Ne(var other) {
-    return !(this == other)
-  }
   String Repr() {
     type t = type(this)
     return '<' + t.name + ' instance>'
@@ -85,6 +86,7 @@ extern class String {
   int GETsize()
   String Str()
   bool Eq(String other)
+  bool Lt(String other)
   bool Bool() {
     return bool(this.size)
   }

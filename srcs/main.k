@@ -36,6 +36,43 @@ void main() {
   assert('Hello world!'.size == 12)
 
   {
+    // primitive comparison
+    assert(1 < 10)
+    assert(10 > 1)
+    assert(-5 <= 0)
+    assert(0 >= 0)
+    assert(!(10 < -1))
+  }
+
+  {
+    // String comparison
+    assert('abc' == 'abc')
+    assert('abc' != 'deff')
+    assert(!('abc' == 'def'))
+    assert('abc' < 'def')
+    assert(!('abc' > 'def'))
+    assert('abc' <= 'abc')
+    assert('abc' >= 'abc')
+  }
+
+  {
+    // Mixed type comparisons
+    // NOTE: mixed type comparisons incur an overhead as
+    // a call to a generic function is made
+    var a = 10
+    assert(a == 10)
+    assert(a == 10.0)  // special case for int,double comparison
+    assert(10 == 10.0)
+    assert(10.0 == 10)
+    assert(9.5 < 10)
+    assert('hello world' != 15)
+
+    assert(17.0 == 17)
+    assert(17.0 is not 17)
+    assert(!(17.0 is 17))
+  }
+
+  {
     var i = 81
     assert(i == 81)
     assert(10 + 15 == 25)

@@ -651,6 +651,10 @@ KLC_bool KLCNString_mEq(KLCNString* a, KLCNString* b) {
   return strcmp(a->buffer, b->buffer) == 0;
 }
 
+KLC_bool KLCNString_mLt(KLCNString* a, KLCNString* b) {
+  return strcmp(a->buffer, b->buffer) < 0;
+}
+
 void KLCNputs(KLCNString* s) {
   printf("%s\n", s->buffer);
 }
