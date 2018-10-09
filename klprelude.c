@@ -25,6 +25,7 @@ typedef struct KLC_functioninfo KLC_functioninfo;
 typedef KLC_functioninfo* KLC_function;
 typedef KLC_typeinfo* KLC_type;
 typedef struct KLCNString KLCNString;
+typedef struct KLCNList KLCNList;
 
 
 struct KLC_stack_frame {
@@ -587,7 +588,7 @@ struct KLCNString {
 };
 
 void KLC_deleteString(KLC_header* robj, KLC_header** dq) {
-  KLCNString *obj = (KLCNString*) robj;
+  KLCNString* obj = (KLCNString*) robj;
   free(obj->buffer);
 }
 
@@ -653,6 +654,70 @@ KLC_bool KLCNString_mEq(KLCNString* a, KLCNString* b) {
 
 KLC_bool KLCNString_mLt(KLCNString* a, KLCNString* b) {
   return strcmp(a->buffer, b->buffer) < 0;
+}
+
+struct KLCNList {
+  KLC_header header;
+  size_t size, cap;
+  KLC_var* buffer;
+};
+
+extern KLC_typeinfo KLC_typeList;
+
+KLCNList* KLC_mklist(size_t cap) {
+  KLCNList* obj = (KLCNList*) malloc(sizeof(KLCNList));
+  KLC_init_header(&obj->header, &KLC_typeList);
+  obj->size = 0;
+  obj->cap = cap;
+  obj->buffer = cap ? (KLC_var*) malloc(sizeof(KLC_var) * cap) : NULL;
+  return obj;
+}
+
+void KLC_deleteList(KLC_header* robj, KLC_header** dq) {
+  KLCNList* list = (KLCNList*) robj;
+  size_t i;
+  for (i = 0; i < list->size; i++) {
+    KLC_partial_release_var(list->buffer[i], dq);
+  }
+  free(list->buffer);
+}
+
+void KLCNList_mpush(KLCNList* list, KLC_var v) {
+  if (list->size >= list->cap) {
+    list->cap += 4;
+    list->cap *= 2;
+    list->buffer = (KLC_var*) realloc(list->buffer, sizeof(KLC_var) * list->cap);
+  }
+  list->buffer[list->size++] = v;
+  KLC_retain_var(v);
+}
+
+KLC_var KLCNList_mGetItem(KLCNList* list, KLC_int i) {
+  if (i < 0) {
+    i += list->size;
+  }
+  if (i < 0 || ((size_t) i) >= list->size) {
+    KLC_errorf("Index out of bounds (i = %ld, size = %ld)", i, list->size);
+  }
+  KLC_retain_var(list->buffer[i]);
+  return list->buffer[i];
+}
+
+KLC_var KLCNList_mSetItem(KLCNList* list, KLC_int i, KLC_var v) {
+  if (i < 0) {
+    i += list->size;
+  }
+  if (i < 0 || ((size_t) i) >= list->size) {
+    KLC_errorf("Index out of bounds (i = %ld, size = %ld)", i, list->size);
+  }
+  list->buffer[i] = v;
+  KLC_retain_var(v);  /* once for attaching value to list */
+  KLC_retain_var(v);  /* once more for using as return value */
+  return v;
+}
+
+KLC_int KLCNList_mGETsize(KLCNList* list) {
+  return (KLC_int) list->size;
 }
 
 void KLCNputs(KLCNString* s) {

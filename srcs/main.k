@@ -92,6 +92,10 @@ void main() {
   }
 
   {
+    assert([1, 2, 3].size == 3)
+  }
+
+  {
     assert(String == String)
   }
 

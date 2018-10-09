@@ -35,6 +35,8 @@ _special_method_names = {
     'Str',
     'Repr',
     'Bool',
+    'GetItem',
+    'SetItem',
 }
 
 SYMBOLS = [
@@ -794,6 +796,23 @@ class DoubleLiteral(Expression):
         # TODO: Warn if size of 'value' is too big
         ctx.src += f'{tempvar} = {self.value};'
         return ('double', tempvar)
+
+
+class ListDisplay(Expression):
+    fields = (
+        ('expressions', List[Expression]),
+    )
+
+    def translate(self, ctx):
+        argvars = []
+        for expr in self.expressions:
+            etype, evar = expr.translate(ctx)
+            argvars.append(ctx.varify(etype, evar))
+        xvar = ctx.mktemp('List')
+        ctx.src += f'{xvar} = KLC_mklist({len(argvars)});'
+        for arg in argvars:
+            ctx.src += f'KLCNList_mpush({xvar}, {arg});'
+        return 'List', xvar
 
 
 class BinaryComparison(Expression):
@@ -2297,6 +2316,15 @@ def parse_one_source(source, cache, stack):
             expr = parse_expression()
             expect(')')
             return expr
+
+        if consume('['):
+            exprs = []
+            while not consume(']'):
+                exprs.append(parse_expression())
+                if not consume(','):
+                    expect(']')
+                    break
+            return ListDisplay(token, exprs)
 
         if consume('null'):
             return NullLiteral(token)

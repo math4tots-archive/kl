@@ -71,6 +71,9 @@ bool type_mBool(type t) {
 bool type_mEq(type a, type b)
 
 trait Object() {
+  bool Eq(var other) {
+    return this is other
+  }
   String Repr() {
     type t = type(this)
     return '<' + t.name + ' instance>'
@@ -108,3 +111,11 @@ String str(var x) {
 String repr(var x) {
   return x.Repr().(String)
 }
+
+extern class List {
+  int GETsize()
+  var GetItem(int i)
+  var SetItem(int i, var x)
+  void push(var x)
+}
+
