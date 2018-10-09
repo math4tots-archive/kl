@@ -1,4 +1,14 @@
 
+// Special functions required by the language
+bool _Is(var a, var b)
+bool _IsNot(var a, var b)
+bool _Eq(var a, var b)
+bool _Ne(var a, var b)
+bool _Lt(var a, var b)
+bool _Le(var a, var b)
+bool _Gt(var a, var b)
+bool _Ge(var a, var b)
+
 // These are explicit function names for primitive types
 // These methods must also be explicitly listed in the
 // _primitive_method_names dictionary above, and of course

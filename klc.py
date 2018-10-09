@@ -93,6 +93,17 @@ with open(os.path.join(_scriptdir, 'builtins.k')) as f:
     BUILTINS = f.read()
 
 
+class InverseSet:
+    def __init__(self, items):
+        self._items = frozenset(items)
+
+    def __contains__(self, key):
+        return key not in self._items
+
+    def __repr__(self):
+        return f'InverseSet({self._items})'
+
+
 class Source(NamedTuple):
     filename: str
     data: str
@@ -592,6 +603,12 @@ class Expression(Node):
         """
         raise NotImplementedError()
 
+    def translate_value(self, ctx):
+        etype, evar = self.translate(ctx)
+        if etype == 'void':
+            raise Error([self.token], 'void type not allowed here')
+        return etype, evar
+
 
 class TranslationContext(object):
     def __init__(self, scope):
@@ -781,6 +798,81 @@ class DoubleLiteral(Expression):
         # TODO: Warn if size of 'value' is too big
         ctx.src += f'{tempvar} = {self.value};'
         return ('double', tempvar)
+
+
+class BinaryComparison(Expression):
+    fields = (
+        ('left', Expression),
+        ('right', Expression),
+    )
+
+    def translate(self, ctx):
+        fast_op_types = type(self).fast_op_types
+        fast_op = type(self).fast_op
+        fallback_fn = type(self).fallback_fn
+
+        ltype, lvar = self.left.translate_value(ctx)
+        rtype, rvar = self.right.translate_value(ctx)
+        if ltype == rtype and ltype in fast_op_types:
+            xvar = ctx.mktemp('bool')
+            ctx.src += f'{xvar} = ({lvar}) {fast_op} ({rvar});'
+            return 'bool', xvar
+
+        # If none of the above match, use the fallback function
+        fn = ctx.scope.get(fallback_fn, [self.token])
+        argtriples = [
+            (self.left.token, ltype, lvar),
+            (self.right.token, rtype, rvar),
+        ]
+        return _translate_fcall(ctx, self.token, fn, argtriples)
+
+
+class Is(BinaryComparison):
+    fast_op_types = InverseSet({'var'})
+    fast_op = '=='
+    fallback_fn = '_Is'
+
+
+class IsNot(BinaryComparison):
+    fast_op_types = InverseSet({'var'})
+    fast_op = '!='
+    fallback_fn = '_IsNot'
+
+
+class Equals(BinaryComparison):
+    fast_op_types = frozenset(PRIMITIVE_TYPES)
+    fast_op = '=='
+    fallback_fn = '_Eq'
+
+
+class NotEquals(BinaryComparison):
+    fast_op_types = frozenset(PRIMITIVE_TYPES)
+    fast_op = '!='
+    fallback_fn = '_Ne'
+
+
+class LessThan(BinaryComparison):
+    fast_op_types = ['int', 'double']
+    fast_op = '<'
+    fallback_fn = '_Lt'
+
+
+class LessThanOrEqual(BinaryComparison):
+    fast_op_types = ['int', 'double']
+    fast_op = '<='
+    fallback_fn = '_Le'
+
+
+class GreaterThan(BinaryComparison):
+    fast_op_types = ['int', 'double']
+    fast_op = '>'
+    fallback_fn = '_Gt'
+
+
+class GreaterThanOrEqual(BinaryComparison):
+    fast_op_types = ['int', 'double']
+    fast_op = '>='
+    fallback_fn = '_Ge'
 
 
 class FunctionCall(Expression):
@@ -1325,6 +1417,11 @@ class FunctionDefinition(GlobalDefinition):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        for m in ('Eq', 'Lt'):
+            if self.name.endswith(f'_m{m}'):
+                if self.return_type != 'bool':
+                    raise Error([self.token],
+                                f'{m} methods must return bool')
         if self.name == 'main':
             if self.return_type != 'void' or len(self.params):
                 raise Error([self.token],
@@ -2041,17 +2138,17 @@ def parse_one_source(source, cache, stack):
         while True:
             token = peek()
             if consume('=='):
-                expr = MethodCall(token, expr, 'Eq', [parse_additive()])
+                expr = Equals(token, expr, parse_additive())
             elif consume('!='):
-                expr = MethodCall(token, expr, 'Ne', [parse_additive()])
+                expr = NotEquals(token, expr, parse_additive())
             elif consume('<'):
-                expr = MethodCall(token, expr, 'Lt', [parse_additive()])
+                expr = LessThan(token, expr, parse_additive())
             elif consume('<='):
-                expr = MethodCall(token, expr, 'Le', [parse_additive()])
+                expr = LessThanOrEqual(token, expr, parse_additive())
             elif consume('>'):
-                expr = MethodCall(token, expr, 'Gt', [parse_additive()])
+                expr = GreaterThan(token, expr, parse_additive())
             elif consume('>='):
-                expr = MethodCall(token, expr, 'Ge', [parse_additive()])
+                expr = GreaterThanOrEqual(token, expr, parse_additive())
             else:
                 break
         return expr

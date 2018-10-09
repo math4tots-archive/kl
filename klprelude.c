@@ -77,6 +77,7 @@ KLCNString* KLC_mkstr(const char *str);
 KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
 KLC_bool KLC_truthy(KLC_var v);
 void KLC_release(KLC_header *obj);
+KLC_bool KLC_var_to_bool(KLC_var v);
 
 size_t KLC_stacktrace_size = 0;
 KLC_stack_frame KLC_stacktrace[KLC_MAX_STACK_SIZE];
@@ -97,6 +98,19 @@ void KLC_push_frame(const char* filename, const char* function, long ln) {
 
 void KLC_pop_frame() {
   KLC_stacktrace_size--;
+}
+
+const char* KLC_tag_to_string(int tag) {
+  switch (tag) {
+    case KLC_TAG_BOOL: return "BOOL";
+    case KLC_TAG_INT: return "INT";
+    case KLC_TAG_DOUBLE: return "DOUBLE";
+    case KLC_TAG_FUNCTION: return "FUNCTION";
+    case KLC_TAG_TYPE: return "TYPE";
+    case KLC_TAG_OBJECT: return "OBJECT";
+  }
+  KLC_errorf("tag_to_string: invalid tag %d", tag);
+  return NULL;
 }
 
 void KLC_release_object_on_exit(KLC_header* obj) {
@@ -131,6 +145,7 @@ void KLC_errorf(const char* fmt, ...) {
   va_start(args, fmt);
   vfprintf(stderr, fmt, args);
   va_end(args);
+  fprintf(stderr, "\n");
   for (i = 0; i < KLC_stacktrace_size; i++) {
     KLC_stack_frame *frame = KLC_stacktrace + i;
     fprintf(
@@ -196,6 +211,106 @@ extern KLC_typeinfo KLC_typedouble;
 extern KLC_typeinfo KLC_typefunction;
 extern KLC_typeinfo KLC_typetype;
 
+KLC_bool KLCN_Is(KLC_var a, KLC_var b) {
+  if (a.tag != b.tag) {
+    return 0;
+  }
+  switch (a.tag) {
+    case KLC_TAG_BOOL:
+    case KLC_TAG_INT:
+      return a.u.i == b.u.i;
+    case KLC_TAG_DOUBLE:
+      return a.u.d == b.u.d;
+    case KLC_TAG_FUNCTION:
+      return a.u.f == b.u.f;
+    case KLC_TAG_TYPE:
+      return a.u.t == b.u.t;
+    case KLC_TAG_OBJECT:
+      return a.u.obj == b.u.obj;
+  }
+  KLC_errorf("_Is: invalid tag: %d", a.tag);
+  return 0;
+}
+
+KLC_bool KLCN_IsNot(KLC_var a, KLC_var b) {
+  return !KLCN_Is(a, b);
+}
+
+KLC_bool KLCN_Eq(KLC_var a, KLC_var b) {
+  if (a.tag == b.tag) {
+    switch (a.tag) {
+      case KLC_TAG_BOOL:
+        return !!a.u.i == !!b.u.i;
+      case KLC_TAG_INT:
+        return a.u.i == b.u.i;
+      case KLC_TAG_DOUBLE:
+        return a.u.d == b.u.d;
+      case KLC_TAG_FUNCTION:
+        return a.u.f == b.u.f;
+      case KLC_TAG_TYPE:
+        return a.u.t == b.u.t;
+      case KLC_TAG_OBJECT:
+        if (a.u.obj == b.u.obj) {
+          return 1;
+        } else if (a.u.obj && b.u.obj && a.u.obj->type == b.u.obj->type) {
+          KLC_var args[2];
+          KLC_var r;
+          KLC_bool br;
+          args[0] = a;
+          args[1] = b;
+          r = KLC_mcall("Eq", 2, args);
+          br = KLC_truthy(r);
+          KLC_release_var(r);
+          return br;
+        }
+      default:
+        KLC_errorf("_Eq: invalid tag: %d", a.tag);
+    }
+  } else if (a.tag == KLC_TAG_INT && b.tag == KLC_TAG_DOUBLE) {
+    return a.u.i == b.u.d;
+  } else if (a.tag == KLC_TAG_DOUBLE && b.tag == KLC_TAG_INT) {
+    return a.u.d == b.u.i;
+  }
+  return 0;
+}
+
+KLC_bool KLCN_Ne(KLC_var a, KLC_var b) {
+  return !KLCN_Eq(a, b);
+}
+
+KLC_bool KLCN_Lt(KLC_var a, KLC_var b) {
+  if (a.tag == b.tag) {
+    switch (a.tag) {
+      case KLC_TAG_INT:
+        return a.u.i < b.u.i;
+      case KLC_TAG_DOUBLE:
+        return a.u.d < b.u.d;
+    }
+  } else if (a.tag == KLC_TAG_INT && b.tag == KLC_TAG_DOUBLE) {
+    return a.u.i < b.u.d;
+  } else if (a.tag == KLC_TAG_DOUBLE && b.tag == KLC_TAG_INT) {
+    return a.u.d < b.u.i;
+  }
+  {
+    KLC_var args[2];
+    args[0] = a;
+    args[1] = b;
+    return KLC_var_to_bool(KLC_mcall("Lt", 2, args));
+  }
+}
+
+KLC_bool KLCN_Gt(KLC_var a, KLC_var b) {
+  return KLCN_Lt(b, a);
+}
+
+KLC_bool KLCN_Le(KLC_var a, KLC_var b) {
+  return !KLCN_Lt(b, a);
+}
+
+KLC_bool KLCN_Ge(KLC_var a, KLC_var b) {
+  return !KLCN_Lt(a, b);
+}
+
 KLC_bool KLCNbool(KLC_var v) {
   return KLC_truthy(v);
 }
@@ -215,7 +330,7 @@ KLC_type KLCNtype(KLC_var v) {
     case KLC_TAG_OBJECT:
       return v.u.obj ? v.u.obj->type : &KLC_typenull;
   }
-  KLC_errorf("Unrecognized type tag %d\n", v.tag);
+  KLC_errorf("Unrecognized type tag %d", v.tag);
   return NULL;
 }
 
@@ -264,7 +379,7 @@ KLC_var KLC_object_to_var(KLC_header* obj) {
 KLC_bool KLC_var_to_bool(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_BOOL) {
-    KLC_errorf("var_to_bool: expected bool (tag %d) but got tag %d\n",
+    KLC_errorf("var_to_bool: expected bool (tag %d) but got tag %d",
                KLC_TAG_BOOL, v.tag);
   }
   return v.u.i ? 1 : 0;
@@ -283,14 +398,14 @@ KLC_bool KLC_truthy(KLC_var v) {
     case KLC_TAG_OBJECT:
       return KLC_var_to_bool(KLC_mcall("Bool", 1, &v));
   }
-  KLC_errorf("truthy: invalid tag %d\n", v.tag);
+  KLC_errorf("truthy: invalid tag %d", v.tag);
   return 0;
 }
 
 KLC_int KLC_var_to_int(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_INT) {
-    KLC_errorf("var_to_int: expected int (tag %d) but got tag %d\n",
+    KLC_errorf("var_to_int: expected int (tag %d) but got tag %d",
                KLC_TAG_INT, v.tag);
   }
   return v.u.i;
@@ -299,7 +414,7 @@ KLC_int KLC_var_to_int(KLC_var v) {
 double KLC_var_to_double(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_DOUBLE) {
-    KLC_errorf("var_to_double: expected double (tag %d) but got tag %d\n",
+    KLC_errorf("var_to_double: expected double (tag %d) but got tag %d",
                KLC_TAG_DOUBLE, v.tag);
   }
   return v.u.d;
@@ -307,7 +422,7 @@ double KLC_var_to_double(KLC_var v) {
 
 KLC_function KLC_var_to_function(KLC_var v) {
 if (v.tag != KLC_TAG_FUNCTION) {
-  KLC_errorf("var_to_type: expected function (tag %d) but got tag %d\n",
+  KLC_errorf("var_to_type: expected function (tag %d) but got tag %d",
              KLC_TAG_FUNCTION, v.tag);
 }
 return v.u.f;
@@ -316,7 +431,7 @@ return v.u.f;
 KLC_type KLC_var_to_type(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_TYPE) {
-    KLC_errorf("var_to_type: expected type (tag %d) but got tag %d\n",
+    KLC_errorf("var_to_type: expected type (tag %d) but got tag %d",
                KLC_TAG_TYPE, v.tag);
   }
   return v.u.t;
@@ -326,10 +441,10 @@ KLC_header* KLC_var_to_object(KLC_var v, KLC_type ti) {
   /* TODO: Better error message */
   KLC_header* ret;
   if (v.tag != KLC_TAG_OBJECT) {
-    KLC_errorf("var_to_object: not an object\n");
+    KLC_errorf("var_to_object: not an object");
   }
   if (ti != KLCNtype(v)) {
-    KLC_errorf("var_to_object: not the right object type\n");
+    KLC_errorf("var_to_object: not the right object type");
   }
   return v.u.obj;
 }
@@ -339,7 +454,7 @@ KLC_var KLC_var_call(KLC_var f, int argc, KLC_var* argv) {
   KLC_var result;
 
   if (f.tag != KLC_TAG_FUNCTION) {
-    KLC_errorf("Not a function\n");
+    KLC_errorf("Not a function");
   }
 
   result = f.u.f->body(argc, argv);
@@ -542,7 +657,7 @@ void KLCNputs(KLCNString* s) {
 
 void KLCNassert(KLC_var cond) {
   if (!KLC_truthy(cond)) {
-    KLC_errorf("Assertion failed\n");
+    KLC_errorf("Assertion failed");
   }
 }
 
