@@ -470,6 +470,16 @@ class Scope(object):
         raise self._missing_name_err(name, tokens)
 
 
+@contextlib.contextmanager
+def with_frame(ctx, token):
+    src = ctx.src
+    filename = token.source.filename.replace(os.sep, '/')
+    fname = ctx.fctx.fdef.name
+    src += f'KLC_push_frame("{filename}", "{fname}", {token.lineno});'
+    yield
+    src += f'KLC_pop_frame();'
+
+
 class Node(object):
     def __init__(self, token, *args):
         self.token = token
@@ -845,13 +855,14 @@ def _translate_fcall(ctx, token, defn, argtriples):
                     f'{len(defn.params)} args expected '
                     f'but got {len(argtriples)}')
     argsstr = ', '.join(argtempvars)
-    if defn.return_type == 'void':
-        ctx.src += f'{ctx.cname(defn.name)}({argsstr});'
-        return ('void', None)
-    else:
-        tempvar = ctx.mktemp(defn.return_type)
-        ctx.src += f'{tempvar} = {ctx.cname(defn.name)}({argsstr});'
-        return (defn.return_type, tempvar)
+    with with_frame(ctx, token):
+        if defn.return_type == 'void':
+            ctx.src += f'{ctx.cname(defn.name)}({argsstr});'
+            return 'void', None
+        else:
+            tempvar = ctx.mktemp(defn.return_type)
+            ctx.src += f'{tempvar} = {ctx.cname(defn.name)}({argsstr});'
+            return defn.return_type, tempvar
 
 
 class MethodCall(Expression):
@@ -886,8 +897,12 @@ class MethodCall(Expression):
             ctx.src += f'{tarr}[0] = {ownertempvar};'
             for i, argtempvar in enumerate(argtempvars, 1):
                 ctx.src += f'{tarr}[{i}] = {argtempvar};'
-            ctx.src += f'{tv} = KLC_mcall("{self.name}", {len(self.args) + 1}, {tarr});'
-            return ('var', tv)
+            with with_frame(ctx, self.token):
+                ctx.src += (
+                    f'{tv} = KLC_mcall("{self.name}", '
+                    f'{len(self.args) + 1}, {tarr});'
+                )
+            return 'var', tv
         else:
             # Check that this method actually exists on this type
             if ownertype in PRIMITIVE_TYPES:
@@ -1002,7 +1017,6 @@ class Conditional(Expression):
         rsrc += f'{xvar} = {rvar};'
         ctx.src += _cretain(ctx, xtype, xvar)
         return (xtype, xvar)
-
 
 
 class VariableDefinition(Statement, BaseVariableDefinition):
@@ -1215,6 +1229,7 @@ class ExpressionTranslationContext(TranslationContext):
         super().__init__(parent.scope)
         self.parent = parent
         self.gctx = parent.gctx
+        self.fctx = parent.fctx
         self.tempdecls = []  # (type, cname) pairs of temporary vars
         parent.src += '{'
         self.tmp = parent.src.spawn(1)

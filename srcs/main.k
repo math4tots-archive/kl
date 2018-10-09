@@ -29,33 +29,36 @@ This is a sample global string
 """
 
 void main() {
-  assert(true, "true is true")
-  assert(!false, "false is not true")
+  assert(true)
+  assert(!false)
 
-  assert('Hello world!' == 'Hello world!', 'String equality')
-  assert('Hello world!'.size == 12, 'String size')
+  assert('Hello world!' == 'Hello world!')
+  assert('Hello world!'.size == 12)
 
   {
     var i = 81
-    assert(i == 81, 'var int equality check')
-    assert(10 + 15 == 25, 'int arithmetic (+)')
+    assert(i == 81)
+    assert(10 + 15 == 25)
   }
 
   {
     Bar bar = Bar()
-    assert(str(bar) == '<Bar instance>', 'Default str implementation')
+    assert(bar.f() == 10)
+    assert(str(bar) == '<Bar instance>')
   }
 
   {
     String s = 'original s variable'
-    assert(s == 'original s variable', 'String local variable value')
+    assert(s == 'original s variable')
     s = 'new value'
-    assert(s == 'new value', 'String local variable update value')
+    assert(s == 'new value')
   }
 
   {
-    assert(String == String, 'type equality')
+    assert(String == String)
   }
+
+  oldmain()
 }
 
 void oldmain() {

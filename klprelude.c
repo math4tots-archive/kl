@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define KLC_MAX_STACK_SIZE 1000
 #define KLC_TAG_BOOL 0
 #define KLC_TAG_INT 1
 #define KLC_TAG_DOUBLE 2
@@ -11,6 +12,7 @@
 #define KLC_TAG_TYPE 4
 #define KLC_TAG_OBJECT 5
 
+typedef struct KLC_stack_frame KLC_stack_frame;
 typedef char KLC_bool;
 typedef long KLC_int;
 typedef struct KLC_header KLC_header;
@@ -22,9 +24,14 @@ typedef KLC_var (*KLC_fp)(int, KLC_var*); /* untyped function pointer */
 typedef struct KLC_functioninfo KLC_functioninfo;
 typedef KLC_functioninfo* KLC_function;
 typedef KLC_typeinfo* KLC_type;
-
 typedef struct KLCNString KLCNString;
 
+
+struct KLC_stack_frame {
+  const char* filename;
+  const char* function;
+  long lineno;
+};
 
 struct KLC_header {
   KLC_typeinfo* type;
@@ -64,15 +71,33 @@ struct KLC_var {
   } u;
 };
 
+void KLC_errorf(const char* fmt, ...);
 KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii);
 KLCNString* KLC_mkstr(const char *str);
 KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
 KLC_bool KLC_truthy(KLC_var v);
 void KLC_release(KLC_header *obj);
 
+size_t KLC_stacktrace_size = 0;
+KLC_stack_frame KLC_stacktrace[KLC_MAX_STACK_SIZE];
+
 size_t KLC_release_on_exit_buffer_cap = 0;
 size_t KLC_release_on_exit_buffer_size = 0;
 KLC_header** KLC_release_on_exit_buffer = NULL;
+
+void KLC_push_frame(const char* filename, const char* function, long ln) {
+  KLC_stacktrace[KLC_stacktrace_size].filename = filename;
+  KLC_stacktrace[KLC_stacktrace_size].function = function;
+  KLC_stacktrace[KLC_stacktrace_size].lineno = ln;
+  KLC_stacktrace_size++;
+  if (KLC_stacktrace_size == KLC_MAX_STACK_SIZE) {
+    KLC_errorf("stackoverflow");
+  }
+}
+
+void KLC_pop_frame() {
+  KLC_stacktrace_size--;
+}
 
 void KLC_release_object_on_exit(KLC_header* obj) {
   if (KLC_release_on_exit_buffer_size >= KLC_release_on_exit_buffer_cap) {
@@ -101,10 +126,20 @@ void KLC_release_queued_before_exit() {
 }
 
 void KLC_errorf(const char* fmt, ...) {
+  size_t i;
   va_list args;
   va_start(args, fmt);
   vfprintf(stderr, fmt, args);
   va_end(args);
+  for (i = 0; i < KLC_stacktrace_size; i++) {
+    KLC_stack_frame *frame = KLC_stacktrace + i;
+    fprintf(
+      stderr,
+      "  %s %s line %lu\n",
+      frame->function,
+      frame->filename,
+      frame->lineno);
+  }
   exit(1);
 }
 
@@ -505,9 +540,9 @@ void KLCNputs(KLCNString* s) {
   printf("%s\n", s->buffer);
 }
 
-void KLCNassert(KLC_var cond, KLCNString* message) {
+void KLCNassert(KLC_var cond) {
   if (!KLC_truthy(cond)) {
-    KLC_errorf("Assertion failed: %s\n", message->buffer);
+    KLC_errorf("Assertion failed\n");
   }
 }
 

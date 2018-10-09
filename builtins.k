@@ -83,7 +83,7 @@ extern class String {
 bool bool(var x)
 type type(var x)
 void puts(String s)
-void assert(var x, String message)
+void assert(var x)
 
 void print(var x) {
   puts(str(x))
