@@ -99,6 +99,19 @@ void main() {
     assert(String == String)
   }
 
+  {
+    StringBuilder sb = StringBuilder()
+    assert(sb.build() == '')
+    sb.add('hello world!')
+    assert(sb.build() == 'hello world!')
+    sb.add('part1 ')
+    sb.add('part2')
+    assert(sb.build() == 'part1 part2')
+    sb.add('hello ')
+    sb.add(15)
+    assert(sb.build() == 'hello 15')
+  }
+
   oldmain()
 }
 

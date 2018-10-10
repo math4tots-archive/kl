@@ -95,6 +95,18 @@ extern class String {
   }
 }
 
+extern class StringBuilder {
+  new()
+  void addstr(String s)
+
+  // NOTE: The 'build' method empties out the StringBuilder
+  String build()
+
+  void add(var x) {
+    this.addstr(str(x))
+  }
+}
+
 bool bool(var x)
 type type(var x)
 void puts(String s)

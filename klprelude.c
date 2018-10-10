@@ -25,6 +25,7 @@ typedef struct KLC_functioninfo KLC_functioninfo;
 typedef KLC_functioninfo* KLC_function;
 typedef KLC_typeinfo* KLC_type;
 typedef struct KLCNString KLCNString;
+typedef struct KLCNStringBuilder KLCNStringBuilder;
 typedef struct KLCNList KLCNList;
 
 
@@ -654,6 +655,51 @@ KLC_bool KLCNString_mEq(KLCNString* a, KLCNString* b) {
 
 KLC_bool KLCNString_mLt(KLCNString* a, KLCNString* b) {
   return strcmp(a->buffer, b->buffer) < 0;
+}
+
+struct KLCNStringBuilder {
+  KLC_header header;
+  size_t size, cap;
+  char* buffer;
+};
+
+extern KLC_typeinfo KLC_typeStringBuilder;
+
+KLCNStringBuilder* KLCNStringBuilder_new() {
+  KLCNStringBuilder* obj = (KLCNStringBuilder*) malloc(sizeof(KLCNStringBuilder));
+  KLC_init_header(&obj->header, &KLC_typeStringBuilder);
+  obj->size = obj->cap = 0;
+  obj->buffer = NULL;
+  return obj;
+}
+
+void KLC_deleteStringBuilder(KLC_header* robj, KLC_header** dq) {
+  KLCNStringBuilder* obj = (KLCNStringBuilder*) robj;
+  free(obj->buffer);
+}
+
+void KLCNStringBuilder_maddstr(KLCNStringBuilder* sb, KLCNString* s) {
+  if (s->bytesize) {
+    if (sb->size + s->bytesize + 1 > sb->cap) {
+      sb->cap += s->bytesize + 16;
+      sb->cap *= 2;
+      sb->buffer = (char*) realloc(sb->buffer, sizeof(char) * sb->cap);
+    }
+    strcpy(sb->buffer + sb->size, s->buffer);
+    sb->size += s->bytesize;
+  }
+}
+
+KLCNString* KLCNStringBuilder_mbuild(KLCNStringBuilder* sb) {
+  if (sb->size) {
+    size_t bytesize = sb->size;
+    char* buffer = (char*) realloc(sb->buffer, sizeof(char) * (sb->size + 1));
+    sb->size = sb->cap = 0;
+    sb->buffer = NULL;
+    return KLC_mkstr_with_buffer(bytesize, buffer, KLC_check_ascii(buffer));
+  } else {
+    return KLC_mkstr("");
+  }
 }
 
 struct KLCNList {

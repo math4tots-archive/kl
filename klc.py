@@ -980,23 +980,32 @@ class FunctionCall(Expression):
             return 'var', tempvar
 
         if isinstance(defn, ClassDefinition):
-            if defn.extern:
-                raise Error(
-                    [self.token],
-                    f"You can't call new on an extern class")
+            argtriples = []
+            for arg in self.args:
+                argtype, argtempvar = arg.translate(ctx)
+                argtriples.append((arg.token, argtype, argtempvar))
             malloc_name = f'KLC_malloc{defn.name}'
             fname = f'{defn.name}_new'
             fdefn = ctx.scope.get(fname, [self.token])
             if not isinstance(fdefn, FunctionDefinition):
                 raise Error([self.token], f'FUBAR: shadowed function name')
-            this_tempvar = ctx.mktemp(defn.name)
-            ctx.src += f'{this_tempvar} = {malloc_name}();'
-            argtriples = [(self.token, defn.name, this_tempvar)]
-            for arg in self.args:
-                argtype, argtempvar = arg.translate(ctx)
-                argtriples.append((arg.token, argtype, argtempvar))
-            _translate_fcall(ctx, self.token, fdefn, argtriples)
-            return defn.name, this_tempvar
+
+            if defn.extern:
+                # For extern types, constructing the type is
+                # identical to a single function call
+                return _translate_fcall(ctx, self.token, fdefn, argtriples)
+            else:
+                # For normal types, we want to malloc first, and then
+                # call the initializer
+                # TODO: Simplify normal types so that these are also
+                # just a single function call like extern types.
+                this_tempvar = ctx.mktemp(defn.name)
+                ctx.src += f'{this_tempvar} = {malloc_name}();'
+                argtriples = [
+                    (self.token, defn.name, this_tempvar)
+                ] + argtriples
+                _translate_fcall(ctx, self.token, fdefn, argtriples)
+                return defn.name, this_tempvar
 
         raise Error([self.token, defn.token],
                     f'{self.function} is not a function')
@@ -2005,10 +2014,6 @@ def parse_one_source(source, cache, stack):
         consume_delim()
         while not consume('}'):
             if at('new'):
-                if extern:
-                    raise Error(
-                        [peek()],
-                        f'extern classes cannot define constructors')
                 if newdef is not None:
                     raise Error(
                         [newdef.token, peek()],
@@ -2016,9 +2021,24 @@ def parse_one_source(source, cache, stack):
                         'a class')
                 fname = f'{name}_new'
                 mtoken = expect('new')
-                params = [Parameter(mtoken, name, 'this')] + parse_params()
-                body = parse_block()
-                newdef = FunctionDefinition(mtoken, 'void', fname, params, body)
+                declparams = parse_params()
+                if extern:
+                    # For extern types, the 'new' function should return
+                    # the constructed object. Further, the new function
+                    # itself must be extern
+                    rt = name
+                    body = None
+                    expect_delim()
+                    params = declparams
+                else:
+                    # For normal types, the 'new' function initializes
+                    # an already allocated object.
+                    # TODO: Make 'new' return the actual object
+                    # like extern types.
+                    rt = 'void'
+                    body = parse_block()
+                    params = [Parameter(mtoken, name, 'this')] + declparams
+                newdef = FunctionDefinition(mtoken, rt, fname, params, body)
                 defs.append(newdef)
             elif at('NAME') and at('NAME', 1) and at_delim(2):
                 if extern:
