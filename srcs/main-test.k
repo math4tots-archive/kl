@@ -232,4 +232,6 @@ void main() {
     assert(!wr)
     assert(wr.getNullable() is null)
   }
+
+  print('Hello world!')
 }

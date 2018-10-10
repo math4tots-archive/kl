@@ -28,6 +28,7 @@ typedef struct KLCNWeakReference KLCNWeakReference;
 typedef struct KLCNString KLCNString;
 typedef struct KLCNStringBuilder KLCNStringBuilder;
 typedef struct KLCNList KLCNList;
+typedef struct KLCNFile KLCNFile;
 
 
 struct KLC_stack_frame {
@@ -87,6 +88,7 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
 KLC_bool KLC_truthy(KLC_var v);
 void KLC_release(KLC_header *obj);
 KLC_bool KLC_var_to_bool(KLC_var v);
+void KLCNFile_mclose(KLCNFile* file);
 
 size_t KLC_stacktrace_size = 0;
 KLC_stack_frame KLC_stacktrace[KLC_MAX_STACK_SIZE];
@@ -819,8 +821,74 @@ KLC_int KLCNList_mGETsize(KLCNList* list) {
   return (KLC_int) list->size;
 }
 
-void KLCNputs(KLCNString* s) {
-  printf("%s\n", s->buffer);
+struct KLCNFile {
+  KLC_header header;
+  FILE* cfile;
+  char* name;
+  char mode[4];
+  KLC_bool should_close;
+};
+
+extern KLC_typeinfo KLC_typeFile;
+
+KLC_bool KLC_is_valid_file_mode(const char* mode) {
+  /* For now restrict file modes to just r, w, and a */
+  char c = mode[0];
+  return (c == 'r' || c == 'w' || c == 'a') && mode[1] == '\0';
+}
+
+KLCNFile* KLC_mkfile(FILE* cfile,
+                     const char* name,
+                     const char* mode,
+                     KLC_bool should_close) {
+  KLCNFile* file;
+  if (!KLC_is_valid_file_mode(mode)) {
+    KLC_errorf("Invalid file mode: %s", mode);
+  }
+  file = (KLCNFile*) malloc(sizeof(KLCNFile));
+  KLC_init_header(&file->header, &KLC_typeFile);
+  file->cfile = cfile;
+  file->name = (char*) malloc(sizeof(char) * (strlen(name) + 1));
+  strcpy(file->name, name);
+  /* KLC_is_valid_file_mode should verify that mode fits into file->mode */
+  strcpy(file->mode, mode);
+  file->should_close = should_close;
+  return file;
+}
+
+void KLC_deleteFile(KLC_header* robj, KLC_header** dq) {
+  KLCNFile* file = (KLCNFile*) robj;
+  free(file->name);
+  KLCNFile_mclose(file);
+}
+
+void KLCNFile_mclose(KLCNFile* file) {
+  if (file->cfile && file->should_close) {
+    fclose(file->cfile);
+    file->cfile = NULL;
+  }
+}
+
+void KLCNFile_mwrite(KLCNFile* file, KLCNString* s) {
+  if (!file->cfile) {
+    KLC_errorf("Trying to write to closed file");
+  }
+  if (file->mode[0] != 'w' && file->mode[0] != 'a') {
+    KLC_errorf("Trying to write to file that's not in write mode");
+  }
+  fwrite(s->buffer, 1, s->bytesize, file->cfile);
+}
+
+KLCNFile* KLCN_initstdin() {
+  return KLC_mkfile(stdin, ":stdin", "r", 0);
+}
+
+KLCNFile* KLCN_initstdout() {
+  return KLC_mkfile(stdout, ":stdout", "w", 0);
+}
+
+KLCNFile* KLCN_initstderr() {
+  return KLC_mkfile(stderr, ":stderr", "w", 0);
 }
 
 void KLCNassert(KLC_var cond) {

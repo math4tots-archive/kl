@@ -124,14 +124,26 @@ extern class StringBuilder {
   }
 }
 
+extern class File {
+  void close()
+  void write(String s)
+  void print(var x) {
+    this.write(str(x))
+    this.write('\n')
+  }
+}
+
+extern File stdin
+extern File stdout
+extern File stderr
+
 void panic(String message)
 bool bool(var x)
 type type(var x)
-void puts(String s)
 void assert(var x)
 
 void print(var x) {
-  puts(str(x))
+  stdout.print(x)
 }
 
 String str(var x) {
