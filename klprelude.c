@@ -24,6 +24,7 @@ typedef KLC_var (*KLC_fp)(int, KLC_var*); /* untyped function pointer */
 typedef struct KLC_functioninfo KLC_functioninfo;
 typedef KLC_functioninfo* KLC_function;
 typedef KLC_typeinfo* KLC_type;
+typedef struct KLCNWeakReference KLCNWeakReference;
 typedef struct KLCNString KLCNString;
 typedef struct KLCNStringBuilder KLCNStringBuilder;
 typedef struct KLCNList KLCNList;
@@ -39,6 +40,7 @@ struct KLC_header {
   KLC_typeinfo* type;
   size_t refcnt;
   KLC_header* next;
+  KLCNWeakReference* weakref;
 };
 
 struct KLC_methodinfo {
@@ -71,6 +73,11 @@ struct KLC_var {
     KLC_function f;
     KLC_type t;
   } u;
+};
+
+struct KLCNWeakReference {
+  KLC_header header;
+  KLC_header* obj;
 };
 
 void KLC_errorf(const char* fmt, ...);
@@ -177,6 +184,10 @@ void KLC_partial_release(KLC_header* obj, KLC_header** delete_queue) {
     if (obj->refcnt) {
       obj->refcnt--;
     } else {
+      if (obj->weakref) {
+        obj->weakref->obj = NULL;
+        obj->weakref = NULL;
+      }
       obj->next = *delete_queue;
       *delete_queue = obj;
     }
@@ -381,8 +392,8 @@ KLC_var KLC_object_to_var(KLC_header* obj) {
 KLC_bool KLC_var_to_bool(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_BOOL) {
-    KLC_errorf("var_to_bool: expected bool (tag %d) but got tag %d",
-               KLC_TAG_BOOL, v.tag);
+    KLC_errorf("var_to_bool: expected BOOL but got %s",
+               KLC_tag_to_string(v.tag));
   }
   return v.u.i ? 1 : 0;
 }
@@ -407,8 +418,8 @@ KLC_bool KLC_truthy(KLC_var v) {
 KLC_int KLC_var_to_int(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_INT) {
-    KLC_errorf("var_to_int: expected int (tag %d) but got tag %d",
-               KLC_TAG_INT, v.tag);
+    KLC_errorf("var_to_int: expected INT but got %s",
+               KLC_tag_to_string(v.tag));
   }
   return v.u.i;
 }
@@ -416,25 +427,25 @@ KLC_int KLC_var_to_int(KLC_var v) {
 double KLC_var_to_double(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_DOUBLE) {
-    KLC_errorf("var_to_double: expected double (tag %d) but got tag %d",
-               KLC_TAG_DOUBLE, v.tag);
+    KLC_errorf("var_to_double: expected DOBULE but got %s",
+               KLC_tag_to_string(v.tag));
   }
   return v.u.d;
 }
 
 KLC_function KLC_var_to_function(KLC_var v) {
-if (v.tag != KLC_TAG_FUNCTION) {
-  KLC_errorf("var_to_type: expected function (tag %d) but got tag %d",
-             KLC_TAG_FUNCTION, v.tag);
-}
-return v.u.f;
+  if (v.tag != KLC_TAG_FUNCTION) {
+    KLC_errorf("var_to_type: expected FUNCTION but got %s",
+               KLC_tag_to_string(v.tag));
+  }
+  return v.u.f;
 }
 
 KLC_type KLC_var_to_type(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_TYPE) {
-    KLC_errorf("var_to_type: expected type (tag %d) but got tag %d",
-               KLC_TAG_TYPE, v.tag);
+    KLC_errorf("var_to_type: expected TYPE but got %s",
+               KLC_tag_to_string(v.tag));
   }
   return v.u.t;
 }
@@ -446,7 +457,11 @@ KLC_header* KLC_var_to_object(KLC_var v, KLC_type ti) {
     KLC_errorf("var_to_object: not an object");
   }
   if (ti != KLCNtype(v)) {
-    KLC_errorf("var_to_object: not the right object type");
+    KLC_type actual_type = KLCNtype(v);
+    KLC_errorf(
+      "var_to_object: expected type %s but got type %s",
+      ti->name,
+      actual_type->name);
   }
   return v.u.obj;
 }
@@ -572,6 +587,38 @@ void KLC_init_header(KLC_header* header, KLC_type type) {
   header->type = type;
   header->refcnt = 0;
   header->next = NULL;
+  header->weakref = NULL;
+}
+
+extern KLC_typeinfo KLC_typeWeakReference;
+
+void KLC_deleteWeakReference(KLC_header* robj, KLC_header** dq) {
+  KLCNWeakReference* wr = (KLCNWeakReference*) robj;
+  if (wr->obj) {
+    wr->obj->weakref = NULL;
+    wr->obj = NULL;
+  }
+}
+
+KLCNWeakReference* KLCNWeakReference_new(KLC_var v) {
+  KLCNWeakReference* wr = (KLCNWeakReference*) malloc(sizeof(KLCNWeakReference));
+  KLC_init_header(&wr->header, &KLC_typeWeakReference);
+  if (v.tag != KLC_TAG_OBJECT) {
+    KLC_errorf(
+      "WeakReference requires an OBJECT value but got %s",
+      KLC_tag_to_string(v.tag));
+  }
+  /* Don't retain v. The whole point is for this reference to be weak */
+  wr->obj = v.u.obj;
+  if (wr->obj) {
+    wr->obj->weakref = wr;
+  }
+  return wr;
+}
+
+KLC_var KLCNWeakReference_mgetNullable(KLCNWeakReference* wr) {
+  KLC_retain(wr->obj); /* retain to use as return */
+  return KLC_object_to_var(wr->obj);
 }
 
 struct KLCNString {
@@ -655,6 +702,10 @@ KLC_bool KLCNString_mEq(KLCNString* a, KLCNString* b) {
 
 KLC_bool KLCNString_mLt(KLCNString* a, KLCNString* b) {
   return strcmp(a->buffer, b->buffer) < 0;
+}
+
+void KLCNpanic(KLCNString* message) {
+  KLC_errorf("%s", message->buffer);
 }
 
 struct KLCNStringBuilder {

@@ -48,10 +48,10 @@ SYMBOLS = [
 ]
 
 KEYWORDS = {
-    'is', 'not', 'null', 'true', 'false', 'new',
+    'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or',
     'extern',
     'class', 'trait',
-    'if', 'else', 'while', 'break', 'continue', 'return',
+    'for', 'if', 'else', 'while', 'break', 'continue', 'return',
 }
 
 PRIMITIVE_TYPES = {
@@ -709,9 +709,9 @@ class SetName(Expression):
                 if defn.type == 'var':
                     evar = ctx.varify(etype, evar)
                 else:
-                    raise Error([param.token, argtok],
+                    raise Error([self.token, defn.token],
                                 f'Tried to set {self.name} of type '
-                                f'to {etype}')
+                                f'{defn.type} to {etype}')
             ctx.src += f'{ctx.cname(self.name)} = {evar};'
             return (etype, tempvar)
         else:
@@ -725,6 +725,15 @@ class Cast(Expression):
         ('type', str),
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if isinstance(self.expression, NullLiteral):
+            raise Error(
+                [self.token],
+                'Type assertions on null values will almost always fail '
+                '(try a typed null instead, '
+                'e.g. null(String) without the period)')
+
     def translate(self, ctx):
         etype, etempvar = self.expression.translate(ctx)
         if etype != 'var':
@@ -733,18 +742,29 @@ class Cast(Expression):
                 f'Only var types can be cast '
                 f'into other types but got {etype}')
         tempvar = ctx.mktemp(self.type)
-        ctx.src += f'{tempvar} = {ctx.unvarify(self.type, etempvar)};'
+        with with_frame(ctx, self.token):
+            ctx.src += f'{tempvar} = {ctx.unvarify(self.type, etempvar)};'
         ctx.src += _cretain(ctx, self.type, tempvar)
         return (self.type, tempvar)
 
 
 class NullLiteral(Expression):
-    fields = ()
+    fields = (
+        ('type', str),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.type in ('void', 'bool', 'int', 'double'):
+            raise Error([self.token], f'{self.type} is not nullable')
 
     def translate(self, ctx):
-        tempvar = ctx.mktemp('var')
-        ctx.src += f'{tempvar} = KLC_null;'
-        return ('var', tempvar)
+        tempvar = ctx.mktemp(self.type)
+        if self.type == 'var':
+            ctx.src += f'{tempvar} = KLC_null;'
+        else:
+            ctx.src += f'{tempvar} = NULL;'
+        return self.type, tempvar
 
 
 class BoolLiteral(Expression):
@@ -2357,7 +2377,11 @@ def parse_one_source(source, cache, stack):
             return ListDisplay(token, exprs)
 
         if consume('null'):
-            return NullLiteral(token)
+            type_ = 'var'
+            if consume('('):
+                type_ = expect('NAME').value
+                expect(')')
+            return NullLiteral(token, type_)
 
         if consume('true'):
             return BoolLiteral(token, True)

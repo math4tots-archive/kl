@@ -209,4 +209,15 @@ void main() {
   {
     assert(sample_global_string == '\nThis is a sample global string\n')
   }
+
+  {
+    // Weak reference test
+    Bar b = Bar()
+    WeakReference wr = WeakReference(b)
+    assert(wr)
+    assert(wr.get() is b)
+    b = null(Bar)
+    assert(!wr)
+    assert(wr.getNullable() is null)
+  }
 }

@@ -83,6 +83,23 @@ trait Object() {
   }
 }
 
+extern class WeakReference {
+  new(var obj)
+  var getNullable()
+
+  bool Bool() {
+    return this.getNullable() is not null
+  }
+
+  var get() {
+    var obj = this.getNullable()
+    if (obj is null) {
+      panic("Get null weak reference")
+    }
+    return obj
+  }
+}
+
 extern class String {
   int bytesize()
   String Add(String b)
@@ -107,6 +124,7 @@ extern class StringBuilder {
   }
 }
 
+void panic(String message)
 bool bool(var x)
 type type(var x)
 void puts(String s)
