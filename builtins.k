@@ -129,5 +129,21 @@ extern class List {
   var GetItem(int i)
   var SetItem(int i, var x)
   void push(var x)
+
+  String Repr() {
+    StringBuilder sb = StringBuilder()
+    sb.addstr('[')
+    int size = this.size
+    int i = 0
+    while (i < size) {
+      if (i != 0) {
+        sb.addstr(', ')
+      }
+      sb.addstr(repr(this[i]))
+      i = i + 1
+    }
+    sb.addstr(']')
+    return sb.build()
+  }
 }
 

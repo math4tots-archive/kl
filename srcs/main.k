@@ -112,6 +112,12 @@ void main() {
     assert(sb.build() == 'hello 15')
   }
 
+  {
+    assert(str([1, 2, 3, 4, 5]) == '[1, 2, 3, 4, 5]')
+    assert(str([]) == '[]')
+    assert(str([17]) == '[17]')
+  }
+
   oldmain()
 }
 

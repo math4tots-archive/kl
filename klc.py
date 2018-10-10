@@ -2326,6 +2326,14 @@ def parse_one_source(source, cache, stack):
                     else:
                         expr = MethodCall(token, expr, f'GET{name}', [])
                         continue
+            elif at('['):
+                args = parse_args('[', ']')
+                if consume('='):
+                    args.append(parse_expression())
+                    expr = MethodCall(token, expr, 'SetItem', args)
+                else:
+                    expr = MethodCall(token, expr, 'GetItem', args)
+                continue
             break
         return expr
 
@@ -2387,13 +2395,13 @@ def parse_one_source(source, cache, stack):
         expect_delim()
         return VariableDefinition(token, vartype, name, value)
 
-    def parse_args():
+    def parse_args(opener='(', closer=')'):
         args = []
-        expect('(')
-        while not consume(')'):
+        expect(opener)
+        while not consume(closer):
             args.append(parse_expression())
             if not consume(','):
-                expect(')')
+                expect(closer)
                 break
         return args
 
