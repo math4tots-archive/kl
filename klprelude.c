@@ -275,6 +275,8 @@ KLC_bool KLCN_Eq(KLC_var a, KLC_var b) {
           br = KLC_truthy(r);
           KLC_release_var(r);
           return br;
+        } else {
+          return 0;
         }
       default:
         KLC_errorf("_Eq: invalid tag: %d", a.tag);

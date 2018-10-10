@@ -131,6 +131,18 @@ void main() {
     assert(17.0 == 17)
     assert(17.0 is not 17)
     assert(!(17.0 is 17))
+
+    // Equality test with null
+    assert('' != null)
+    String s1 = ''
+    String s2
+    assert(s1 != s2)
+    assert(null == null)
+    assert(null(String) == null(Bar))
+    assert(null(Bar) == s2)
+    assert(s2 == null(Bar))
+    assert(s1 != null(Bar))
+    assert(null(String) != s1)
   }
 
   {

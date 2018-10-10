@@ -83,6 +83,8 @@ _primitive_method_names = {
     ],
 }
 
+def nullable(type_):
+    return type_ not in ('void', 'bool', 'int', 'double')
 
 with open(os.path.join(_scriptdir, 'klprelude.c')) as f:
     CPRELUDE = f.read()
@@ -755,7 +757,7 @@ class NullLiteral(Expression):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if self.type in ('void', 'bool', 'int', 'double'):
+        if not nullable(self.type):
             raise Error([self.token], f'{self.type} is not nullable')
 
     def translate(self, ctx):
@@ -848,6 +850,10 @@ class BinaryComparison(Expression):
     method_types = set()
     fallback_method = None
 
+    # The operator to use to compare the two values if
+    # the either of the expressions are null
+    op_for_null = None
+
     # Customizations for when using a fallback method.
     reverse_method_args = False
     invert_method_result = False
@@ -857,6 +863,7 @@ class BinaryComparison(Expression):
         fast_op = type(self).fast_op
         fallback_method = type(self).fallback_method
         fallback_fn = type(self).fallback_fn
+        op_for_null = type(self).op_for_null
         reverse_method_args = type(self).reverse_method_args
         invert_method_result = type(self).invert_method_result
 
@@ -892,12 +899,36 @@ class BinaryComparison(Expression):
                     (self.left.token, ltype, lvar),
                     (self.right.token, rtype, rvar),
                 ]
+
+                # null check, but we only care about this if:
+                #  1. we're comparing nullable types, and
+                #  2. the operator supports some kind of alternate
+                #     behavior on null. In our case, in case of null
+                #     we substitute with the 'op_for_null' operator
+                #     if set.
+                #  *** We also cheat a little bit here.
+                #      Since we know that the only operators that specify
+                #      op_for_null are Equals and NotEquals, we can
+                #      also skip doing the full method call if
+                #      left and right are pointer equal.
+                if nullable(ltype) and op_for_null:
+                    xvar0 = ctx.mktemp('bool')
+                    ctx.src += f'if ({lvar} && {rvar} && {lvar} != {rvar}) ''{'
+
                 xtype, xvar = _translate_mcall(
                     ctx, self.token, fallback_method, argtriples)
                 assert xtype == 'bool', xtype
                 if invert_method_result:
                     ctx.src += f'{xvar} = !{xvar};'
-                return xtype, xvar
+
+                if nullable(ltype) and op_for_null:
+                    ctx.src += f'{xvar0} = {xvar};'
+                    ctx.src += '} else {'
+                    ctx.src += f'{xvar0} = {lvar} {op_for_null} {rvar};'
+                    ctx.src += '}'
+                    return 'bool', xvar0
+                else:
+                    return 'bool', xvar
 
         # If none of the above match, use the fallback function
         fn = ctx.scope.get(fallback_fn, [self.token])
@@ -923,6 +954,7 @@ class IsNot(BinaryComparison):
 class Equals(BinaryComparison):
     fast_op_types = frozenset(PRIMITIVE_TYPES)
     fast_op = '=='
+    op_for_null = '=='
     fallback_method = 'Eq'
     fallback_fn = '_Eq'
 
@@ -930,6 +962,7 @@ class Equals(BinaryComparison):
 class NotEquals(BinaryComparison):
     fast_op_types = frozenset(PRIMITIVE_TYPES)
     fast_op = '!='
+    op_for_null = '!='
     fallback_method = 'Eq'
     invert_method_result = True
     fallback_fn = '_Ne'
