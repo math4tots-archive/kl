@@ -234,4 +234,6 @@ void main() {
   }
 
   print('Hello world!')
+  print(File('main.c', 'r').read())
+  print('After reading main.c')
 }

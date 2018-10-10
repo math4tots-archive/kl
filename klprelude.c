@@ -862,6 +862,18 @@ void KLC_deleteFile(KLC_header* robj, KLC_header** dq) {
   KLCNFile_mclose(file);
 }
 
+KLCNFile* KLCNFile_new(KLCNString* path, KLCNString* mode) {
+  FILE* cfile;
+  if (!KLC_is_valid_file_mode(mode->buffer)) {
+    KLC_errorf("Invalid file mode: %s", mode->buffer);
+  }
+  cfile = fopen(path->buffer, mode->buffer);
+  if (!cfile) {
+    KLC_errorf("Failed to open file at %s", path->buffer);
+  }
+  return KLC_mkfile(cfile, path->buffer, mode->buffer, 1);
+}
+
 void KLCNFile_mclose(KLCNFile* file) {
   if (file->cfile && file->should_close) {
     fclose(file->cfile);
@@ -874,9 +886,44 @@ void KLCNFile_mwrite(KLCNFile* file, KLCNString* s) {
     KLC_errorf("Trying to write to closed file");
   }
   if (file->mode[0] != 'w' && file->mode[0] != 'a') {
-    KLC_errorf("Trying to write to file that's not in write mode");
+    KLC_errorf(
+        "Trying to write to file that's not in write/append mode (%s)",
+        file->name);
   }
   fwrite(s->buffer, 1, s->bytesize, file->cfile);
+}
+
+KLCNString* KLCNFile_mread(KLCNFile* file) {
+  size_t cap, i, read_size, last;
+  char* buffer;
+
+  if (!file->cfile) {
+    KLC_errorf("Trying to read from closed file");
+  }
+  if (file->mode[0] != 'r') {
+    KLC_errorf(
+        "Trying to read from file that's not in read mode (%s)",
+        file->name);
+  }
+
+  read_size = cap = 1024;
+  i = 0;
+  buffer = (char*) malloc(sizeof(char) * cap);
+  while ((last = fread(buffer + i, 1, read_size, file->cfile)) == read_size) {
+    i += last;
+    cap *= 2;
+    read_size = cap - i;
+    buffer = (char*) realloc(buffer, sizeof(char) * cap);
+  }
+  i += last;
+
+  if (ferror(file->cfile) != 0) {
+    KLC_errorf("Error while reading file %s", file->name);
+  }
+
+  buffer = (char*) realloc(buffer, sizeof(char) * (i + 1));
+  buffer[i] = '\0';
+  return KLC_mkstr_with_buffer(i, buffer, KLC_check_ascii(buffer));
 }
 
 KLCNFile* KLCN_initstdin() {

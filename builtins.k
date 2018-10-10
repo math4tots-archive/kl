@@ -125,8 +125,10 @@ extern class StringBuilder {
 }
 
 extern class File {
+  new(String path, String mode)
   void close()
   void write(String s)
+  String read()
   void print(var x) {
     this.write(str(x))
     this.write('\n')
