@@ -532,8 +532,10 @@ def _cretain(ctx, type_, cname):
 
 
 def _ctruthy(ctx, type_, cname):
-    if type_ in ('bool', 'int', 'double'):
+    if type_ == 'bool':
         return cname
+    elif type_ in ('int', 'double'):
+        return f'({cname} != 0)'
     elif type_ in ('function', 'type'):
         return '1'
     elif type_ == 'null':
@@ -1785,9 +1787,9 @@ class ClassDefinition(TypeDefinition):
             # We have to retain 'v' twice:
             #  once for returning this value, and
             #  once more for attaching it to a field of this object.
-            sp += _cretain(ctx, ctype, 'v')
-            sp += _cretain(ctx, ctype, 'v')
-            sp += _crelease(ctx, ctype, f'({field_ref})')
+            sp += _cretain(ctx, field.type, 'v')
+            sp += _cretain(ctx, field.type, 'v')
+            sp += _crelease(ctx, field.type, f'({field_ref})')
             sp += f'{field_ref} = v;'
             sp += 'return v;'
 

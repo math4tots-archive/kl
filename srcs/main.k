@@ -11,8 +11,10 @@ class Bar {
 }
 
 class Baz {
+  int a
+
   new(int a) {
-    print('Baz.a')
+    this.a = a
   }
 }
 
@@ -29,11 +31,70 @@ This is a sample global string
 """
 
 void main() {
-  assert(true)
-  assert(!false)
+  {
+    assert(true)
+    assert(!false)
+    assert(!0 is true)
+    assert((true || false) is true)
+    assert((false || false) is false)
+    assert((true && false) is false)
+    assert((false && false) is false)
+    assert((true && true) is true)
 
-  assert('Hello world!' == 'Hello world!')
-  assert('Hello world!'.size == 12)
+    assert((1 || 2) is true)
+    assert((1 && 2) is true)
+    assert((0 && 1) is false)
+    assert((0 || 1) is true)
+    assert((0.0 || 0) is false)
+    assert(('' && '') is false)
+    assert(('a' || '') is true)
+    assert((0 ? 3 : 4) is 4)
+    assert((true ? 3 : 4) is 3)
+    assert(str(null) == 'null')
+  }
+
+  {
+    // Arithmetic and function calls
+    var i = 81
+    assert(i == 81)
+    assert(10 + 15 == 25)
+    assert(ff() == 184)
+
+    assert(15 + 17 == 32)
+    assert(i + 5 == 86)
+    assert(81 + 5 == 86)
+    assert(i - 5 == 76)
+    assert(81 == 81)
+    assert(_f() == 'result of _f')
+  }
+
+  {
+    assert('Hello world!' == 'Hello world!')
+    assert('Hello world!'.size == 12)
+
+    String s = 'Hello world!'
+    assert(s == 'Hello world!')
+    assert('Hello world!' == s)
+    assert(s.size == 12)
+
+    var v = 'Hello world!'
+    assert(v == 'Hello world!')
+    assert('Hello world!' == v)
+    assert(v.size == 12)
+
+    String vs = v.(String)
+    assert(vs == s)
+    assert(vs == v)
+    assert('vs = ' + vs == 'vs = Hello world!')
+
+    v = '"result-of-new-v"'
+    assert(str(v) == v)
+    assert(v == '"result-of-new-v"')
+
+    s = 'new s value'
+    assert(s != 'Hello world!')
+    assert(s == 'new s value')
+  }
 
   {
     // primitive comparison
@@ -73,15 +134,22 @@ void main() {
   }
 
   {
-    var i = 81
-    assert(i == 81)
-    assert(10 + 15 == 25)
-  }
-
-  {
     Bar bar = Bar()
+    assert(bar.s is null)
+    assert(bar.s == null)
+    bar.s = 'bar.s content'
+    assert(bar.s == 'bar.s content')
     assert(bar.f() == 10)
     assert(str(bar) == '<Bar instance>')
+
+    Baz baz = Baz(15)
+    assert(str(baz) == '<Baz instance>')
+    assert(baz.a == 15)
+
+    bar.d = 10.
+    assert(bar.d is 10.0)
+    assert(bar.d == 10)
+    assert(bar.d is not 10)
   }
 
   {
@@ -116,83 +184,29 @@ void main() {
     assert(str([1, 2, 3, 4, 5]) == '[1, 2, 3, 4, 5]')
     assert(str([]) == '[]')
     assert(str([17]) == '[17]')
-  }
 
-  oldmain()
-}
-
-void oldmain() {
-  String s = 'String s variable'
-  var v = 'var v variable'
-  print('Hello world!')
-  print('Hello world!'.size)
-  print(s)
-  print(s.size)
-  print(v)
-  print(v.size)
-  print(ff())
-  print(15 + 17)
-  var i = 81
-  print(i + 5)
-  print(81 + 5)
-  print(i - 5)
-  print(81 == 81)
-  print(_f())
-  Bar bar = Bar()
-  print(bar)
-  Baz baz = Baz(15)
-  print(baz)
-
-  bar.d = 10.
-  print('bard.d = ' + str(bar.d))
-
-  print(bar.s)
-  bar.s = 'bar.s content'
-  print(bar.s)
-
-  {
-    String vs = v.(String)
-    print('vs = ' + vs)
-  }
-
-  if (1 < 10) {
-    print('1 < 10 is true')
-  } else if (1 == 10) {
-    print('1 == 10 10 is true')
-  } else {
-    print('1 < 10 is false, or something')
-  }
-
-  v = '"result-of-new-v"'
-  print('v = ' + str(v))
-
-  {
+    List xs = []
     int j = 0
     while (j < 10) {
-      print('j = ' + str(j))
+      xs.push(j)
       j = j + 1
     }
+    assert(str(xs) == '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]')
   }
 
   {
-    String ss = 'hi'
-    ss = 'there'
+    String result
+    if (1 < 10) {
+      result = '1 < 10 is true'
+    } else if (1 == 10) {
+      result = '1 == 10 10 is true'
+    } else {
+      result = '1 < 10 is false, or something'
+    }
+    assert(result == '1 < 10 is true')
   }
 
-  print(1 || 2)
-  print(1 && 2)
-  print(0 && 1)
-  print(0 || 1)
-  print(0.0 || 0)
-  print('' && '')
-  print('a' || '')
-  print(0 ? 1 : 2)
-  print(true ? 1 : 2)
-  print(null)
-  print(sample_global_string)
-  print(sample_global_string)
-  print(sample_global_string)
-  print(sample_global_string)
-  print(!true)
-  print(!0)
+  {
+    assert(sample_global_string == '\nThis is a sample global string\n')
+  }
 }

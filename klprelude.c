@@ -650,7 +650,7 @@ KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b) {
 }
 
 KLC_bool KLCNString_mEq(KLCNString* a, KLCNString* b) {
-  return strcmp(a->buffer, b->buffer) == 0;
+  return a->bytesize == b->bytesize && strcmp(a->buffer, b->buffer) == 0;
 }
 
 KLC_bool KLCNString_mLt(KLCNString* a, KLCNString* b) {
