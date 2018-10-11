@@ -26,6 +26,7 @@ _special_method_prefixes = [
 ]
 
 _special_method_names = {
+    'Call',
     'Add',
     'Sub',
     'Mul',
@@ -680,9 +681,9 @@ class Name(Expression):
             ctx.src += f'{tempvar} = &KLC_type{defn.name};'
             return 'type', tempvar
         elif isinstance(defn, FunctionDefinition):
-            tempvar = ctx.mktemp('var')
-            ctx.src += f'{tempvar} = KLC_function_to_var(&KLC_functioninfo{defn.name});'
-            return ('var', tempvar)
+            tempvar = ctx.mktemp('function')
+            ctx.src += f'{tempvar} = &KLC_functioninfo{defn.name};'
+            return 'function', tempvar
         else:
             raise Error([self.token, defn.token],
                         f'{name} is not a variable')
@@ -1014,7 +1015,8 @@ class FunctionCall(Expression):
                 argtriples.append((arg.token, argtype, argtempvar))
             return _translate_fcall(ctx, self.token, defn, argtriples)
 
-        if isinstance(defn, BaseVariableDefinition) and defn.type == 'var':
+        if (isinstance(defn, BaseVariableDefinition) and
+                defn.type in ('var', 'function')):
             argtempvars = []
             for arg in self.args:
                 argtype, argtempvar = arg.translate(ctx)
@@ -1026,12 +1028,26 @@ class FunctionCall(Expression):
                 argtempvars.append(argtempvar)
             tempvar = ctx.mktemp('var')
             nargs = len(self.args)
-            temparr = ctx.mktemparr(nargs)
+            temparr = ctx.mktemparr(nargs) if nargs else 'NULL'
             cfname = ctx.cname(defn.name)
             for i, argtempvar in enumerate(argtempvars):
                 ctx.src += f'{temparr}[{i}] = {argtempvar};'
-            ctx.src += f'{tempvar} = KLC_var_call({cfname}, {nargs}, {temparr});'
+            if defn.type == 'function':
+                ctx.src += f'{tempvar} = {cfname}->body({nargs}, {temparr});'
+            else:
+                ctx.src += f'{tempvar} = KLC_var_call({cfname}, {nargs}, {temparr});'
             return 'var', tempvar
+
+        if isinstance(defn, BaseVariableDefinition):
+            # At this point, we know defn.type cannot be var or function
+            # For these types, we just want to call the 'Call' method.
+            argtriples = [
+                (self.token, defn.type, ctx.cname(defn.name)),
+            ]
+            for arg in self.args:
+                argtype, argtempvar = arg.translate_value(ctx)
+                argtriples.append((arg.token, argtype, argtempvar))
+            return _translate_mcall(ctx, self.token, 'Call', argtriples)
 
         if isinstance(defn, ClassDefinition):
             argtriples = []

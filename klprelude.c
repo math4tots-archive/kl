@@ -471,16 +471,20 @@ KLC_header* KLC_var_to_object(KLC_var v, KLC_type ti) {
 }
 
 KLC_var KLC_var_call(KLC_var f, int argc, KLC_var* argv) {
-  /* TODO: Better error message */
-  KLC_var result;
-
-  if (f.tag != KLC_TAG_FUNCTION) {
-    KLC_errorf("Not a function");
+  if (f.tag == KLC_TAG_FUNCTION) {
+    return f.u.f->body(argc, argv);
+  } else {
+    KLC_var* argv2 = (KLC_var*) malloc(sizeof(KLC_var) * (argc + 1));
+    int i;
+    KLC_var result;
+    argv2[0] = f;
+    for (i = 0; i < argc; i++) {
+      argv2[i + 1] = argv[i];
+    }
+    result = KLC_mcall("Call", argc + 1, argv2);
+    free(argv2);
+    return result;
   }
-
-  result = f.u.f->body(argc, argv);
-
-  return result;
 }
 
 KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {

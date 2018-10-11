@@ -30,6 +30,34 @@ String sample_global_string = """
 This is a sample global string
 """
 
+class F0 {
+  String s
+
+  new(String s) {
+    this.s = s
+  }
+
+  String Call() {
+    return 'xx' + this.s + 'xx'
+  }
+}
+
+String f0() {
+  return 'hello'
+}
+
+String f1(function f) {
+  return f().(String) + ' world'
+}
+
+String f2(var f) {
+  return f().(String) + ' world'
+}
+
+String f3(F0 f) {
+  return f() + ' world'
+}
+
 void main() {
   {
     assert(true)
@@ -231,6 +259,16 @@ void main() {
     b = null(Bar)
     assert(!wr)
     assert(wr.getNullable() is null)
+  }
+
+  // function as variable
+  {
+    assert(f1(f0) == 'hello world')
+    assert(f2(f0) == 'hello world')
+    assert(f1(f0) == f2(f0))
+    final f = F0('hello')
+    assert(f2(f) == f3(f))
+    assert(f2(f) == 'xxhelloxx world')
   }
 
   print('Hello world!')
