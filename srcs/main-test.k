@@ -225,7 +225,7 @@ void main() {
   {
     // Weak reference test
     Bar b = Bar()
-    WeakReference wr = WeakReference(b)
+    final wr = WeakReference(b)
     assert(wr)
     assert(wr.get() is b)
     b = null(Bar)
@@ -234,6 +234,7 @@ void main() {
   }
 
   print('Hello world!')
-  print(File('main.c', 'r').read())
+  final data = File('hw.c', 'r').read()
+  print('data.size = ' + str(data.size))
   print('After reading main.c')
 }

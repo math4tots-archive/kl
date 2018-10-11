@@ -49,8 +49,7 @@ SYMBOLS = [
 
 KEYWORDS = {
     'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or',
-    'extern',
-    'class', 'trait',
+    'extern', 'class', 'trait', 'final',
     'for', 'if', 'else', 'while', 'break', 'continue', 'return',
 }
 
@@ -1254,23 +1253,37 @@ class Conditional(Expression):
 
 
 class VariableDefinition(Statement, BaseVariableDefinition):
-    fields = BaseVariableDefinition.fields + (
+    fields = (
+        ('final', bool),
+        ('type', Optional[str]),
+        ('name', str),
         ('expression', Optional[Expression]),
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.type is None and self.expression is None:
+            raise Error(
+                [self.token],
+                'If explicit type is not specified for '
+                'a variable definition, an expression must be supplied')
+
     def translate(self, ctx):
-        ctx.scope.add(self)
         if self.expression:
             ectx = ctx.ectx()
             etype, tempvar = self.expression.translate(ectx)
             value = tempvar
-            if self.type == 'var' and etype != 'void':
+            if self.type is None:
+                self.type = etype
+            elif self.type == 'var' and etype != 'void':
                 value = ctx.varify(etype, tempvar)
             elif self.type != etype:
                 raise Error([self.token],
                             f'Expected {self.type} but got {etype}')
             ectx.src += f'{self.cname(ectx)} = {value};'
             ectx.release_tempvars(tempvar)
+
+        ctx.scope.add(self)
 
 
 class ExpressionStatement(Statement):
@@ -2033,7 +2046,7 @@ def parse_one_source(source, cache, stack):
                     ifname,
                     [],
                     Block(token, [
-                        VariableDefinition(token, vtype, 'ret'),
+                        VariableDefinition(token, True, vtype, 'ret', None),
                         Return(token, Name(token, 'ret')),
                     ]))
         defs.append(initf)
@@ -2219,7 +2232,7 @@ def parse_one_source(source, cache, stack):
         if at('{'):
             return parse_block()
 
-        if at('NAME') and at('NAME', 1):
+        if (at('final') or at('NAME')) and at('NAME', 1):
             return parse_variable_definition()
 
         if consume('while'):
@@ -2448,11 +2461,16 @@ def parse_one_source(source, cache, stack):
 
     def parse_variable_definition():
         token = peek()
-        vartype = expect('NAME').value
+        final = bool(consume('final'))
+        vartype = None if final else expect('NAME').value
         name = expect('NAME').value
         value = parse_expression() if consume('=') else None
         expect_delim()
-        return VariableDefinition(token, vartype, name, value)
+        if final and value is None:
+            raise Error(
+                [self.token],
+                'final variables definitions must specify an expression')
+        return VariableDefinition(token, final, vartype, name, value)
 
     def parse_args(opener='(', closer=')'):
         args = []

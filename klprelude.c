@@ -906,7 +906,7 @@ KLCNString* KLCNFile_mread(KLCNFile* file) {
         file->name);
   }
 
-  read_size = cap = 1024;
+  read_size = cap = 16;
   i = 0;
   buffer = (char*) malloc(sizeof(char) * cap);
   while ((last = fread(buffer + i, 1, read_size, file->cfile)) == read_size) {
