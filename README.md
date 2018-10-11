@@ -95,3 +95,17 @@ void main() {
 
 ## TODO
 
+* varargs?
+  * Maybe. I'm not sure I want to support this.
+    My decision here may decide how I choose to implement
+    lambda expressions.
+* lambda expressions
+  * There are two time consuming bit of work I see here:
+    1. determine which variables to capture
+        The current architecture isn't set up to make this easy.
+        It might be best to just ask user to specify
+        which variables to capture at first
+    1. figuring out what the type of lambdas will be
+        and how to represent them. The issue here is
+        that every lambda will have a different type
+        signature.
