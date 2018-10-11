@@ -37,6 +37,9 @@ bool bool_mEq(bool a, bool b) {
 
 int int_mAdd(int a, int b)
 int int_mSub(int a, int b)
+int int_mMul(int a, int b)
+int int_mDiv(int a, int b)
+int int_mMod(int a, int b)
 bool int_mEq(int a, int b)
 bool int_mLt(int a, int b)
 String int_mRepr(int a)
@@ -46,6 +49,8 @@ bool int_mBool(int x) {
 
 double double_mAdd(double a, double b)
 double double_mSub(double a, double b)
+double double_mMul(double a, double b)
+double double_mDiv(double a, double b)
 bool double_mEq(double a, double b)
 bool double_mLt(double a, double b)
 String double_mRepr(double a)

@@ -68,12 +68,12 @@ _primitive_method_names = {
     'bool': ['Repr', 'Bool'],
     'int': [
         'Eq', 'Lt',
-        'Add', 'Sub',
+        'Add', 'Sub', 'Mul', 'Div', 'Mod',
         'Repr', 'Bool',
     ],
     'double': [
         'Eq', 'Lt',
-        'Add', 'Sub',
+        'Add', 'Sub', 'Mul', 'Div',
         'Repr', 'Bool',
     ],
     'function': ['GETname', 'Repr', 'Bool'],
@@ -2297,7 +2297,7 @@ def parse_one_source(source, cache, stack):
         expr = parse_and()
         while True:
             token = peek()
-            if consume('||'):
+            if consume('or'):
                 right = parse_and()
                 expr = LogicalOr(token, expr, right)
             else:
@@ -2308,7 +2308,7 @@ def parse_one_source(source, cache, stack):
         expr = parse_relational()
         while True:
             token = peek()
-            if consume('&&'):
+            if consume('and'):
                 right = parse_relational()
                 expr = LogicalAnd(token, expr, right)
             else:

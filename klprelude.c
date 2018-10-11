@@ -535,6 +535,18 @@ KLC_int KLCNint_mSub(KLC_int a, KLC_int b) {
   return a - b;
 }
 
+KLC_int KLCNint_mMul(KLC_int a, KLC_int b) {
+  return a * b;
+}
+
+KLC_int KLCNint_mDiv(KLC_int a, KLC_int b) {
+  return a / b;
+}
+
+KLC_int KLCNint_mMod(KLC_int a, KLC_int b) {
+  return a % b;
+}
+
 KLC_bool KLCNint_mEq(KLC_int a, KLC_int b) {
   return a == b;
 }
@@ -559,6 +571,14 @@ double KLCNdouble_mAdd(double a, double b) {
 
 double KLCNdouble_mSub(double a, double b) {
   return a - b;
+}
+
+double KLCNdouble_mMul(double a, double b) {
+  return a * b;
+}
+
+double KLCNdouble_mDiv(double a, double b) {
+  return a / b;
 }
 
 KLC_bool KLCNdouble_mEq(double a, double b) {
