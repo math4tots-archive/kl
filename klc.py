@@ -50,7 +50,7 @@ SYMBOLS = [
 
 KEYWORDS = {
     'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or',
-    'extern', 'class', 'trait', 'final',
+    'extern', 'class', 'trait', 'final', 'def',
     'for', 'if', 'else', 'while', 'break', 'continue', 'return',
 }
 
@@ -163,7 +163,7 @@ class Token:
         colno = self.colno
         lineno = self.lineno
         spaces = ' ' * (colno - 1)
-        return f'on line {lineno}\n{line}\n{spaces}*\n'
+        return f'{self.source.filename} on line {lineno}\n{line}\n{spaces}*\n'
 
 
 class Error(Exception):
@@ -558,6 +558,10 @@ class BaseVariableDefinition(Node):
         super().__init__(*args, **kwargs)
         if self.type == 'void':
             raise Error([self.token], f'Variable of type void is not allowed')
+        if self.type == 'Closure':
+            raise Error(
+                [self.token],
+                f'Variable of type Closure is not allowed (use var instead)')
 
     def cproto(self, ctx):
         return f'{ctx.cdecltype(self.type)} {ctx.cname(self.name)}'
@@ -1666,11 +1670,17 @@ def _delname(cname):
     return f'KLC_delete{cname}'
 
 
-def _write_ctypeinfo(src, cname, methodmap, use_null_deleter=False):
+def _write_ctypeinfo(src, cname, methodmap, use_null_deleter=False,
+                     untyped_methods=None):
     # For primitive types, it's silly to have a deleter, so
     # use_null_deleter allows caller to control this
+
     del_name = _delname(cname)
-    if methodmap:
+    if methodmap or untyped_methods:
+        # If there are 'extern' methods, add entries for them here
+        if untyped_methods is not None:
+            for mname in untyped_methods:
+                methodmap[mname] = f'{cname}_m{mname}'
         src += f'static KLC_methodinfo KLC_methodarray{cname}[] = ' '{'
         for mname, mfname in sorted(methodmap.items()):
             src += '  {' f'"{mname}", KLC_untyped{mfname}' '},'
@@ -1764,6 +1774,7 @@ class ClassDefinition(TypeDefinition):
         ('traits', List[str]),
         ('fields', Optional[List[Field]]),
         ('methods', List[str]),
+        ('untyped_methods', List[str]),
     )
 
     _method_map = None
@@ -1771,6 +1782,10 @@ class ClassDefinition(TypeDefinition):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         _check_type_name(self.token, self.name)
+        if self.untyped_methods and self.name != 'Closure':
+            raise Error(
+                [self.token],
+                'Closure is the only type allowed to have untyped methods')
 
     @property
     def extern(self):
@@ -1806,7 +1821,8 @@ class ClassDefinition(TypeDefinition):
         _write_ctypeinfo(
             src=ctx.src,
             cname=name,
-            methodmap=self.method_map(ctx))
+            methodmap=self.method_map(ctx),
+            untyped_methods=self.untyped_methods)
 
         if self.extern:
             return
@@ -1879,7 +1895,8 @@ class ClassDefinition(TypeDefinition):
 def parse(source):
     cache = dict()
     stack = []
-    main_node = parse_one_source(source, cache, stack)
+    intgen = [0]
+    main_node = parse_one_source(source, cache, stack, intgen)
     defs = list(main_node.definitions)
     for lib_node in cache.values():
         defs.extend(lib_node.definitions)
@@ -1903,7 +1920,7 @@ def _check_method_name(token, name):
             f'Only special methods may start with an upper case letter')
 
 
-def parse_one_source(source, cache, stack):
+def parse_one_source(source, cache, stack, intgen):
     tokens = lex(source)
     i = 0
     cache = dict() if cache is None else cache
@@ -1975,9 +1992,12 @@ def parse_one_source(source, cache, stack):
         defs = []
         while not at('EOF'):
             parse_global_definition(defs)
+            consume_delim()
         return Program(token, defs)
 
     def parse_global_definition(defs):
+        consume_delim()
+
         if at('#'):
             parse_macro(defs)
             return
@@ -2028,7 +2048,7 @@ def parse_one_source(source, cache, stack):
 
         try:
             stack.append((upath, token))
-            cache[upath] = parse_one_source(Source(abspath, data), cache, stack)
+            cache[upath] = parse_one_source(Source(abspath, data), cache, stack, intgen)
         finally:
             stack.pop()
 
@@ -2048,7 +2068,7 @@ def parse_one_source(source, cache, stack):
                 None)
         else:
             if consume('='):
-                expr = parse_expression()
+                expr = parse_expression(defs)
                 initf = FunctionDefinition(
                     token,
                     vtype,
@@ -2079,7 +2099,7 @@ def parse_one_source(source, cache, stack):
                 f'Function names should not start with uppercase letters')
         params = parse_params()
         if at('{'):
-            body = parse_block()
+            body = parse_block(defs)
         else:
             body = None
             expect_delim()
@@ -2092,7 +2112,19 @@ def parse_one_source(source, cache, stack):
         name = expect('NAME').value
         traits = parse_trait_list()
         method_to_token_table = dict()
+        member_to_token_table = dict()
+
+        def mark_member(name, token):
+            if name in member_to_token_table:
+                raise Error([token], f'Duplicate member definition {name}')
+            member_to_token_table[name] = token
+
+        def mark_method(name, token):
+            mark_member(name, token)
+            method_to_token_table[name] = token
+
         fields = None if extern else []
+        untyped_methods = []
         newdef = None
         expect('{')
         consume_delim()
@@ -2110,7 +2142,15 @@ def parse_one_source(source, cache, stack):
                     # For extern types, the 'new' function should return
                     # the constructed object. Further, the new function
                     # itself must be extern
-                    rt = name
+                    if name == 'Closure':
+                        # It sucks to special case so much for this one
+                        # type, but I want to make sure that an actual
+                        # expression of type 'Closure' is impossible.
+                        # So for just this one, I want the return type
+                        # to be var
+                        rt = 'var'
+                    else:
+                        rt = name
                     body = None
                     expect_delim()
                     params = declparams
@@ -2120,7 +2160,7 @@ def parse_one_source(source, cache, stack):
                     # TODO: Make 'new' return the actual object
                     # like extern types.
                     rt = 'void'
-                    body = parse_block()
+                    body = parse_block(defs)
                     params = [Parameter(mtoken, name, 'this')] + declparams
                 newdef = FunctionDefinition(mtoken, rt, fname, params, body)
                 defs.append(newdef)
@@ -2133,6 +2173,7 @@ def parse_one_source(source, cache, stack):
                 ftoken = peek()
                 ftype = expect('NAME').value
                 fname = expect('NAME').value
+                mark_member(fname, ftoken)
                 expect_delim()
                 fields.append(Field(ftoken, ftype, fname))
 
@@ -2153,28 +2194,30 @@ def parse_one_source(source, cache, stack):
                     [Parameter(ftoken, name, 'this'),
                      Parameter(ftoken, ftype, 'value')],
                     None))
-                method_to_token_table[f'GET{fname}'] = ftoken
-                method_to_token_table[f'SET{fname}'] = ftoken
-
+                mark_method(f'GET{fname}', ftoken)
+                mark_method(f'SET{fname}', ftoken)
+            elif at('extern'):
+                uftoken = expect('extern')
+                ufname = expect('NAME').value
+                expect_delim()
+                untyped_methods.append(ufname)
+                mark_member(ufname, uftoken)
             else:
                 mtoken = peek()
                 rtype = expect('NAME').value
                 mname = expect('NAME').value
                 _check_method_name(mtoken, mname)
                 params = [Parameter(mtoken, name, 'this')] + parse_params()
-                body = None if consume_delim() else parse_block()
+                body = None if consume_delim() else parse_block(defs)
 
                 # A method is mapped to a function with a special name,
                 # and an implicit first parameter.
                 fname = f'{name}_m{mname}'
 
-                if mname in method_to_token_table:
-                    raise Error([method_to_token_table[mname], mtoken],
-                                f'Duplicate method {name}.{mname}')
-
-                method_to_token_table[mname] = mtoken
+                mark_method(mname, token)
 
                 defs.append(FunctionDefinition(mtoken, rtype, fname, params, body))
+            consume_delim()
 
         consume_delim()
 
@@ -2187,7 +2230,8 @@ def parse_one_source(source, cache, stack):
                 Block(token, [])))
 
         method_names = sorted(method_to_token_table)
-        defs.append(ClassDefinition(token, name, traits, fields, method_names))
+        defs.append(ClassDefinition(
+            token, name, traits, fields, method_names, untyped_methods))
 
     def parse_trait_definition(defs):
         token = expect('trait')
@@ -2201,7 +2245,7 @@ def parse_one_source(source, cache, stack):
             rtype = expect('NAME').value
             mname = expect('NAME').value
             params = parse_params()
-            body = parse_block()
+            body = parse_block(defs)
             _check_method_name(mtoken, mname)
 
             # A method is mapped to a function with a special name,
@@ -2216,6 +2260,7 @@ def parse_one_source(source, cache, stack):
             method_to_token_table[mname] = mtoken
 
             defs.append(FunctionDefinition(mtoken, rtype, fname, params, body))
+            consume_delim()
         consume_delim()
 
         method_names = sorted(method_to_token_table)
@@ -2233,162 +2278,162 @@ def parse_one_source(source, cache, stack):
             traits = ['Object']
         return traits
 
-    def parse_block():
+    def parse_block(defs):
         token = expect('{')
         consume_delim()
         statements = []
         while not consume('}'):
-            statements.append(parse_statement())
-        consume_delim()
+            statements.append(parse_statement(defs))
+            consume_delim()
         return Block(token, statements)
 
-    def parse_statement():
+    def parse_statement(defs):
         token = peek()
 
         if at('{'):
-            return parse_block()
+            return parse_block(defs)
 
         if (at('final') or at('NAME')) and at('NAME', 1):
-            return parse_variable_definition()
+            return parse_variable_definition(defs)
 
         if consume('while'):
             expect('(')
             with skipping_newlines(True):
-                condition = parse_expression()
+                condition = parse_expression(defs)
                 expect(')')
-            body = parse_block()
+            body = parse_block(defs)
             return While(token, condition, body)
 
         if consume('if'):
             expect('(')
             with skipping_newlines(True):
-                condition = parse_expression()
+                condition = parse_expression(defs)
                 expect(')')
-            body = parse_block()
+            body = parse_block(defs)
             if consume('else'):
-                other = parse_statement()
+                other = parse_statement(defs)
             else:
                 other = None
             return If(token, condition, body, other)
 
         if consume('return'):
-            expression = None if at_delim() else parse_expression()
+            expression = None if at_delim() else parse_expression(defs)
             expect_delim()
             return Return(token, expression)
 
-        expression = parse_expression()
+        expression = parse_expression(defs)
         expect_delim()
         return ExpressionStatement(token, expression)
 
-    def parse_expression():
-        return parse_conditional()
+    def parse_expression(defs):
+        return parse_conditional(defs)
 
-    def parse_conditional():
-        expr = parse_or()
+    def parse_conditional(defs):
+        expr = parse_or(defs)
         token = peek()
         if consume('?'):
-            left = parse_expression()
+            left = parse_expression(defs)
             expect(':')
-            right = parse_conditional()
+            right = parse_conditional(defs)
             return Conditional(token, expr, left, right)
         return expr
 
-    def parse_or():
-        expr = parse_and()
+    def parse_or(defs):
+        expr = parse_and(defs)
         while True:
             token = peek()
             if consume('or'):
-                right = parse_and()
+                right = parse_and(defs)
                 expr = LogicalOr(token, expr, right)
             else:
                 break
         return expr
 
-    def parse_and():
-        expr = parse_relational()
+    def parse_and(defs):
+        expr = parse_relational(defs)
         while True:
             token = peek()
             if consume('and'):
-                right = parse_relational()
+                right = parse_relational(defs)
                 expr = LogicalAnd(token, expr, right)
             else:
                 break
         return expr
 
-    def parse_relational():
-        expr = parse_additive()
+    def parse_relational(defs):
+        expr = parse_additive(defs)
         while True:
             token = peek()
             if consume('=='):
-                expr = Equals(token, expr, parse_additive())
+                expr = Equals(token, expr, parse_additive(defs))
             elif consume('!='):
-                expr = NotEquals(token, expr, parse_additive())
+                expr = NotEquals(token, expr, parse_additive(defs))
             elif consume('<'):
-                expr = LessThan(token, expr, parse_additive())
+                expr = LessThan(token, expr, parse_additive(defs))
             elif consume('<='):
-                expr = LessThanOrEqual(token, expr, parse_additive())
+                expr = LessThanOrEqual(token, expr, parse_additive(defs))
             elif consume('>'):
-                expr = GreaterThan(token, expr, parse_additive())
+                expr = GreaterThan(token, expr, parse_additive(defs))
             elif consume('>='):
-                expr = GreaterThanOrEqual(token, expr, parse_additive())
+                expr = GreaterThanOrEqual(token, expr, parse_additive(defs))
             elif consume('is'):
                 if consume('not'):
-                    expr = IsNot(token, expr, parse_additive())
+                    expr = IsNot(token, expr, parse_additive(defs))
                 else:
-                    expr = Is(token, expr, parse_additive())
+                    expr = Is(token, expr, parse_additive(defs))
             else:
                 break
         return expr
 
-    def parse_additive():
-        expr = parse_multiplicative()
+    def parse_additive(defs):
+        expr = parse_multiplicative(defs)
         while True:
             token = peek()
             if consume('+'):
-                expr = MethodCall(token, expr, 'Add', [parse_multiplicative()])
+                expr = MethodCall(token, expr, 'Add', [parse_multiplicative(defs)])
             elif consume('-'):
-                expr = MethodCall(token, expr, 'Sub', [parse_multiplicative()])
+                expr = MethodCall(token, expr, 'Sub', [parse_multiplicative(defs)])
             else:
                 break
         return expr
 
-    def parse_multiplicative():
-        expr = parse_unary()
+    def parse_multiplicative(defs):
+        expr = parse_unary(defs)
         while True:
             token = peek()
             if consume('*'):
-                expr = MethodCall(token, expr, 'Mul', [parse_unary()])
+                expr = MethodCall(token, expr, 'Mul', [parse_unary(defs)])
             elif consume('/'):
-                expr = MethodCall(token, expr, 'Div', [parse_unary()])
+                expr = MethodCall(token, expr, 'Div', [parse_unary(defs)])
             elif consume('%'):
-                expr = MethodCall(token, expr, 'Mod', [parse_unary()])
+                expr = MethodCall(token, expr, 'Mod', [parse_unary(defs)])
             else:
                 break
         return expr
 
-    def parse_unary():
+    def parse_unary(defs):
         token = peek()
         if consume('-'):
-            expr = parse_pow()
+            expr = parse_pow(defs)
             if isinstance(expr, (IntLiteral, DoubleLiteral)):
                 type_ = type(expr)
                 return type_(expr.token, -expr.value)
             else:
                 return MethodCall(token, expr, 'Neg', [])
         if consume('!'):
-            expr = parse_pow()
+            expr = parse_pow(defs)
             return LogicalNot(token, expr)
-        return parse_pow()
+        return parse_pow(defs)
 
-    def parse_pow():
-        expr = parse_postfix()
+    def parse_pow(defs):
+        expr = parse_postfix(defs)
         token = peek()
         if consume('**'):
-            expr = MethodCall(token, expr, 'Pow', [parse_pow()])
+            expr = MethodCall(token, expr, 'Pow', [parse_pow(defs)])
         return expr
 
-    def parse_postfix():
-        expr = parse_primary()
+    def parse_postfix(defs):
+        expr = parse_primary(defs)
         while True:
             token = peek()
             if consume('.'):
@@ -2400,20 +2445,20 @@ def parse_one_source(source, cache, stack):
                 else:
                     name = expect('NAME').value
                     if at('('):
-                        args = parse_args()
+                        args = parse_args(defs)
                         expr = MethodCall(token, expr, name, args)
                         continue
                     elif consume('='):
-                        val = parse_expression()
+                        val = parse_expression(defs)
                         expr = MethodCall(token, expr, f'SET{name}', [val])
                         continue
                     else:
                         expr = MethodCall(token, expr, f'GET{name}', [])
                         continue
             elif at('['):
-                args = parse_args('[', ']')
+                args = parse_args(defs, '[', ']')
                 if consume('='):
-                    args.append(parse_expression())
+                    args.append(parse_expression(defs))
                     expr = MethodCall(token, expr, 'SetItem', args)
                 else:
                     expr = MethodCall(token, expr, 'GetItem', args)
@@ -2421,18 +2466,49 @@ def parse_one_source(source, cache, stack):
             break
         return expr
 
-    def parse_primary():
+    def parse_primary(defs):
         token = peek()
 
+        if consume('def'):
+            next_int = intgen[0]
+            intgen[0] += 1
+            lambda_name = f'_lambda{next_int}'
+            return_type = expect('NAME').value
+            capture_params = []
+            if consume('['):
+                while not consume(']'):
+                    if at('NAME') and at('NAME', 1):
+                        type_ = expect('NAME').value
+                    else:
+                        type_ = 'var'
+                    capture_params.append(Parameter(peek(), type_, expect('NAME').value))
+                    if not consume(','):
+                        expect(']')
+                        break
+            params = parse_params()
+            body = parse_block(defs)
+            defs.append(FunctionDefinition(
+                token,
+                return_type,
+                lambda_name,
+                capture_params + params,
+                body))
+            return FunctionCall(token, 'Closure', [
+                ListDisplay(token, [
+                    Name(p.token, p.name) for p in capture_params
+                ]),
+                Name(token, lambda_name),
+            ])
+
         if consume('('):
-            expr = parse_expression()
+            expr = parse_expression(defs)
             expect(')')
             return expr
 
         if consume('['):
             exprs = []
             while not consume(']'):
-                exprs.append(parse_expression())
+                exprs.append(parse_expression(defs))
                 if not consume(','):
                     expect(']')
                     break
@@ -2462,10 +2538,10 @@ def parse_one_source(source, cache, stack):
         if at('NAME'):
             name = expect('NAME').value
             if consume('='):
-                expr = parse_expression()
+                expr = parse_expression(defs)
                 return SetName(token, name, expr)
             elif at('('):
-                args = parse_args()
+                args = parse_args(defs)
                 return FunctionCall(token, name, args)
             else:
                 return Name(token, name)
@@ -2475,12 +2551,12 @@ def parse_one_source(source, cache, stack):
 
         raise Error([token], 'Expected expression')
 
-    def parse_variable_definition():
+    def parse_variable_definition(defs):
         token = peek()
         final = bool(consume('final'))
         vartype = None if final else expect('NAME').value
         name = expect('NAME').value
-        value = parse_expression() if consume('=') else None
+        value = parse_expression(defs) if consume('=') else None
         expect_delim()
         if final and value is None:
             raise Error(
@@ -2488,11 +2564,11 @@ def parse_one_source(source, cache, stack):
                 'final variables definitions must specify an expression')
         return VariableDefinition(token, final, vartype, name, value)
 
-    def parse_args(opener='(', closer=')'):
+    def parse_args(defs, opener='(', closer=')'):
         args = []
         expect(opener)
         while not consume(closer):
-            args.append(parse_expression())
+            args.append(parse_expression(defs))
             if not consume(','):
                 expect(closer)
                 break

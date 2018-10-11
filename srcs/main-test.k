@@ -271,6 +271,37 @@ void main() {
     assert(f2(f) == 'xxhelloxx world')
   }
 
+  // lambda expressions
+  {
+    final x = 10
+    var addX = def int[int x](int y) {
+      return x + y
+    }
+    assert(addX(15) == 25)
+    assert(addX(17) == 27)
+    assert(str(type(addX)) == '<type Closure>')
+
+    // Check for leaks
+    {
+      String s = 'captured value'
+      final wr = WeakReference(s)
+
+      var lambda = def void[String s]() {}
+
+      // There are two references to 'captured value',
+      assert(wr)
+
+      // Now we remove one of the references. But
+      // the lambda should still be pointing to it.
+      s = 'changed'
+      assert(wr)
+
+      // Now 'captured value' should have been collected
+      lambda = null
+      assert(!wr)
+    }
+  }
+
   print('Hello world!')
   final data = File('hw.c', 'r').read()
   print('data.size = ' + str(data.size))

@@ -25,6 +25,7 @@ typedef struct KLC_functioninfo KLC_functioninfo;
 typedef KLC_functioninfo* KLC_function;
 typedef KLC_typeinfo* KLC_type;
 typedef struct KLCNWeakReference KLCNWeakReference;
+typedef struct KLCNClosure KLCNClosure;
 typedef struct KLCNString KLCNString;
 typedef struct KLCNStringBuilder KLCNStringBuilder;
 typedef struct KLCNList KLCNList;
@@ -843,6 +844,52 @@ KLC_var KLCNList_mSetItem(KLCNList* list, KLC_int i, KLC_var v) {
 
 KLC_int KLCNList_mGETsize(KLCNList* list) {
   return (KLC_int) list->size;
+}
+
+struct KLCNClosure {
+  KLC_header header;
+  KLCNList* captures;
+  KLC_function f;
+};
+
+extern KLC_typeinfo KLC_typeClosure;
+
+KLC_var KLCNClosure_new(KLCNList* captures, KLC_function f) {
+  KLCNClosure* closure = (KLCNClosure*) malloc(sizeof(KLCNClosure));
+  KLC_init_header(&closure->header, &KLC_typeClosure);
+  KLC_retain((KLC_header*) captures);
+  closure->captures = captures;
+  closure->f = f;
+  return KLC_object_to_var((KLC_header*) closure);
+}
+
+void KLC_deleteClosure(KLC_header* robj, KLC_header** dq) {
+  KLCNClosure* closure = (KLCNClosure*) robj;
+  KLC_partial_release((KLC_header*) closure->captures, dq);
+}
+
+KLC_var KLC_untypedClosure_mCall(int argc, KLC_var* argv) {
+  KLCNClosure* closure;
+  if (argc < 1) {
+    KLC_errorf("method call with no receiver");
+  }
+  closure = (KLCNClosure*) argv[0].u.obj;
+  {
+    int argc2 = closure->captures->size + argc - 1;
+    KLC_var* argv2 = (KLC_var*) malloc(sizeof(KLC_var) * (argc2));
+    KLC_var result;
+    size_t ui;
+    int i;
+    for (ui = 0; ui < closure->captures->size; ui++) {
+      argv2[ui] = closure->captures->buffer[ui];
+    }
+    for (i = 0; i + 1 < argc; i++) {
+      argv2[closure->captures->size + i] = argv[i + 1];
+    }
+    result = closure->f->body(argc2, argv2);
+    free(argv2);
+    return result;
+  }
 }
 
 struct KLCNFile {

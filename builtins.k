@@ -140,6 +140,11 @@ extern class File {
   }
 }
 
+extern class Closure {
+  new(List captures, function f)
+  extern Call
+}
+
 extern File stdin
 extern File stdout
 extern File stderr
