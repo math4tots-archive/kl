@@ -153,6 +153,10 @@ extern File stdin
 extern File stdout
 extern File stderr
 
+// argc and argv passed to main
+// made available as a List
+extern List args
+
 void panic(String message)
 bool bool(var x)
 type type(var x)

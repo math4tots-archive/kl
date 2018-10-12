@@ -324,6 +324,7 @@ void main() {
 
   print(os.name)
   print('os.posix = ' + str(os.posix))
+  print('args = ' + str(args))
   print(os.listdir('.'))
   print('Hello world!')
   final data = File('hw.c', 'r').read()

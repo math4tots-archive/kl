@@ -6,6 +6,9 @@
 
 #define KLC_MAX_STACK_SIZE 1000
 
+static int KLC_argc;
+static const char** KLC_argv;
+
 static size_t KLC_stacktrace_size = 0;
 static KLC_stack_frame KLC_stacktrace[KLC_MAX_STACK_SIZE];
 
@@ -938,6 +941,17 @@ KLCNFile* KLCN_initstderr() {
   return KLC_mkfile(stderr, ":stderr", "w", 0);
 }
 
+KLCNList* KLCN_initargs() {
+  KLCNList* args = KLC_mklist(KLC_argc);
+  int i;
+  for (i = 0; i < KLC_argc; i++) {
+    KLC_header* arg = (KLC_header*) KLC_mkstr(KLC_argv[i]);
+    KLCNList_mpush(args, KLC_object_to_var(arg));
+    KLC_release(arg);
+  }
+  return args;
+}
+
 void KLCNassert(KLC_var cond) {
   if (!KLC_truthy(cond)) {
     KLC_errorf("Assertion failed");
@@ -946,7 +960,9 @@ void KLCNassert(KLC_var cond) {
 
 void KLCNmain();
 
-int main() {
+int main(int argc, const char** argv) {
+  KLC_argc = argc;
+  KLC_argv = argv;
   KLCNmain();
   KLC_release_queued_before_exit();
   return 0;
