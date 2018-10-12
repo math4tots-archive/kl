@@ -27,6 +27,10 @@ _special_method_prefixes = [
 
 _special_method_names = {
     'Call',
+    'Contains',
+    'Iterator',
+    'Next',
+    'HasNext',
     'Add',
     'Sub',
     'Mul',
@@ -43,7 +47,7 @@ _special_method_names = {
 SYMBOLS = [
     '\n',
     '||', '&&',
-    ';', '#', '?', ':', '!',
+    ';', '#', '?', ':', '!', '++', '--',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
     '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
 ]
@@ -1179,6 +1183,31 @@ class MethodCall(Expression):
             argtype, argvar = arg.translate(ctx)
             argtriples.append((arg.token, argtype, argvar))
         return _translate_mcall(ctx, self.token, self.name, argtriples)
+
+
+class BaseInOperation(Expression):
+    fields = (
+        ('left', Expression),
+        ('right', Expression),
+    )
+
+    method_name = None
+
+    def translate(self, ctx):
+        ltype, lvar = self.left.translate(ctx)
+        rtype, rvar = self.right.translate(ctx)
+        # This could almost just be a simple MethodCall, but the problem
+        # is that the order or arguments have to be reversed
+        argtriples = [
+            (self.right.token, rtype, rvar),
+            (self.left.token, ltype, lvar),
+        ]
+        return _translate_mcall(
+            ctx, self.token, type(self).method_name, argtriples)
+
+
+class In(BaseInOperation):
+    method_name = 'Contains'
 
 
 class LogicalNot(Expression):
@@ -2401,6 +2430,11 @@ def parse_one_source(source, cache, stack, intgen):
                     expr = IsNot(token, expr, parse_additive(defs))
                 else:
                     expr = Is(token, expr, parse_additive(defs))
+            elif consume('in'):
+                expr = In(token, expr, parse_additive(defs))
+            elif consume('not'):
+                expect('in')
+                expr = LogicalNot(token, In(token, expr, parse_additive(defs)))
             else:
                 break
         return expr
@@ -2557,7 +2591,13 @@ def parse_one_source(source, cache, stack, intgen):
 
         if at('NAME'):
             name = expect('NAME').value
-            if consume('='):
+            if consume('++'):
+                return SetName(token, name, MethodCall(
+                    token, Name(token, name), 'Add', [IntLiteral(token, 1)]))
+            if consume('--'):
+                return SetName(token, name, MethodCall(
+                    token, Name(token, name), 'Sub', [IntLiteral(token, 1)]))
+            elif consume('='):
                 expr = parse_expression(defs)
                 return SetName(token, name, expr)
             elif at('('):
@@ -2572,7 +2612,7 @@ def parse_one_source(source, cache, stack, intgen):
         raise Error([token], 'Expected expression')
 
     def at_variable_definition():
-        return (at('final') or at('final') or at('NAME')) and at('NAME', 1)
+        return (at('final') or at('auto') or at('NAME')) and at('NAME', 1)
 
     def parse_variable_definition(defs):
         token = peek()

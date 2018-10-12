@@ -187,5 +187,28 @@ extern class List {
     sb.addstr(']')
     return sb.build()
   }
+
+  bool Eq(List other) {
+    int size = this.size
+    if (size != other.size) {
+      return false
+    }
+    for (int i = 0; i < size; i++) {
+      if (this[i] != other[i]) {
+        return false
+      }
+    }
+    return true
+  }
+
+  bool Contains(var x) {
+    int size = this.size
+    for (int i = 0; i < size; i++) {
+      if (this[i] == x) {
+        return true
+      }
+    }
+    return false
+  }
 }
 

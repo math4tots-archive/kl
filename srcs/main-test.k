@@ -302,6 +302,19 @@ void main() {
     }
   }
 
+  // Test for loop and List.Contains
+  {
+    auto xs = []
+    assert(3 not in xs)
+    for (int i = 0; i < 5; i++) {
+      xs.push(i)
+    }
+    assert(xs == [0, 1, 2, 3, 4])
+    assert(3 in xs)
+    assert(5 not in xs)
+    assert(-1 not in xs)
+  }
+
   print('Hello world!')
   final data = File('hw.c', 'r').read()
   print('data.size = ' + str(data.size))
