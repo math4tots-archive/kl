@@ -49,8 +49,8 @@ SYMBOLS = [
 ]
 
 KEYWORDS = {
-    'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or',
-    'extern', 'class', 'trait', 'final', 'def',
+    'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
+    'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
     'for', 'if', 'else', 'while', 'break', 'continue', 'return',
 }
 
@@ -2293,7 +2293,7 @@ def parse_one_source(source, cache, stack, intgen):
         if at('{'):
             return parse_block(defs)
 
-        if (at('final') or at('NAME')) and at('NAME', 1):
+        if at_variable_definition():
             return parse_variable_definition(defs)
 
         if consume('while'):
@@ -2303,6 +2303,26 @@ def parse_one_source(source, cache, stack, intgen):
                 expect(')')
             body = parse_block(defs)
             return While(token, condition, body)
+
+        if consume('for'):
+            expect('(')
+            init = []
+            if consume(';'):
+                pass
+            elif at_variable_definition():
+                init.append(parse_variable_definition(defs))
+            else:
+                init.append(ExpressionStatement(token, parse_expression(defs)))
+                expect(';')
+            cond = BoolLiteral(token, True) if at(';') else parse_expression(defs)
+            expect(';')
+            incr = ExpressionStatement(token, parse_expression(defs))
+            expect(')')
+            raw_body = parse_block(defs)
+            body = Block(token, raw_body.statements + [incr])
+            return Block(token, init + [
+                While(token, cond, body),
+            ])
 
         if consume('if'):
             expect('(')
@@ -2551,10 +2571,20 @@ def parse_one_source(source, cache, stack, intgen):
 
         raise Error([token], 'Expected expression')
 
+    def at_variable_definition():
+        return (at('final') or at('final') or at('NAME')) and at('NAME', 1)
+
     def parse_variable_definition(defs):
         token = peek()
-        final = bool(consume('final'))
-        vartype = None if final else expect('NAME').value
+        if consume('final'):
+            final = True
+            vartype = None
+        elif consume('auto'):
+            final = False
+            vartype = None
+        else:
+            final = False
+            vartype = expect('NAME').value
         name = expect('NAME').value
         value = parse_expression(defs) if consume('=') else None
         expect_delim()
