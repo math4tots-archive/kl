@@ -49,6 +49,7 @@
 #else
 
 #define KLC_OS_NAME "unknown"
+#define KLC_OS_UNKNOWN 1
 
 #endif
 
@@ -65,5 +66,9 @@ KLCNOperatingSystemInterface* KLCN_initos();
 void KLC_deleteOperatingSystemInterface(KLC_header* robj, KLC_header** dq);
 KLCNString* KLCNOperatingSystemInterface_mGETname(KLCNOperatingSystemInterface*);
 KLC_bool KLCNOperatingSystemInterface_mGETposix(KLCNOperatingSystemInterface*);
+KLC_bool KLCNOperatingSystemInterface_mBool(KLCNOperatingSystemInterface*);
+KLCNList* KLCNOperatingSystemInterface_mlistdir(
+  KLCNOperatingSystemInterface*,
+  KLCNString*);
 
 #endif/*klc_os_h*/

@@ -322,6 +322,9 @@ void main() {
     assert(xs == ys)
   }
 
+  print(os.name)
+  print('os.posix = ' + str(os.posix))
+  print(os.listdir('.'))
   print('Hello world!')
   final data = File('hw.c', 'r').read()
   print('data.size = ' + str(data.size))

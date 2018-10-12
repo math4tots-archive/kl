@@ -149,6 +149,9 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
 KLC_bool KLC_truthy(KLC_var v);
 void KLC_release(KLC_header *obj);
 KLC_bool KLC_var_to_bool(KLC_var v);
+KLC_var KLC_object_to_var(KLC_header* obj);
 void KLCNFile_mclose(KLCNFile* file);
+KLCNList* KLC_mklist(size_t cap);
+void KLCNList_mpush(KLCNList* list, KLC_var v);
 
 #endif/*klc_prelude_h*/

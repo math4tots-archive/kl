@@ -248,6 +248,7 @@ class ListIterator {
 extern class OperatingSystemInterface {
   String GETname()
   bool GETposix()
+  List listdir(String path)
 }
 
 extern OperatingSystemInterface os
