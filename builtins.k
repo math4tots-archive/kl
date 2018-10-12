@@ -225,7 +225,6 @@ extern class List(Iterable) {
   }
 }
 
-
 class ListIterator {
   List list
   int i
@@ -246,4 +245,9 @@ class ListIterator {
   }
 }
 
+extern class OperatingSystemInterface {
+  String GETname()
+  bool GETposix()
+}
 
+extern OperatingSystemInterface os

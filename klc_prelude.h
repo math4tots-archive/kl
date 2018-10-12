@@ -136,6 +136,13 @@ extern KLC_typeinfo KLC_typeFile;
 extern const KLC_var KLC_null;
 
 void KLC_errorf(const char* fmt, ...);
+void KLC_retain(KLC_header *obj);
+void KLC_retain_var(KLC_var v);
+void KLC_partial_release(KLC_header* obj, KLC_header** delete_queue);
+void KLC_partial_release_var(KLC_var v, KLC_header** delete_queue);
+void KLC_release(KLC_header *obj);
+void KLC_release_var(KLC_var v);
+void KLC_init_header(KLC_header* header, KLC_type type);
 KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii);
 KLCNString* KLC_mkstr(const char *str);
 KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
