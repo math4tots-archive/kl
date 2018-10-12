@@ -166,7 +166,16 @@ String repr(var x) {
   return x.Repr().(String)
 }
 
-extern class List {
+trait Iterable {
+  void forEach(var f) {
+    final i = this.Iterator()
+    while (i.HasNext()) {
+      f(i.Next())
+    }
+  }
+}
+
+extern class List(Iterable) {
   int GETsize()
   var GetItem(int i)
   var SetItem(int i, var x)
@@ -210,5 +219,31 @@ extern class List {
     }
     return false
   }
+
+  ListIterator Iterator() {
+    return ListIterator(this)
+  }
 }
+
+
+class ListIterator {
+  List list
+  int i
+
+  new(List list) {
+    this.list = list
+    this.i = 0
+  }
+
+  bool HasNext() {
+    return this.i < this.list.size
+  }
+
+  var Next() {
+    var value = this.list[this.i]
+    this.i = this.i + 1
+    return value
+  }
+}
+
 

@@ -302,9 +302,9 @@ void main() {
     }
   }
 
-  // Test for loop and List.Contains
+  // Test for loop, List.Contains, and Iterable protocol
   {
-    auto xs = []
+    final xs = []
     assert(3 not in xs)
     for (int i = 0; i < 5; i++) {
       xs.push(i)
@@ -313,6 +313,13 @@ void main() {
     assert(3 in xs)
     assert(5 not in xs)
     assert(-1 not in xs)
+
+    final ys = []
+    xs.forEach(def void[List ys](int i) {
+      ys.push(i)
+    })
+    assert(ys == [0, 1, 2, 3, 4])
+    assert(xs == ys)
   }
 
   print('Hello world!')
