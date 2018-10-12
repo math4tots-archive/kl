@@ -110,6 +110,10 @@ extern class String {
   String Add(String b)
   int GETsize()
   String Str()
+  String Repr() {
+    return '"' + this.escape() + '"'
+  }
+  String escape()
   bool Eq(String other)
   bool Lt(String other)
   bool Bool() {

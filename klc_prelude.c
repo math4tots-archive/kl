@@ -612,6 +612,74 @@ KLCNString* KLCNString_mStr(KLCNString* s) {
   return s;
 }
 
+KLCNString* KLCNString_mescape(KLCNString* str) {
+  size_t i = 0, j = 0, bs = str->bytesize;
+  char* buffer = (char*) malloc(sizeof(char) * (2 * bs + 1));
+  char* s = str->buffer;
+
+  while (i < bs) {
+    switch (s[i]) {
+      case '\n':
+        buffer[j++] = '\\';
+        buffer[j++] = 'n';
+        i++;
+        break;
+      case '\t':
+        buffer[j++] = '\\';
+        buffer[j++] = 't';
+        i++;
+        break;
+      case '\r':
+        buffer[j++] = '\\';
+        buffer[j++] = 'r';
+        i++;
+        break;
+      case '\f':
+        buffer[j++] = '\\';
+        buffer[j++] = 'f';
+        i++;
+        break;
+      case '\v':
+        buffer[j++] = '\\';
+        buffer[j++] = 'v';
+        i++;
+        break;
+      case '\0':
+        buffer[j++] = '\\';
+        buffer[j++] = '0';
+        i++;
+        break;
+      case '\a':
+        buffer[j++] = '\\';
+        buffer[j++] = 'a';
+        i++;
+        break;
+      case '\b':
+        buffer[j++] = '\\';
+        buffer[j++] = 'b';
+        i++;
+        break;
+      case '\"':
+        buffer[j++] = '\\';
+        buffer[j++] = '\"';
+        i++;
+        break;
+      case '\'':
+        buffer[j++] = '\\';
+        buffer[j++] = '\'';
+        i++;
+        break;
+      default:
+        buffer[j++] = s[i++];
+    }
+  }
+
+  buffer = (char*) realloc(buffer, sizeof(char) * (j + 1));
+  buffer[j] = '\0';
+
+  return KLC_mkstr_with_buffer(j, buffer, KLC_check_ascii(buffer));
+}
+
 KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b) {
   size_t bytesize = a->bytesize + b->bytesize;
   char* buffer = (char*) malloc(sizeof(char) * (bytesize + 1));
