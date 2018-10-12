@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <errno.h>
+#include <sys/stat.h>
 #endif
 
 KLCNOperatingSystemInterface* KLCN_initos() {
@@ -83,3 +84,38 @@ KLCNString* KLCNOperatingSystemInterface_mgetcwd(KLCNOperatingSystemInterface* o
 #endif
 }
 
+KLC_bool KLCNOperatingSystemInterface_misfile(
+    KLCNOperatingSystemInterface* os,
+    KLCNString* path) {
+#if KLC_POSIX
+  struct stat sb;
+  if (stat(path->buffer, &sb) == 0) {
+    /* Returns true iff we check that this path is a regular file */
+    return !!S_ISREG(sb.st_mode);
+  }
+  /* We can't prove that given path is a file, so we return false. */
+  return 0;
+#else
+  /* TODO: The best we can do in an unknown environment,
+   * is just to open the file and see if it succeeds */
+  KLC_errorf("os.isfile not supported for %s", KLC_OS_NAME);
+#endif
+}
+
+KLC_bool KLCNOperatingSystemInterface_misdir(
+    KLCNOperatingSystemInterface* os,
+    KLCNString* path) {
+#if KLC_POSIX
+  struct stat sb;
+  if (stat(path->buffer, &sb) == 0) {
+    /* Returns true iff we check that this path is a regular file */
+    return !!S_ISDIR(sb.st_mode);
+  }
+  /* We can't prove that given path is a file, so we return false. */
+  return 0;
+#else
+  /* TODO: The best we can do in an unknown environment,
+   * is just to open the file and see if it succeeds */
+  KLC_errorf("os.isdir not supported for %s", KLC_OS_NAME);
+#endif
+}

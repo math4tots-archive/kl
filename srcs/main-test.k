@@ -322,9 +322,18 @@ void main() {
     assert(xs == ys)
   }
 
+  // Directory stuff
+  {
+    assert(os.isdir('.'))
+  }
+
   print(os.name)
   print('os.getcwd() = ' + str(os.getcwd()))
   print('os.posix = ' + str(os.posix))
+  print('os.isdir("hw.c") = ' + str(os.isdir("hw.c")))
+  print('os.isdir("srcs") = ' + str(os.isdir("srcs")))
+  print('os.isfile("hw.c") = ' + str(os.isfile("hw.c")))
+  print('os.isfile("srcs") = ' + str(os.isfile("srcs")))
   print('args = ' + str(args))
   print(os.listdir('.'))
   print('Hello world!')

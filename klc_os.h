@@ -70,5 +70,11 @@ KLC_bool KLCNOperatingSystemInterface_mBool(KLCNOperatingSystemInterface*);
 KLCNList* KLCNOperatingSystemInterface_mlistdir(
   KLCNOperatingSystemInterface*,
   KLCNString*);
+KLC_bool KLCNOperatingSystemInterface_misfile(
+    KLCNOperatingSystemInterface* os,
+    KLCNString* path);
+KLC_bool KLCNOperatingSystemInterface_misdir(
+    KLCNOperatingSystemInterface* os,
+    KLCNString* path);
 
 #endif/*klc_os_h*/

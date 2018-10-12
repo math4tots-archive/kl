@@ -258,6 +258,8 @@ extern class OperatingSystemInterface {
   bool GETposix()
   List listdir(String path)
   String getcwd()
+  bool isfile(String path)
+  bool isdir(String path)
 }
 
 extern OperatingSystemInterface os
