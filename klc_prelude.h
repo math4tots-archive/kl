@@ -136,6 +136,7 @@ extern KLC_typeinfo KLC_typeFile;
 extern const KLC_var KLC_null;
 
 void KLC_errorf(const char* fmt, ...);
+int KLC_check_ascii(const char* str);
 void KLC_retain(KLC_header *obj);
 void KLC_retain_var(KLC_var v);
 void KLC_partial_release(KLC_header* obj, KLC_header** delete_queue);

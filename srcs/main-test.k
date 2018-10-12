@@ -323,6 +323,7 @@ void main() {
   }
 
   print(os.name)
+  print('os.getcwd() = ' + str(os.getcwd()))
   print('os.posix = ' + str(os.posix))
   print('args = ' + str(args))
   print(os.listdir('.'))

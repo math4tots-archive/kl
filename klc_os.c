@@ -1,8 +1,11 @@
 #include "klc_os.h"
 
+#include <string.h>
+
 #if KLC_POSIX
 #include <unistd.h>
 #include <dirent.h>
+#include <errno.h>
 #endif
 
 KLCNOperatingSystemInterface* KLCN_initos() {
@@ -58,3 +61,25 @@ KLCNList* KLCNOperatingSystemInterface_mlistdir(
   KLC_errorf("os.listdir not supported for %s", KLC_OS_NAME);
 #endif
 }
+
+KLCNString* KLCNOperatingSystemInterface_mgetcwd(KLCNOperatingSystemInterface* os) {
+#if KLC_POSIX
+  size_t cap = 2, len;
+  char* buffer = (char*) malloc(sizeof(char) * cap);
+  while (getcwd(buffer, cap) == NULL) {
+    if (errno != ERANGE) {
+      /* We failed to getcwd for a reason besides not big enough buffer
+       * TODO: Better error handling */
+      return NULL;
+    }
+    cap *= 2;
+    buffer = (char*) realloc(buffer, sizeof(char) * cap);
+  }
+  len = strlen(buffer);
+  buffer = (char*) realloc(buffer, sizeof(char) * (len + 1));
+  return KLC_mkstr_with_buffer(len, buffer, KLC_check_ascii(buffer));
+#else
+  KLC_errorf("os.getcwd not supported for %s", KLC_OS_NAME);
+#endif
+}
+
