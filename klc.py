@@ -90,7 +90,7 @@ _primitive_method_names = {
 def nullable(type_):
     return type_ not in ('void', 'bool', 'int', 'double')
 
-with open(os.path.join(_scriptdir, 'klprelude.c')) as f:
+with open(os.path.join(_scriptdir, 'klc_prelude.c')) as f:
     CPRELUDE = f.read()
 
 with open(os.path.join(_scriptdir, 'builtins.k')) as f:
