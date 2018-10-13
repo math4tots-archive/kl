@@ -103,7 +103,6 @@ struct KLCNString {
      */
   #if KLC_OS_WINDOWS
     LPWSTR wstr;
-    size_t wstrbytesize;
   #endif
   int is_ascii;
 };
@@ -167,7 +166,8 @@ KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b);
 
 #if KLC_OS_WINDOWS
 LPCWSTR KLC_windows_get_wstr(KLCNString* s);
-KLCNString* KLC_windows_string_from_wstr_buffer(LPWSTR s, size_t bytesize);
+KLCNString* KLC_windows_string_from_wstr_buffer(LPWSTR s);
+KLCNString* KLC_windows_string_from_wstr(LPCWSTR s);
 #endif
 
 #endif/*klc_prelude_h*/

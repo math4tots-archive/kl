@@ -64,18 +64,18 @@ KLCNList* KLCNOperatingSystemInterface_mlistdir(
   /* TODO: Use unicode versions of these functions */
   KLCNString* suffix = KLC_mkstr("\\*");
   KLCNString* pattern = KLCNString_mAdd(path, suffix);
-  WIN32_FIND_DATAA data;
-  HANDLE hFind = FindFirstFileA(pattern->buffer, &data);
+  WIN32_FIND_DATAW data;
+  HANDLE hFind = FindFirstFileW(KLC_windows_get_wstr(pattern), &data);
   KLCNList* ret = KLC_mklist(0);
   if (hFind == INVALID_HANDLE_VALUE) {
     /* Read failed. TODO: Better error handling */
     return NULL;
   }
   do {
-    KLC_header* name = (KLC_header*) KLC_mkstr(data.cFileName);
+    KLC_header* name = (KLC_header*) KLC_windows_string_from_wstr(data.cFileName);
     KLCNList_mpush(ret, KLC_object_to_var(name));
     KLC_release(name);
-  } while (FindNextFileA(hFind, &data));
+  } while (FindNextFileW(hFind, &data));
   FindClose(hFind);
   KLC_release((KLC_header*) suffix);
   KLC_release((KLC_header*) pattern);
@@ -105,10 +105,10 @@ KLCNString* KLCNOperatingSystemInterface_mgetcwd(KLCNOperatingSystemInterface* o
 #elif KLC_OS_WINDOWS
   DWORD bufsize;
   LPWSTR buf;
-  bufsize = GetCurrentDirectoryW(0, NULL);
-  buf = (LPWSTR) malloc(bufsize);
+  bufsize = GetCurrentDirectoryW(0, NULL) + 1;
+  buf = (LPWSTR) malloc(bufsize * 2);
   GetCurrentDirectoryW(bufsize, buf);
-  return KLC_windows_string_from_wstr_buffer(buf, bufsize);
+  return KLC_windows_string_from_wstr_buffer(buf);
 #else
   KLC_errorf("os.getcwd not supported for %s", KLC_OS_NAME);
   return NULL;
@@ -127,8 +127,7 @@ KLC_bool KLCNOperatingSystemInterface_misfile(
   /* We can't prove that given path is a file, so we return false. */
   return 0;
 #elif KLC_OS_WINDOWS
-  /* TODO: Use the unicode version of this function */
-  DWORD ftype = GetFileAttributesA(path->buffer);
+  DWORD ftype = GetFileAttributesW(KLC_windows_get_wstr(path));
   if (ftype == INVALID_FILE_ATTRIBUTES) {
     return 0;
   }
@@ -156,8 +155,7 @@ KLC_bool KLCNOperatingSystemInterface_misdir(
   /* We can't prove that given path is a file, so we return false. */
   return 0;
 #elif KLC_OS_WINDOWS
-  /* TODO: Use the unicode version of this function */
-  DWORD ftype = GetFileAttributesA(path->buffer);
+  DWORD ftype = GetFileAttributesW(KLC_windows_get_wstr(path));
   if (ftype == INVALID_FILE_ATTRIBUTES) {
     return 0;
   }

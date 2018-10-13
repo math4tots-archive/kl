@@ -595,36 +595,39 @@ KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii) {
   obj->utf32 = NULL;
   #if KLC_OS_WINDOWS
     obj->wstr = NULL;
-    obj->wstrbytesize = 0;
   #endif
   obj->is_ascii = is_ascii;
   return obj;
 }
 
 #if KLC_OS_WINDOWS
-KLCNString* KLC_windows_string_from_wstr_buffer(LPWSTR s, size_t bytesize) {
-  size_t bufsize = WideCharToMultiByte(CP_UTF8, 0, s, bytesize, NULL, 0, NULL, NULL);
-  char* buf = (char*) malloc(bufsize);
-  KLCNString* ret;
-  WideCharToMultiByte(CP_UTF8, 0, s, bytesize, buf, bufsize, NULL, NULL);
-  ret = KLC_mkstr_with_buffer(bufsize, buf, KLC_check_ascii(buf));
-  ret->wstr = s;
-  ret->wstrbytesize = bytesize;
-  return ret;
-}
-
-LPCWSTR KLC_windows_get_wstr(KLCNString* s) {
-  if (!s->wstr) {
-    size_t bufsize = MultiByteToWideChar(CP_UTF8, 0, s->buffer, s->bytesize, NULL, 0);
-    if (bufsize == 0) {
-      KLC_errorf("Windows: UTF-8 to UTF-16 conversion failed");
-    }
-    s->wstr = (LPWSTR) malloc(bufsize);
-    MultiByteToWideChar(CP_UTF8, 0, s->buffer, s->bytesize, s->wstr, bufsize);
-    s->wstrbytesize = bufsize;
+  KLCNString* KLC_windows_string_from_wstr_buffer(LPWSTR s) {
+    size_t bufsize = WideCharToMultiByte(CP_UTF8, 0, s, -1, NULL, 0, NULL, NULL);
+    char* buf = (char*) malloc(bufsize);
+    KLCNString* ret;
+    WideCharToMultiByte(CP_UTF8, 0, s, -1, buf, bufsize, NULL, NULL);
+    ret = KLC_mkstr_with_buffer(bufsize - 1, buf, KLC_check_ascii(buf));
+    ret->wstr = s;
+    return ret;
   }
-  return s->wstr;
-}
+
+  KLCNString* KLC_windows_string_from_wstr(LPCWSTR s) {
+    LPWSTR buf = (LPWSTR) malloc((wcslen(s) + 1) * 2);
+    wcscpy(buf, s);
+    return KLC_windows_string_from_wstr_buffer(buf);
+  }
+
+  LPCWSTR KLC_windows_get_wstr(KLCNString* s) {
+    if (!s->wstr) {
+      size_t bufsize = MultiByteToWideChar(CP_UTF8, 0, s->buffer, -1, NULL, 0);
+      if (bufsize == 0) {
+        KLC_errorf("Windows: UTF-8 to UTF-16 conversion failed");
+      }
+      s->wstr = (LPWSTR) malloc(2 * bufsize);
+      MultiByteToWideChar(CP_UTF8, 0, s->buffer, -1, s->wstr, bufsize);
+    }
+    return s->wstr;
+  }
 #endif
 
 KLCNString* KLC_mkstr(const char *str) {
