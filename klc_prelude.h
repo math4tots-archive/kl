@@ -2,6 +2,11 @@
 #define klc_prelude_h
 #include <stdlib.h>
 #include <stdio.h>
+#include "klc_plat.h"
+
+#if KLC_OS_WINDOWS
+#include <windows.h>
+#endif
 
 #define KLC_TAG_BOOL 0
 #define KLC_TAG_INT 1
@@ -96,6 +101,10 @@ struct KLCNString {
      * exactly 32-bits. As such, I want to error on side of correctness and
      * use chars instead for measuring out the utf-32 representation.
      */
+  #if KLC_OS_WINDOWS
+    LPWSTR wstr;
+    size_t wstrbytesize;
+  #endif
   int is_ascii;
 };
 
@@ -154,5 +163,11 @@ KLC_var KLC_object_to_var(KLC_header* obj);
 void KLCNFile_mclose(KLCNFile* file);
 KLCNList* KLC_mklist(size_t cap);
 void KLCNList_mpush(KLCNList* list, KLC_var v);
+KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b);
+
+#if KLC_OS_WINDOWS
+LPCWSTR KLC_windows_get_wstr(KLCNString* s);
+KLCNString* KLC_windows_string_from_wstr_buffer(LPWSTR s, size_t bytesize);
+#endif
 
 #endif/*klc_prelude_h*/

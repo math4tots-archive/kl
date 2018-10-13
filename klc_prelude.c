@@ -567,6 +567,10 @@ KLC_var KLCNWeakReference_mgetNullable(KLCNWeakReference* wr) {
 void KLC_deleteString(KLC_header* robj, KLC_header** dq) {
   KLCNString* obj = (KLCNString*) robj;
   free(obj->buffer);
+  free(obj->utf32);
+  #if KLC_OS_WINDOWS
+    free(obj->wstr);
+  #endif
 }
 
 int KLC_check_ascii(const char* str) {
@@ -589,9 +593,39 @@ KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii) {
   obj->nchars = bytesize; /* only true when is_ascii */
   obj->buffer = str;
   obj->utf32 = NULL;
+  #if KLC_OS_WINDOWS
+    obj->wstr = NULL;
+    obj->wstrbytesize = 0;
+  #endif
   obj->is_ascii = is_ascii;
   return obj;
 }
+
+#if KLC_OS_WINDOWS
+KLCNString* KLC_windows_string_from_wstr_buffer(LPWSTR s, size_t bytesize) {
+  size_t bufsize = WideCharToMultiByte(CP_UTF8, 0, s, bytesize, NULL, 0, NULL, NULL);
+  char* buf = (char*) malloc(bufsize);
+  KLCNString* ret;
+  WideCharToMultiByte(CP_UTF8, 0, s, bytesize, buf, bufsize, NULL, NULL);
+  ret = KLC_mkstr_with_buffer(bufsize, buf, KLC_check_ascii(buf));
+  ret->wstr = s;
+  ret->wstrbytesize = bytesize;
+  return ret;
+}
+
+LPCWSTR KLC_windows_get_wstr(KLCNString* s) {
+  if (!s->wstr) {
+    size_t bufsize = MultiByteToWideChar(CP_UTF8, 0, s->buffer, s->bytesize, NULL, 0);
+    if (bufsize == 0) {
+      KLC_errorf("Windows: UTF-8 to UTF-16 conversion failed");
+    }
+    s->wstr = (LPWSTR) malloc(bufsize);
+    MultiByteToWideChar(CP_UTF8, 0, s->buffer, s->bytesize, s->wstr, bufsize);
+    s->wstrbytesize = bufsize;
+  }
+  return s->wstr;
+}
+#endif
 
 KLCNString* KLC_mkstr(const char *str) {
   size_t len = strlen(str);
