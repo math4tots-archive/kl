@@ -2667,7 +2667,10 @@ builtins_node = parse(Source('<builtin>', BUILTINS))
 
 parser = argparse.ArgumentParser()
 parser.add_argument('kfile')
-parser.add_argument('--out-file', '-o', default='a.out')
+parser.add_argument('--out-file', '-o', default=None)
+parser.add_argument('--opt', '-O', type=int, default=1)
+parser.add_argument('--debug', '-g', action='store_true', default=False)
+parser.add_argument('--no-debug', dest='debug', action='store_false')
 
 def main():
     args = parser.parse_args()
@@ -2682,12 +2685,15 @@ def main():
     with open(os.path.join(_scriptdir, 'main.c'), 'w') as f:
         f.write(c_src)
 
-    run_compiler(args.out_file)
+    run_compiler(args.out_file, args.opt, args.debug)
 
 
-def run_compiler(out_file):
+def run_compiler(out_file, opt, debug):
     if sys.platform == 'win32':
+        # TODO: pass in opt flag to windows compiler
         run_compiler_for_windows(out_file)
+    elif sys.platform == 'darwin':
+        run_compiler_for_osx(out_file, opt, debug)
     else:
         raise TypeError('Unsupported platform %s' % (sys.platform, ))
 
@@ -2699,6 +2705,9 @@ def run_compiler_for_windows(out_file):
     exe_name = os.path.join(_scriptdir, 'a.exe')
     main_path = os.path.join(_scriptdir, 'main.c')
     os_src_path = os.path.join(_scriptdir, 'klc_os.c')
+
+    if out_file is None:
+        out_file = 'a.exe'
 
     if not out_file.endswith('.exe'):
         out_file += '.exe'
@@ -2717,6 +2726,29 @@ def run_compiler_for_windows(out_file):
         )
     except subprocess.CalledProcessError:
         exit(subprocess.run(compile_cmd, shell=True).returncode)
+
+
+def run_compiler_for_osx(out_file, opt, debug):
+    run_compiler_for_unix('clang', out_file, opt, debug)
+
+
+def run_compiler_for_unix(cc, out_file, opt, debug):
+    if out_file is None:
+        out_file = 'a.out'
+
+    dbg = '-g ' if debug else ''
+    main_path = os.path.join(_scriptdir, 'main.c')
+    os_src_path = os.path.join(_scriptdir, 'klc_os.c')
+    compile_cmd = (
+        f'{cc} -Wall -Werror -Wpedantic -std=c89 -O{opt} {dbg}'
+        f'-Wno-unused-function -Wno-unused-variable '
+        f'{main_path} {os_src_path} -o {out_file}'
+    )
+
+    try:
+        subprocess.run(compile_cmd, check=True, shell=True)
+    except subprocess.CalledProcessError as e:
+        exit(e.returncode)
 
 
 if __name__ == '__main__':
