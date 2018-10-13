@@ -1,4 +1,6 @@
 *.pyc
+*.obj
+*.exe
 a.out
 main.c
 main.cc

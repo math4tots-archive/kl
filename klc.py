@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import typing
+import subprocess
 
 _scriptdir = os.path.dirname(os.path.realpath(__file__))
 
@@ -2666,6 +2667,7 @@ builtins_node = parse(Source('<builtin>', BUILTINS))
 
 parser = argparse.ArgumentParser()
 parser.add_argument('kfile')
+parser.add_argument('--out-file', '-o', default='a.out')
 
 def main():
     args = parser.parse_args()
@@ -2674,7 +2676,48 @@ def main():
     source = Source(args.kfile, data)
     node = parse(source)
     program = Program(node.token, node.definitions + builtins_node.definitions)
-    print(program.translate())
+
+    c_src = program.translate()
+
+    with open(os.path.join(_scriptdir, 'main.c'), 'w') as f:
+        f.write(c_src)
+
+    run_compiler(args.out_file)
+
+
+def run_compiler(out_file):
+    if sys.platform == 'win32':
+        run_compiler_for_windows(out_file)
+    else:
+        raise TypeError('Unsupported platform %s' % (sys.platform, ))
+
+
+def run_compiler_for_windows(out_file):
+    # TODO: Support different versions of visual studio, and handle
+    # missing C compiler more gracefully.
+    vcvars_path = r'C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat'
+    exe_name = os.path.join(_scriptdir, 'a.exe')
+    main_path = os.path.join(_scriptdir, 'main.c')
+    os_src_path = os.path.join(_scriptdir, 'klc_os.c')
+
+    if not out_file.endswith('.exe'):
+        out_file += '.exe'
+
+    compile_cmd = (
+        f'"{vcvars_path}" x64 2> NUL > NUL && '
+        f'cl "{main_path}" "{os_src_path}" /Fe{exe_name} /WX'
+    )
+    quiet_compile = f'{compile_cmd} 2> NUL > NUL'
+
+    try:
+        subprocess.run(
+            f'{quiet_compile} && move {exe_name} {out_file} > NUL',
+            check=True,
+            shell=True,
+        )
+    except subprocess.CalledProcessError:
+        exit(subprocess.run(compile_cmd, shell=True).returncode)
+
 
 if __name__ == '__main__':
     main()

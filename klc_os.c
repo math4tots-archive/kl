@@ -7,6 +7,8 @@
 #include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
+#elif KLC_OS_WINDOWS
+#include <windows.h>
 #endif
 
 KLCNOperatingSystemInterface* KLCN_initos() {
@@ -60,6 +62,7 @@ KLCNList* KLCNOperatingSystemInterface_mlistdir(
   return ret;
 #else
   KLC_errorf("os.listdir not supported for %s", KLC_OS_NAME);
+  return NULL;
 #endif
 }
 
@@ -81,6 +84,7 @@ KLCNString* KLCNOperatingSystemInterface_mgetcwd(KLCNOperatingSystemInterface* o
   return KLC_mkstr_with_buffer(len, buffer, KLC_check_ascii(buffer));
 #else
   KLC_errorf("os.getcwd not supported for %s", KLC_OS_NAME);
+  return NULL;
 #endif
 }
 
@@ -99,6 +103,7 @@ KLC_bool KLCNOperatingSystemInterface_misfile(
   /* TODO: The best we can do in an unknown environment,
    * is just to open the file and see if it succeeds */
   KLC_errorf("os.isfile not supported for %s", KLC_OS_NAME);
+  return 0;
 #endif
 }
 
@@ -117,5 +122,6 @@ KLC_bool KLCNOperatingSystemInterface_misdir(
   /* TODO: The best we can do in an unknown environment,
    * is just to open the file and see if it succeeds */
   KLC_errorf("os.isdir not supported for %s", KLC_OS_NAME);
+  return 0;
 #endif
 }
