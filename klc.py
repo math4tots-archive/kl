@@ -1,14 +1,3 @@
-"""
-From powershell:
-$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
-python .\klc.py > main.c
-
-From linux subsystem for windows:
-gcc -std=c89 -Werror -Wpedantic -Wall -Wno-unused-function -Wno-unused-variable main.c && \
-cp main.{c,cc} && \
-g++ -std=c++98 -Werror -Wpedantic -Wall -Wno-unused-function -Wno-unused-variable main.cc && \
-./a.out
-"""
 from typing import NamedTuple, Tuple, List, Union, Optional, Callable, Iterable
 import abc
 import argparse
@@ -91,7 +80,7 @@ _primitive_method_names = {
 def nullable(type_):
     return type_ not in ('void', 'bool', 'int', 'double')
 
-with open(os.path.join(_scriptdir, 'klc_prelude.c')) as f:
+with open(os.path.join(_scriptdir, 'c', 'klc_prelude.c')) as f:
     CPRELUDE = f.read()
 
 with open(os.path.join(_scriptdir, 'builtins.k')) as f:
@@ -2817,7 +2806,7 @@ def main():
 
     c_src = program.translate()
 
-    with open(os.path.join(_scriptdir, 'main.c'), 'w') as f:
+    with open(os.path.join(_scriptdir, 'c', 'main.c'), 'w') as f:
         f.write(c_src)
 
     run_compiler(args.out_file, args.opt, args.debug, args.compile_flags)
@@ -2838,8 +2827,8 @@ def run_compiler_for_windows(out_file):
     # missing C compiler more gracefully.
     vcvars_path = r'C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat'
     exe_name = os.path.join(_scriptdir, 'a.exe')
-    main_path = os.path.join(_scriptdir, 'main.c')
-    os_src_path = os.path.join(_scriptdir, 'klc_os.c')
+    main_path = os.path.join(_scriptdir, 'c', 'main.c')
+    os_src_path = os.path.join(_scriptdir, 'c', 'klc_os.c')
 
     if out_file is None:
         out_file = 'a.exe'
@@ -2877,8 +2866,8 @@ def run_compiler_for_unix(cc, out_file, opt, debug, flags=''):
         out_file = 'a.out'
 
     dbg = '-g ' if debug else ''
-    main_path = os.path.join(_scriptdir, 'main.c')
-    os_src_path = os.path.join(_scriptdir, 'klc_os.c')
+    main_path = os.path.join(_scriptdir, 'c', 'main.c')
+    os_src_path = os.path.join(_scriptdir, 'c', 'klc_os.c')
     compile_cmd = (
         f'{cc} -Wall -Werror -Wpedantic -std=c89 -O{opt} {dbg}'
         f'-Wno-unused-function -Wno-unused-variable '
