@@ -1469,6 +1469,7 @@ class GlobalTranslationContext(TranslationContext):
         for d in program.definitions:
             self.scope.add(d)
         self.out = FractalStringBuilder(0)
+        self.inc = self.out.spawn()
         self.out(CPRELUDE)
         self.fwd = self.out.spawn()
         self.hdr = self.out.spawn()
@@ -1559,6 +1560,8 @@ class Program(Node):
 
     def translate(self):
         ctx = GlobalTranslationContext(self)
+        for inc in self.env['@vars']['C_HEADERS']:
+            ctx.inc += f'#include "{inc}"'
         for ptype, mnames in sorted(_primitive_method_names.items()):
             methodmap = _compute_method_map(
                 token=self.token,
@@ -1963,7 +1966,7 @@ def parse_one_source(source, env):
     def peek(j=0):
         nonlocal i
         if should_skip_newlines():
-            while i < len(tokens) and tokens[i] == '\n':
+            while i < len(tokens) and tokens[i].type == '\n':
                 i += 1
         return tokens[min(i + j, len(tokens) - 1)]
 
@@ -2112,80 +2115,82 @@ def parse_one_source(source, env):
         #  * list
         token = peek()
         if consume('('):
-            fn = expect('NAME').value
-            if fn == 'define':
-                vname = expect('NAME').value
-                expr = parse_macro_expression()
-                expect(')')
+            with skipping_newlines(True):
+                fn = expect('NAME').value
+                if fn == 'define':
+                    vname = expect('NAME').value
+                    expr = parse_macro_expression()
+                    expect(')')
+                    def run():
+                        result = env['@vars'][vname] = expr()
+                        return result
+                    return run
+                argexprs = []
+                while not consume(')'):
+                    argexprs.append(parse_macro_expression())
                 def run():
-                    result = env['@vars'][vname] = expr()
-                    return result
+                    if fn == 'cond':
+                        i = 0
+                        while i + 1 < len(argexprs):
+                            if argexprs[i]():
+                                return argexprs[i + 1]()
+                            i += 2
+                        return argexprs[i]() if i < len(argexprs) else 0.0
+                    args = [expr() for expr in argexprs]
+                    if fn == 'eq':
+                        _check_args(token, fn, 2, args)
+                        return args[0] == args[1]
+                    elif fn == 'str':
+                        return ''.join(map(str, args))
+                    elif fn == 'begin':
+                        last = 0.0
+                        for arg in args:
+                            last = arg()
+                        return last
+                    elif fn == 'append':
+                        _check_args(token, fn, 2, args)
+                        args[0].append(args[1])
+                        return 0.0
+                    elif fn == 'print':
+                        # Should be used for debugging purposes only!!
+                        _check_args(token, fn, 1, args)
+                        print(args[0])
+                    elif fn == 'error':
+                        _check_args(token, fn, 1, args)
+                        raise Error([token], str(args[0]))
+                    elif fn == 'add':
+                        if len(args) < 1:
+                            raise Error([token], 'add expects at least 1 arg')
+                        result = args[0]
+                        for arg in args[1:]:
+                            result += arg
+                        return result
+                    elif fn == 'subtract':
+                        _check_args(token, fn, 2, args)
+                        return args[0] - args[1]
+                    elif fn == 'multiply':
+                        _check_args(token, fn, 2, args)
+                        return args[0] * args[1]
+                    elif fn == 'divide':
+                        _check_args(token, fn, 2, args)
+                        return args[0] / args[1]
+                    elif fn == 'modulo':
+                        _check_args(token, fn, 2, args)
+                        return args[0] % args[1]
+                    elif fn == 'lt':
+                        _check_args(token, fn, 2, args)
+                        return args[0] < args[1]
+                    else:
+                        raise Error([token], f'Unrecognized macro function {token}')
                 return run
-            argexprs = []
-            while not consume(')'):
-                argexprs.append(parse_macro_expression())
-            def run():
-                if fn == 'cond':
-                    i = 0
-                    while i + 1 < len(argexprs):
-                        if argexprs[i]():
-                            return argexprs[i + 1]()
-                        i += 2
-                    return argexprs[i]() if i < len(argexprs) else 0.0
-                args = [expr() for expr in argexprs]
-                if fn == 'eq':
-                    _check_args(token, fn, 2, args)
-                    return args[0] == args[1]
-                elif fn == 'str':
-                    return ''.join(map(str, args))
-                elif fn == 'begin':
-                    last = 0.0
-                    for arg in args:
-                        last = arg()
-                    return last
-                elif fn == 'append':
-                    _check_args(token, fn, 2, args)
-                    args[0].append(args[1])
-                    return 0.0
-                elif fn == 'print':
-                    # Should be used for debugging purposes only!!
-                    _check_args(token, fn, 1, args)
-                    print(args[0])
-                elif fn == 'error':
-                    _check_args(token, fn, 1, args)
-                    raise Error([token], str(args[0]))
-                elif fn == 'add':
-                    if len(args) < 1:
-                        raise Error([token], 'add expects at least 1 arg')
-                    result = args[0]
-                    for arg in args[1:]:
-                        result += arg
-                    return result
-                elif fn == 'subtract':
-                    _check_args(token, fn, 2, args)
-                    return args[0] - args[1]
-                elif fn == 'multiply':
-                    _check_args(token, fn, 2, args)
-                    return args[0] * args[1]
-                elif fn == 'divide':
-                    _check_args(token, fn, 2, args)
-                    return args[0] / args[1]
-                elif fn == 'modulo':
-                    _check_args(token, fn, 2, args)
-                    return args[0] % args[1]
-                elif fn == 'lt':
-                    _check_args(token, fn, 2, args)
-                    return args[0] < args[1]
-                else:
-                    raise Error([token], f'Unrecognized macro function {token}')
-            return run
         elif consume('['):
-            exprs = []
-            while not consume(']'):
-                exprs.append(parse_macro_expression())
-            def run():
-                return [expr() for expr in exprs]
-            return run
+            with skipping_newlines(True):
+                exprs = []
+                while not consume(']'):
+                    exprs.append(parse_macro_expression())
+                def run():
+                    return [expr() for expr in exprs]
+                return run
         elif at('INT') or at('FLOAT'):
             value = float(gettok().value)
             return lambda: value
@@ -2200,7 +2205,9 @@ def parse_one_source(source, env):
                 return env['@vars'][name]
             return run
         else:
-            raise Error([token], f'Expected macro expression')
+            raise Error(
+                [token],
+                f'Expected macro expression but got {repr(token.type)}')
 
 
     def parse_global_variable_definition(defs):
@@ -2805,19 +2812,20 @@ def main():
         node.env)
 
     c_src = program.translate()
+    env = program.env
 
     with open(os.path.join(_scriptdir, 'c', 'main.c'), 'w') as f:
         f.write(c_src)
 
-    run_compiler(args.out_file, args.opt, args.debug, args.compile_flags)
+    run_compiler(env, args.out_file, args.opt, args.debug, args.compile_flags)
 
 
-def run_compiler(out_file, opt, debug, flags):
+def run_compiler(env, out_file, opt, debug, flags):
     if sys.platform == 'win32':
         # TODO: pass in opt flag to windows compiler
         run_compiler_for_windows(out_file)
     elif sys.platform == 'darwin':
-        run_compiler_for_osx(out_file, opt, debug, flags)
+        run_compiler_for_osx(env, out_file, opt, debug, flags)
     else:
         raise TypeError('Unsupported platform %s' % (sys.platform, ))
 
@@ -2852,26 +2860,35 @@ def run_compiler_for_windows(out_file):
         exit(subprocess.run(compile_cmd, shell=True).returncode)
 
 
-def run_compiler_for_osx(out_file, opt, debug, flags):
+def run_compiler_for_osx(env, out_file, opt, debug, flags):
+
+    framework_flags = ''
+
+    for framework in env['@vars']['APPLE_FRAMEWORKS']:
+        framework_flags += f' -framework {framework}'
+
     run_compiler_for_unix(
         'clang',
+        env,
         out_file,
         opt,
         debug,
-        flags)
+        flags + framework_flags)
 
 
-def run_compiler_for_unix(cc, out_file, opt, debug, flags=''):
+def run_compiler_for_unix(cc, env, out_file, opt, debug, flags=''):
     if out_file is None:
         out_file = 'a.out'
 
+    base = os.path.join(_scriptdir, 'c')
+    srcs = env['@vars']['C_SOURCES']
+    srcsstr = ' '.join(os.path.join(base, p) for p in srcs)
+
     dbg = '-g ' if debug else ''
-    main_path = os.path.join(_scriptdir, 'c', 'main.c')
-    os_src_path = os.path.join(_scriptdir, 'c', 'klc_os.c')
     compile_cmd = (
         f'{cc} -Wall -Werror -Wpedantic -std=c89 -O{opt} {dbg}'
         f'-Wno-unused-function -Wno-unused-variable '
-        f'{main_path} {os_src_path} -o {out_file} {flags}'
+        f'{srcsstr} -o {out_file} {flags}'
     )
 
     try:

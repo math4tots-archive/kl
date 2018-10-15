@@ -1,4 +1,12 @@
 
+#(define C_HEADERS [
+  'klc_os.h'
+])
+#(define C_SOURCES [
+  'main.c'    // This is where the main program is
+  'klc_os.c'  // basic operating system interface
+])
+
 // Frameworks that are required for deploying to darwin targets.
 #(define APPLE_FRAMEWORKS [])
 
