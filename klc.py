@@ -1923,12 +1923,14 @@ class ClassDefinition(TypeDefinition):
 
 
 def parse(source):
-    cache = dict()
-    stack = []
-    intgen = [0]
-    main_node = parse_one_source(source, cache, stack, intgen)
+    env = {
+        '@stack': [],
+        '@intgen': [0],
+        '@cache': dict(),
+    }
+    main_node = parse_one_source(source, env)
     defs = list(main_node.definitions)
-    for lib_node in cache.values():
+    for lib_node in env['@cache'].values():
         defs.extend(lib_node.definitions)
     return Program(main_node.token, defs)
 
@@ -1950,12 +1952,13 @@ def _check_method_name(token, name):
             f'Only special methods may start with an upper case letter')
 
 
-def parse_one_source(source, cache, stack, intgen):
+def parse_one_source(source, env):
     tokens = lex(source)
     i = 0
-    cache = dict() if cache is None else cache
-    stack = [] if stack is None else stack
     indent_stack = []
+    cache = env['@cache']
+    stack = env['@stack']
+    intgen = env['@intgen']
 
     def peek(j=0):
         nonlocal i
@@ -2078,7 +2081,7 @@ def parse_one_source(source, cache, stack, intgen):
 
         try:
             stack.append((upath, token))
-            cache[upath] = parse_one_source(Source(abspath, data), cache, stack, intgen)
+            cache[upath] = parse_one_source(Source(abspath, data), env)
         finally:
             stack.pop()
 
