@@ -6,6 +6,10 @@
 
 #if KLC_OS_WINDOWS
 #include <windows.h>
+#elif KLC_OS_APPLE
+#include <CoreFoundation/CoreFoundation.h>
+#include <objc/objc.h>
+#include <objc/objc-runtime.h>
 #endif
 
 #define KLC_TAG_BOOL 0

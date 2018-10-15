@@ -1,6 +1,7 @@
 *.pyc
 *.obj
 *.exe
+*.dSYM
 a.out
 main.c
 main.cc

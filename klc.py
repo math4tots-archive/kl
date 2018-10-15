@@ -2671,6 +2671,7 @@ parser.add_argument('--out-file', '-o', default=None)
 parser.add_argument('--opt', '-O', type=int, default=1)
 parser.add_argument('--debug', '-g', action='store_true', default=False)
 parser.add_argument('--no-debug', dest='debug', action='store_false')
+parser.add_argument('--compile-flags', '-f', default='')
 
 def main():
     args = parser.parse_args()
@@ -2685,15 +2686,15 @@ def main():
     with open(os.path.join(_scriptdir, 'main.c'), 'w') as f:
         f.write(c_src)
 
-    run_compiler(args.out_file, args.opt, args.debug)
+    run_compiler(args.out_file, args.opt, args.debug, args.compile_flags)
 
 
-def run_compiler(out_file, opt, debug):
+def run_compiler(out_file, opt, debug, flags):
     if sys.platform == 'win32':
         # TODO: pass in opt flag to windows compiler
         run_compiler_for_windows(out_file)
     elif sys.platform == 'darwin':
-        run_compiler_for_osx(out_file, opt, debug)
+        run_compiler_for_osx(out_file, opt, debug, flags)
     else:
         raise TypeError('Unsupported platform %s' % (sys.platform, ))
 
@@ -2728,11 +2729,16 @@ def run_compiler_for_windows(out_file):
         exit(subprocess.run(compile_cmd, shell=True).returncode)
 
 
-def run_compiler_for_osx(out_file, opt, debug):
-    run_compiler_for_unix('clang', out_file, opt, debug)
+def run_compiler_for_osx(out_file, opt, debug, flags):
+    run_compiler_for_unix(
+        'clang',
+        out_file,
+        opt,
+        debug,
+        flags)
 
 
-def run_compiler_for_unix(cc, out_file, opt, debug):
+def run_compiler_for_unix(cc, out_file, opt, debug, flags=''):
     if out_file is None:
         out_file = 'a.out'
 
@@ -2742,7 +2748,7 @@ def run_compiler_for_unix(cc, out_file, opt, debug):
     compile_cmd = (
         f'{cc} -Wall -Werror -Wpedantic -std=c89 -O{opt} {dbg}'
         f'-Wno-unused-function -Wno-unused-variable '
-        f'{main_path} {os_src_path} -o {out_file}'
+        f'{main_path} {os_src_path} -o {out_file} {flags}'
     )
 
     try:
