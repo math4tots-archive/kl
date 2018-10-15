@@ -1,4 +1,7 @@
 
+// Frameworks that are required for deploying to darwin targets.
+#(define APPLE_FRAMEWORKS [])
+
 // Special functions required by the language
 bool _Is(var a, var b)
 bool _IsNot(var a, var b)

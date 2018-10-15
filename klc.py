@@ -1565,6 +1565,7 @@ class ExpressionTranslationContext(TranslationContext):
 class Program(Node):
     fields = (
         ('definitions', List[GlobalDefinition]),
+        ('env', dict),
     )
 
     def translate(self):
@@ -1922,17 +1923,27 @@ class ClassDefinition(TypeDefinition):
             sp += 'return v;'
 
 
-def parse(source):
+def parse(source, env=None):
+    plat = sys.platform
+
+    # NOTE: This is really for documentation purposes, so that
+    # plat is not something unexpected
+    assert plat in (
+        'darwin',  # OS X
+    ), plat
     env = {
         '@stack': [],
         '@intgen': [0],
         '@cache': dict(),
-    }
+        '@vars': {
+            'PLATFORM': plat,
+        },
+    } if env is None else env
     main_node = parse_one_source(source, env)
     defs = list(main_node.definitions)
     for lib_node in env['@cache'].values():
         defs.extend(lib_node.definitions)
-    return Program(main_node.token, defs)
+    return Program(main_node.token, defs, env)
 
 
 def _has_lower(s):
@@ -1999,10 +2010,13 @@ def parse_one_source(source, env):
         return gettok()
 
     def expect_name(name):
-        token = expect('NAME')
-        if token.value != name:
+        if not at_name(name):
+            token = expect('NAME')
             raise Error([token], f'Expected name {name} but got {token.value}')
-        return token
+        return expect('NAME')
+
+    def at_name(name, j=0):
+        return at('NAME', j) and peek(j).value == name
 
     def expect_delim():
         token = peek()
@@ -2026,7 +2040,7 @@ def parse_one_source(source, env):
         while not at('EOF'):
             parse_global_definition(defs)
             consume_delim()
-        return Program(token, defs)
+        return Program(token, defs, env)
 
     def parse_global_definition(defs):
         consume_delim()
@@ -2055,35 +2069,150 @@ def parse_one_source(source, env):
 
     def parse_macro(defs):
         token = expect('#')
-        expect_name('include')
-        upath = expect('STRING').value
-        consume_delim()
-        if not upath.startswith('./'):
-            raise Error([token], 'Absolute paths not supported yet')
+        if at_name('include'):
+            # 'include' directives are handled specially.
+            # Conditional includes are not allowed.
+            expect_name('include')
+            upath = expect('STRING').value
+            consume_delim()
+            if not upath.startswith('./'):
+                raise Error([token], 'Absolute paths not supported yet')
 
-        if upath in [p for p, _ in stack]:
-            toks = [t for _, t in stack]
-            raise Error(toks + [token], '#include cycle')
+            if upath in [p for p, _ in stack]:
+                toks = [t for _, t in stack]
+                raise Error(toks + [token], '#include cycle')
 
-        if upath in cache:
-            return
+            if upath in cache:
+                return
 
-        parts = upath.split('/')
-        assert parts[0] == '.'
-        dirpath = os.path.dirname(source.filename)
-        path = os.path.join(dirpath, *parts[1:])
-        abspath = os.path.abspath(os.path.realpath(path))
-        if not os.path.isfile(abspath):
-            raise Error([token], f'File {upath} ({abspath}) does not exist')
+            parts = upath.split('/')
+            assert parts[0] == '.'
+            dirpath = os.path.dirname(source.filename)
+            path = os.path.join(dirpath, *parts[1:])
+            abspath = os.path.abspath(os.path.realpath(path))
+            if not os.path.isfile(abspath):
+                raise Error([token], f'File {upath} ({abspath}) does not exist')
 
-        with open(abspath) as f:
-            data = f.read()
+            with open(abspath) as f:
+                data = f.read()
 
-        try:
-            stack.append((upath, token))
-            cache[upath] = parse_one_source(Source(abspath, data), env)
-        finally:
-            stack.pop()
+            try:
+                stack.append((upath, token))
+                cache[upath] = parse_one_source(Source(abspath, data), env)
+            finally:
+                stack.pop()
+        elif at('('):
+            parse_macro_expression()()
+        else:
+            raise Error([peek()], f'Unrecognized macro type')
+
+    def _check_args(token, fn, expect, args):
+        if len(args) != expect:
+            raise Error(
+                [token],
+                f'Macro function {fn} expects {expect} args '
+                f'but got {len(args)}')
+
+    def parse_macro_expression():
+        # The result of parsing a macro expression is just a Python
+        # function that accepts no arguments. Simply running the
+        # function will cause the macro expression to be evaluated.
+        # Result of macro expressions must be one of the following:
+        #  * number (double)
+        #  * string
+        #  * list
+        token = peek()
+        if consume('('):
+            fn = expect('NAME').value
+            if fn == 'define':
+                vname = expect('NAME').value
+                expr = parse_macro_expression()
+                expect(')')
+                def run():
+                    result = env['@vars'][vname] = expr()
+                    return result
+                return run
+            argexprs = []
+            while not consume(')'):
+                argexprs.append(parse_macro_expression())
+            def run():
+                if fn == 'cond':
+                    i = 0
+                    while i + 1 < len(argexprs):
+                        if argexprs[i]():
+                            return argexprs[i + 1]()
+                        i += 2
+                    return argexprs[i]() if i < len(argexprs) else 0.0
+                args = [expr() for expr in argexprs]
+                if fn == 'eq':
+                    _check_args(token, fn, 2, args)
+                    return args[0] == args[1]
+                elif fn == 'str':
+                    return ''.join(map(str, args))
+                elif fn == 'begin':
+                    last = 0.0
+                    for arg in args:
+                        last = arg()
+                    return last
+                elif fn == 'append':
+                    _check_args(token, fn, 2, args)
+                    args[0].append(args[1])
+                    return 0.0
+                elif fn == 'print':
+                    # Should be used for debugging purposes only!!
+                    _check_args(token, fn, 1, args)
+                    print(args[0])
+                elif fn == 'error':
+                    _check_args(token, fn, 1, args)
+                    raise Error([token], str(args[0]))
+                elif fn == 'add':
+                    if len(args) < 1:
+                        raise Error([token], 'add expects at least 1 arg')
+                    result = args[0]
+                    for arg in args[1:]:
+                        result += arg
+                    return result
+                elif fn == 'subtract':
+                    _check_args(token, fn, 2, args)
+                    return args[0] - args[1]
+                elif fn == 'multiply':
+                    _check_args(token, fn, 2, args)
+                    return args[0] * args[1]
+                elif fn == 'divide':
+                    _check_args(token, fn, 2, args)
+                    return args[0] / args[1]
+                elif fn == 'modulo':
+                    _check_args(token, fn, 2, args)
+                    return args[0] % args[1]
+                elif fn == 'lt':
+                    _check_args(token, fn, 2, args)
+                    return args[0] < args[1]
+                else:
+                    raise Error([token], f'Unrecognized macro function {token}')
+            return run
+        elif consume('['):
+            exprs = []
+            while not consume(']'):
+                exprs.append(parse_macro_expression())
+            def run():
+                return [expr() for expr in exprs]
+            return run
+        elif at('INT') or at('FLOAT'):
+            value = float(gettok().value)
+            return lambda: value
+        elif at('STRING'):
+            value = expect('STRING').value
+            return lambda: value
+        elif at('NAME'):
+            name = expect('NAME').value
+            def run():
+                if name not in env['@vars']:
+                    raise Error([token], f'Macro variable {name} not defined')
+                return env['@vars'][name]
+            return run
+        else:
+            raise Error([token], f'Expected macro expression')
+
 
     def parse_global_variable_definition(defs):
         token = peek()
@@ -2666,8 +2795,6 @@ def parse_one_source(source, env):
 
 tok = lex(Source('<dummy>', 'dummy'))[0]
 
-builtins_node = parse(Source('<builtin>', BUILTINS))
-
 parser = argparse.ArgumentParser()
 parser.add_argument('kfile')
 parser.add_argument('--out-file', '-o', default=None)
@@ -2681,8 +2808,12 @@ def main():
     with open(args.kfile) as f:
         data = f.read()
     source = Source(args.kfile, data)
-    node = parse(source)
-    program = Program(node.token, node.definitions + builtins_node.definitions)
+    builtins_node = parse(Source('<builtin>', BUILTINS))
+    node = parse(source, builtins_node.env)
+    program = Program(
+        node.token,
+        node.definitions + builtins_node.definitions,
+        node.env)
 
     c_src = program.translate()
 
