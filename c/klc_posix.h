@@ -13,6 +13,8 @@ struct KLCNPOSIXInterface {
 
 KLCNPOSIXInterface* KLCN_initPOSIX();
 void KLC_deletePOSIXInterface(KLC_header*, KLC_header**);
+KLC_int KLCNPOSIXInterface_mGETVERSION(KLCNPOSIXInterface*);
 KLCNString* KLCNPOSIXInterface_mgetcwd(KLCNPOSIXInterface*);
+KLCNList* KLCNPOSIXInterface_mreaddir(KLCNPOSIXInterface*, KLCNString*);
 
 #endif/*klc_posix_h*/

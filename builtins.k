@@ -97,6 +97,9 @@ trait Object() {
   String Str() {
     return this.Repr().(String)
   }
+  bool Bool() {
+    return true
+  }
 }
 
 extern class WeakReference {

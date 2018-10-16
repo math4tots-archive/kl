@@ -4,6 +4,14 @@
 #include <stdio.h>
 #include "klc_plat.h"
 
+#if KLC_POSIX
+/* TODO: Check if this is ok.
+ * I don't think inttypes.h was included in
+ * the first version of posix.
+ */
+#include <inttypes.h>
+#endif
+
 #if KLC_OS_WINDOWS
 #include <windows.h>
 #elif KLC_OS_APPLE
@@ -21,7 +29,13 @@
 
 typedef struct KLC_stack_frame KLC_stack_frame;
 typedef char KLC_bool;
+
+#if KLC_POSIX
+typedef intmax_t KLC_int;
+#else
 typedef long KLC_int;
+#endif
+
 typedef struct KLC_header KLC_header;
 typedef struct KLC_methodinfo KLC_methodinfo;
 typedef struct KLC_methodlist KLC_methodlist;
@@ -162,6 +176,7 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
 KLC_bool KLC_truthy(KLC_var v);
 void KLC_release(KLC_header *obj);
 KLC_bool KLC_var_to_bool(KLC_var v);
+KLC_var KLC_int_to_var(KLC_int i);
 KLC_var KLC_object_to_var(KLC_header* obj);
 void KLCNFile_mclose(KLCNFile* file);
 KLCNList* KLC_mklist(size_t cap);

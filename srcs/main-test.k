@@ -261,6 +261,15 @@ void main() {
     assert(wr.getNullable() is null)
   }
 
+  // truthy
+  {
+    String s
+
+    // null variables, even if concretely typed,
+    // should return false
+    assert(!s)
+  }
+
   // function as variable
   {
     assert(f1(f0) == 'hello world')

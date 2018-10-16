@@ -4,6 +4,11 @@
 /* I want to eventually support at least POSIX and Windows.
  * Anything not yet supported will cause the 'os' global variable
  * set to null.
+ *
+ * Even if _POSIX_VERSION is defined, the minimum version of
+ * of 200112 must be met to be considered 'POSIX'.
+ * This corresponds to Issue 6.
+ *
  */
 #if __APPLE__
 
@@ -39,7 +44,7 @@
 #define KLC_OS_NAME "windows"
 #define KLC_OS_WINDOWS 1
 
-#elif defined(_POSIX_C_SOURCE) || defined(_POSIX_VERSION)
+#elif _POSIX_VERSION >= 200112
 
 #define KLC_OS_NAME "posix"
 #define KLC_POSIX 1
