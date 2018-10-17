@@ -1922,6 +1922,7 @@ def parse(source, env=None):
     # plat is not something unexpected
     assert plat in (
         'darwin',  # OS X
+        'win32',
     ), plat
     env = {
         '@stack': [],
