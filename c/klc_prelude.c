@@ -5,8 +5,22 @@
 
 #define KLC_MAX_STACK_SIZE 1000
 
+/* For now we assume that
+ * we always want command line programs.
+ * But in the future we can enable
+ * KLC_WIN_APP to create windows GUI programs
+ */
+#if KLC_OS_WINDOWS
+#define KLC_WIN_APP 0
+#endif
+
+#if KLC_WIN_APP
+#pragma comment(lib, "shell32.lib")
+static LPCWSTR KLC_lpCmdLine;
+#else
 static int KLC_argc;
 static const char** KLC_argv;
+#endif
 
 static size_t KLC_stacktrace_size = 0;
 static KLC_stack_frame KLC_stacktrace[KLC_MAX_STACK_SIZE];
@@ -978,6 +992,19 @@ KLCNFile* KLCN_initstderr() {
 }
 
 KLCNList* KLCN_initargs() {
+#if KLC_WIN_APP
+  KLCNList* args;
+  int argc, i;
+  LPWSTR* argv;
+  argv = CommandLineToArgvW(KLC_lpCmdLine, &argc);
+  args = KLC_mklist(argc);
+  for (i = 0; i < argc; i++) {
+    KLC_header* arg = (KLC_header*) KLC_windows_string_from_wstr(argv[i]);
+    KLCNList_mpush(args, KLC_object_to_var(arg));
+    KLC_release(arg);
+  }
+  LocalFree(argv);
+#else
   KLCNList* args = KLC_mklist(KLC_argc);
   int i;
   for (i = 0; i < KLC_argc; i++) {
@@ -985,6 +1012,7 @@ KLCNList* KLCN_initargs() {
     KLCNList_mpush(args, KLC_object_to_var(arg));
     KLC_release(arg);
   }
+#endif
   return args;
 }
 
@@ -996,6 +1024,18 @@ void KLCNassert(KLC_var cond) {
 
 void KLCNmain();
 
+#if KLC_WIN_APP
+int CALLBACK wWinMain(
+    _In_ HINSTANCE hInstance,
+    _In_ HINSTANCE hPrevInstance,
+    _In_ LPWSTR lpCmdLine,
+    _In_ int nCmdShow) {
+  KLC_lpCmdLine = lpCmdLine;
+  KLCNmain();
+  KLC_release_queued_before_exit();
+  return 0;
+}
+#else
 int main(int argc, const char** argv) {
   KLC_argc = argc;
   KLC_argv = argv;
@@ -1003,3 +1043,4 @@ int main(int argc, const char** argv) {
   KLC_release_queued_before_exit();
   return 0;
 }
+#endif

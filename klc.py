@@ -2824,20 +2824,21 @@ def main():
 def run_compiler(env, out_file, opt, debug, flags):
     if sys.platform == 'win32':
         # TODO: pass in opt flag to windows compiler
-        run_compiler_for_windows(out_file)
+        run_compiler_for_windows(env, out_file)
     elif sys.platform == 'darwin':
         run_compiler_for_osx(env, out_file, opt, debug, flags)
     else:
         raise TypeError('Unsupported platform %s' % (sys.platform, ))
 
 
-def run_compiler_for_windows(out_file):
+def run_compiler_for_windows(env, out_file):
     # TODO: Support different versions of visual studio, and handle
     # missing C compiler more gracefully.
     vcvars_path = r'C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat'
     exe_name = os.path.join(_scriptdir, 'a.exe')
-    main_path = os.path.join(_scriptdir, 'c', 'main.c')
-    os_src_path = os.path.join(_scriptdir, 'c', 'klc_os.c')
+    base = os.path.join(_scriptdir, 'c')
+    srcs = env['@vars']['C_SOURCES']
+    srcsstr = ' '.join(f'"{os.path.join(base, p)}"' for p in srcs)
 
     if out_file is None:
         out_file = 'a.exe'
@@ -2847,7 +2848,7 @@ def run_compiler_for_windows(out_file):
 
     compile_cmd = (
         f'"{vcvars_path}" x64 2> NUL > NUL && '
-        f'cl "{main_path}" "{os_src_path}" /Fe{exe_name} /WX'
+        f'cl {srcsstr} /Fe{exe_name} /WX'
     )
     quiet_compile = f'{compile_cmd} 2> NUL > NUL'
 

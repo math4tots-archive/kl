@@ -145,6 +145,10 @@ struct KLCNFile {
   KLC_bool should_close;
 };
 
+#if KLC_OS_WINDOWS
+extern HINSTANCE KLC_hInstance;
+#endif
+
 extern KLC_typeinfo KLC_typenull;
 extern KLC_typeinfo KLC_typebool;
 extern KLC_typeinfo KLC_typeint;
