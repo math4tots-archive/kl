@@ -1923,6 +1923,7 @@ def parse(source, env=None):
     assert plat in (
         'darwin',  # OS X
         'win32',
+        'linux',
     ), plat
     env = {
         '@stack': [],
@@ -2798,7 +2799,6 @@ parser.add_argument('--out-file', '-o', default=None)
 parser.add_argument('--opt', '-O', type=int, default=1)
 parser.add_argument('--debug', '-g', action='store_true', default=False)
 parser.add_argument('--no-debug', dest='debug', action='store_false')
-parser.add_argument('--compile-flags', '-f', default='')
 
 def main():
     args = parser.parse_args()
@@ -2818,15 +2818,17 @@ def main():
     with open(os.path.join(_scriptdir, 'c', 'main.c'), 'w') as f:
         f.write(c_src)
 
-    run_compiler(env, args.out_file, args.opt, args.debug, args.compile_flags)
+    run_compiler(env, args.out_file, args.opt, args.debug)
 
 
-def run_compiler(env, out_file, opt, debug, flags):
+def run_compiler(env, out_file, opt, debug):
     if sys.platform == 'win32':
         # TODO: pass in opt flag to windows compiler
         run_compiler_for_windows(env, out_file)
     elif sys.platform == 'darwin':
-        run_compiler_for_osx(env, out_file, opt, debug, flags)
+        run_compiler_for_osx(env, out_file, opt, debug)
+    elif sys.platform == 'linux':
+        run_compiler_for_linux(env, out_file, opt, debug)
     else:
         raise TypeError('Unsupported platform %s' % (sys.platform, ))
 
@@ -2862,7 +2864,7 @@ def run_compiler_for_windows(env, out_file):
         exit(subprocess.run(compile_cmd, shell=True).returncode)
 
 
-def run_compiler_for_osx(env, out_file, opt, debug, flags):
+def run_compiler_for_osx(env, out_file, opt, debug):
 
     framework_flags = ''
 
@@ -2875,7 +2877,14 @@ def run_compiler_for_osx(env, out_file, opt, debug, flags):
         out_file,
         opt,
         debug,
-        flags + framework_flags)
+        framework_flags)
+
+
+def run_compiler_for_linux(env, out_file, opt, debug):
+    warning_flags = (
+        '-Wno-unused-but-set-variable '
+    )
+    run_compiler_for_unix('gcc', env, out_file, opt, debug, warning_flags)
 
 
 def run_compiler_for_unix(cc, env, out_file, opt, debug, flags=''):

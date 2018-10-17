@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# For windows subsystem for linux, Python 3.6 is not available from the
+# official repository.
+# So at least for me, I built Python3.6.6 from source
+# and I've used that to test this.
+#
+# wget https://www.python.org/ftp/python/3.6.6/Python-3.6.6.tar.xz
+# tar xf Python-3.6.6.tar.xz
+# cd Python-3.6.6
+# ./configure --enable-optimizations
+# make -j 8
+# sudo make altinstall
+#
+# Or if the above is too slow,
+#
+# ./configure --without-tests
+# ...
+#
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && cd ../.. && pwd )"
+python3.6 "$DIR/klc.py" "$@"
