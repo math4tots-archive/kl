@@ -51,15 +51,74 @@ static size_t KLC_utf8_pointsize(char sc) {
   return 0;
 }
 
-static KLC_char32 KLC_utf8_next(const char* s, size_t len) {
+static size_t KLC_utf8_size_for_point(KLC_char32 c) {
+  if (c <= 0x7F) {
+    return 1;
+  } else if (c >= 0x80 && c <= 0x7FF) {
+    return 2;
+  } else if (c >= 0x800 && c <= 0xFFFF) {
+    return 3;
+  } else if (c >= 0x10000 && c <= 0x10FFFF) {
+    return 4;
+  }
+  /* INVALID */
+  return 0;
+}
+
+static KLC_char32 KLC_utf8_read_next(const char* s, size_t len) {
   size_t i;
-  KLC_char32 c = *s;
-  for (i = 1; i < len; i++) {
-    s++;
-    c <<= 7;
-    c |= *s & 0xFF;
+  KLC_char32 c = (unsigned char) *s++;
+  switch (len) {
+    case 2:
+      c &= ((1 << 5) - 1);
+      break;
+    case 3:
+      c &= ((1 << 4) - 1);
+      break;
+    case 4:
+      c &= ((1 << 3) - 1);
+      break;
+  }
+  for (i = 1; i < len; i++, s++) {
+    c <<= 6;
+    c |= ((unsigned char) *s) & ((1 << 6) - 1);
+  }
+  if (KLC_utf8_size_for_point(c) != len) {
+    KLC_errorf("FUBAR: Incorrectly read string");
+  }
+  if (len == 3) {
+    printf("%x\n", c);
   }
   return c;
+}
+
+static size_t KLC_utf8_write_next(char* s, KLC_char32 c) {
+  size_t len = KLC_utf8_size_for_point(c), i;
+  if (!len) {
+    /* INVALID */
+    return 0;
+  }
+  for (i = 1; i < len; i++) {
+    s[len - i] = (1 << 7 | (c % (1 << 6)));
+    c >>= 6;
+  }
+  switch (len) {
+    case 1:
+      *s = c;
+      break;
+    case 2:
+      *s = (11 << 6) | c;
+      break;
+    case 3:
+      *s = (111 << 5) | c;
+      break;
+    case 4:
+      *s = (1111 << 4) | c;
+      break;
+    default:
+      KLC_errorf("KLC_utf8_write_next: FUBAR");
+  }
+  return len;
 }
 
 static KLC_bool KLC_utf8_has_bom(const char* s) {
@@ -76,7 +135,7 @@ static KLC_char32* KLC_utf8_to_utf32(const char* s, size_t bytesize, size_t* siz
       free(buf);
       return NULL;
     }
-    buf[len++] = KLC_utf8_next(s + i, ps);
+    buf[len++] = KLC_utf8_read_next(s + i, ps);
     i += ps;
   }
   buf[len] = 0;
@@ -799,6 +858,60 @@ KLC_bool KLCNString_mEq(KLCNString* a, KLCNString* b) {
 
 KLC_bool KLCNString_mLt(KLCNString* a, KLCNString* b) {
   return strcmp(a->utf8, b->utf8) < 0;
+}
+
+KLCNString* KLCNString_mSlice(KLCNString* s, KLC_int a, KLC_int b) {
+  size_t len;
+  KLC_String_init_utf32(s);
+  len = s->nchars;
+  if (a < 0) {
+    a += len;
+  }
+  if (a < 0 || a >= len) {
+    KLC_errorf(
+        "start index out of bounds (a = "
+        KLC_INT_FMT ", len = " KLC_INT_FMT ")",
+        a, len);
+  }
+  if (b < 0) {
+    b += len;
+  }
+  if (b < 0 || b > len) {
+    KLC_errorf(
+        "end index out of bounds (b = "
+        KLC_INT_FMT ", len = " KLC_INT_FMT ")",
+        b, len);
+  }
+  if (a >= b) {
+    return KLC_mkstr("");
+  }
+  if (s->is_ascii) {
+    char* buffer = (char*) malloc(sizeof(char) * (b - a + 1));
+    size_t i = a, j = 0;
+    while (i < b) {
+      buffer[j++] = s->utf8[i++];
+    }
+    buffer[j] = '\0';
+    return KLC_mkstr_with_buffer(j, buffer, 1);
+  } else {
+    char* buffer = (char*) malloc(sizeof(KLC_char32) * (b - a + 1));
+    int is_ascii = 1;
+    size_t i = a, j = 0;
+    while (i < b) {
+      size_t d = KLC_utf8_write_next(buffer + j, s->utf32[i++]);
+      if (!d) {
+        /* KLC_errorf("FUBAR: Invalid unicode codepoint"); */
+        KLC_errorf("FUBAR: Invalid unicode codepoint %lu", s->utf32[i - 1]);
+      }
+      if (d > 1) {
+        is_ascii = 0;
+      }
+      j += d;
+    }
+    buffer[j] = '\0';
+    buffer = (char*) realloc(buffer, sizeof(char) * (j + 1));
+    return KLC_mkstr_with_buffer(j, buffer, is_ascii);
+  }
 }
 
 void KLCNpanic(KLCNString* message) {

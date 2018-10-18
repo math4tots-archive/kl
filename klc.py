@@ -32,6 +32,9 @@ _special_method_names = {
     'Bool',
     'GetItem',
     'SetItem',
+    'Slice',
+    'SliceLeft',
+    'SliceRight',
 }
 
 SYMBOLS = [

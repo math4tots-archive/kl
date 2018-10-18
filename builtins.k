@@ -130,6 +130,22 @@ extern class String {
   bool Bool() {
     return bool(this.size)
   }
+  String Slice(int start, int end)
+
+  String SliceLeft(int start) {
+    return this.Slice(start, this.size)
+  }
+
+  String SliceRight(int end) {
+    return this.Slice(0, end)
+  }
+
+  String GetItem(int i) {
+    if (i < 0) {
+      i = i + this.size
+    }
+    return this.Slice(i, i + 1)
+  }
 }
 
 extern class StringBuilder {
