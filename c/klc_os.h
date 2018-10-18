@@ -11,7 +11,7 @@ struct KLCNOperatingSystemInterface {
 
 extern KLC_typeinfo KLC_typeOperatingSystemInterface;
 
-KLCNOperatingSystemInterface* KLCN_initos();
+KLCNOperatingSystemInterface* KLCN_initOS();
 void KLC_deleteOperatingSystemInterface(KLC_header* robj, KLC_header** dq);
 KLCNString* KLCNOperatingSystemInterface_mGETname(KLCNOperatingSystemInterface*);
 KLC_bool KLCNOperatingSystemInterface_mGETposix(KLCNOperatingSystemInterface*);

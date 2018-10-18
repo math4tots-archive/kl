@@ -11,7 +11,7 @@
 #include <windows.h>
 #endif
 
-KLCNOperatingSystemInterface* KLCN_initos() {
+KLCNOperatingSystemInterface* KLCN_initOS() {
   KLCNOperatingSystemInterface* os =
     (KLCNOperatingSystemInterface*) malloc(sizeof(KLCNOperatingSystemInterface));
   KLC_init_header(&os->header, &KLC_typeOperatingSystemInterface);

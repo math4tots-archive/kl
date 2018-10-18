@@ -276,4 +276,4 @@ extern class OperatingSystemInterface {
   bool isdir(String path)
 }
 
-extern OperatingSystemInterface os
+extern OperatingSystemInterface OS

@@ -1,5 +1,5 @@
 void main() {
-  print(os)
-  print(os.name)
-  print('os.posix = ' + str(os.posix))
+  print(OS)
+  print(OS.name)
+  print('OS.posix = ' + str(OS.posix))
 }

@@ -333,18 +333,18 @@ void main() {
 
   // Directory stuff
   {
-    assert(os.isdir('.'))
+    assert(OS.isdir('.'))
   }
 
-  print(os.name)
-  print('os.getcwd() = ' + str(os.getcwd()))
-  print('os.posix = ' + str(os.posix))
-  print('os.isdir("c/hw.c") = ' + str(os.isdir("c/hw.c")))
-  print('os.isdir("srcs") = ' + str(os.isdir("srcs")))
-  print('os.isfile("c/hw.c") = ' + str(os.isfile("c/hw.c")))
-  print('os.isfile("srcs") = ' + str(os.isfile("srcs")))
+  print(OS.name)
+  print('OS.getcwd() = ' + str(OS.getcwd()))
+  print('OS.posix = ' + str(OS.posix))
+  print('OS.isdir("c/hw.c") = ' + str(OS.isdir("c/hw.c")))
+  print('OS.isdir("srcs") = ' + str(OS.isdir("srcs")))
+  print('OS.isfile("c/hw.c") = ' + str(OS.isfile("c/hw.c")))
+  print('OS.isfile("srcs") = ' + str(OS.isfile("srcs")))
   print('args = ' + str(args))
-  print(os.listdir('.'))
+  print(OS.listdir('.'))
   print('Hello world!')
   final data = File('c/hw.c', 'r').read()
   print('data.size = ' + str(data.size))
