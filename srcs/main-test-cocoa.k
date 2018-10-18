@@ -1,4 +1,4 @@
-#include "./cocoa.k"
+#include "cocoa"
 
 void main() {
   print(COCOA)

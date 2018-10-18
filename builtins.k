@@ -1,10 +1,7 @@
 
-#(define C_HEADERS [
-  'klc_os.h'
-])
+#(define C_HEADERS [])
 #(define C_SOURCES [
   'main.c'    // This is where the main program is
-  'klc_os.c'  // basic operating system interface
 ])
 
 // Frameworks that are required for deploying to darwin targets.
@@ -266,17 +263,3 @@ class ListIterator {
     return value
   }
 }
-
-extern class OperatingSystemInterface {
-  String GETname()
-  bool GETposix()
-  List listdir(String path)
-  String getcwd()
-  bool isfile(String path)
-  bool isdir(String path)
-  String Repr() {
-    return '<OS interface (' + this.name + ')>'
-  }
-}
-
-extern OperatingSystemInterface OS

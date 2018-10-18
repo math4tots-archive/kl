@@ -1,4 +1,4 @@
-#include "./posix.k"
+#include "posix"
 
 void main() {
   assert(POSIX)

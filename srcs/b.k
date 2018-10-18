@@ -1,4 +1,4 @@
-#include "./lib.k"
+#include "lib"
 
 // 'Tr' comes from lib.k
 class Foo(Tr) {

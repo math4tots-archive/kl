@@ -1,4 +1,5 @@
-#include "posix.k"
+#include "os"
+#include "posix"
 
 void main() {
   print(OS)

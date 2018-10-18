@@ -2084,7 +2084,7 @@ def parse_one_source(source, env):
                     upath,
                 )
 
-            upath = os.path.abspath(os.path.realpath(upath))
+            upath = os.path.abspath(os.path.realpath(upath + '.k'))
 
             if upath in [p for p, _ in stack]:
                 toks = [t for _, t in stack]
@@ -2810,24 +2810,29 @@ parser.add_argument('--debug', '-g', action='store_true', default=False)
 parser.add_argument('--no-debug', dest='debug', action='store_false')
 
 def main():
-    args = parser.parse_args()
-    with open(args.kfile) as f:
-        data = f.read()
-    source = Source(args.kfile, data)
-    builtins_node = parse(Source('<builtin>', BUILTINS))
-    node = parse(source, builtins_node.env)
-    program = Program(
-        node.token,
-        node.definitions + builtins_node.definitions,
-        node.env)
+    try:
+        args = parser.parse_args()
+        with open(args.kfile) as f:
+            data = f.read()
+        source = Source(args.kfile, data)
+        builtins_node = parse(Source('<builtin>', BUILTINS))
+        node = parse(source, builtins_node.env)
+        program = Program(
+            node.token,
+            node.definitions + builtins_node.definitions,
+            node.env)
 
-    c_src = program.translate()
-    env = program.env
+        c_src = program.translate()
 
-    with open(os.path.join(_scriptdir, 'c', 'main.c'), 'w') as f:
-        f.write(c_src)
+        env = program.env
 
-    run_compiler(env, args.out_file, args.opt, args.debug)
+        with open(os.path.join(_scriptdir, 'c', 'main.c'), 'w') as f:
+            f.write(c_src)
+
+        run_compiler(env, args.out_file, args.opt, args.debug)
+    except Error as e:
+        sys.stderr.write(f'{e}\n')
+        exit(1)
 
 
 def run_compiler(env, out_file, opt, debug):

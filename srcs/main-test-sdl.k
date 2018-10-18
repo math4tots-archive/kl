@@ -1,4 +1,4 @@
-#include "./sdl.k"
+#include "./sdl"
 
 void main() {
   if (sdl.init(sdl.INIT_VIDEO) != 0) {

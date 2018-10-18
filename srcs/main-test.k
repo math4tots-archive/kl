@@ -1,5 +1,6 @@
-#include "./a.k"
-#include "./b.k"
+#include "./a"
+#include "./b"
+#include "os"
 
 class Bar {
   double d
