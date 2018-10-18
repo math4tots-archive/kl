@@ -1,10 +1,12 @@
 #include "klc_posix.h"
 
 #if KLC_POSIX
-#include <unistd.h>
 #include <dirent.h>
 #include <errno.h>
+#include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 KLCNPOSIXInterface* KLCN_initPOSIX() {

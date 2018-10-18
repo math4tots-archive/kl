@@ -20,6 +20,10 @@ extern class POSIXInterface {
     }
     return ret
   }
+
+  String Repr() {
+    return '<POSIX interface>'
+  }
 }
 
 extern POSIXInterface POSIX

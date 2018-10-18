@@ -274,6 +274,9 @@ extern class OperatingSystemInterface {
   String getcwd()
   bool isfile(String path)
   bool isdir(String path)
+  String Repr() {
+    return '<OS interface (' + this.name + ')>'
+  }
 }
 
 extern OperatingSystemInterface OS

@@ -2069,8 +2069,22 @@ def parse_one_source(source, env):
             expect_name('include')
             upath = expect('STRING').value
             consume_delim()
-            if not upath.startswith('./'):
-                raise Error([token], 'Absolute paths not supported yet')
+
+            if upath.startswith('/'):
+                pass
+            elif upath.startswith('./'):
+                upath = os.path.join(
+                    os.path.dirname(source.filename),
+                    *upath.split('/')[1:],
+                )
+            else:
+                upath = os.path.join(
+                    _scriptdir,
+                    'srcs',
+                    upath,
+                )
+
+            upath = os.path.abspath(os.path.realpath(upath))
 
             if upath in [p for p, _ in stack]:
                 toks = [t for _, t in stack]
@@ -2079,20 +2093,15 @@ def parse_one_source(source, env):
             if upath in cache:
                 return
 
-            parts = upath.split('/')
-            assert parts[0] == '.'
-            dirpath = os.path.dirname(source.filename)
-            path = os.path.join(dirpath, *parts[1:])
-            abspath = os.path.abspath(os.path.realpath(path))
-            if not os.path.isfile(abspath):
-                raise Error([token], f'File {upath} ({abspath}) does not exist')
+            if not os.path.isfile(upath):
+                raise Error([token], f'File {upath} ({upath}) does not exist')
 
-            with open(abspath) as f:
+            with open(upath) as f:
                 data = f.read()
 
             try:
                 stack.append((upath, token))
-                cache[upath] = parse_one_source(Source(abspath, data), env)
+                cache[upath] = parse_one_source(Source(upath, data), env)
             finally:
                 stack.pop()
         elif at('('):
