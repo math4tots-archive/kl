@@ -1031,19 +1031,19 @@ KLCNString* KLCNFile_mread(KLCNFile* file) {
   return KLC_mkstr_with_buffer(i, buffer, KLC_check_ascii(buffer));
 }
 
-KLCNFile* KLCN_initstdin() {
-  return KLC_mkfile(stdin, ":stdin", "r", 0);
+KLCNFile* KLCN_initSTDIN() {
+  return KLC_mkfile(stdin, ":STDIN", "r", 0);
 }
 
-KLCNFile* KLCN_initstdout() {
-  return KLC_mkfile(stdout, ":stdout", "w", 0);
+KLCNFile* KLCN_initSTDOUT() {
+  return KLC_mkfile(stdout, ":STDOUT", "w", 0);
 }
 
-KLCNFile* KLCN_initstderr() {
-  return KLC_mkfile(stderr, ":stderr", "w", 0);
+KLCNFile* KLCN_initSTDERR() {
+  return KLC_mkfile(stderr, ":STDERR", "w", 0);
 }
 
-KLCNList* KLCN_initargs() {
+KLCNList* KLCN_initARGS() {
 #if KLC_WIN_APP
   KLCNList* args;
   int argc, i;

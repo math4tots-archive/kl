@@ -160,13 +160,13 @@ extern class Closure {
   extern Call
 }
 
-extern File stdin
-extern File stdout
-extern File stderr
+extern File STDIN
+extern File STDOUT
+extern File STDERR
 
 // argc and argv passed to main
 // made available as a List
-extern List args
+extern List ARGS
 
 void panic(String message)
 bool bool(var x)
@@ -174,7 +174,7 @@ type type(var x)
 void assert(var x)
 
 void print(var x) {
-  stdout.print(x)
+  STDOUT.print(x)
 }
 
 String str(var x) {

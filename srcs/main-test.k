@@ -344,7 +344,7 @@ void main() {
   print('OS.isdir("srcs") = ' + str(OS.isdir("srcs")))
   print('OS.isfile("c/hw.c") = ' + str(OS.isfile("c/hw.c")))
   print('OS.isfile("srcs") = ' + str(OS.isfile("srcs")))
-  print('args = ' + str(args))
+  print('ARGS = ' + str(ARGS))
   print(OS.listdir('.'))
   print('Hello world!')
   final data = File('c/hw.c', 'r').read()
