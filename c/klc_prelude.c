@@ -34,6 +34,56 @@ const KLC_var KLC_null = {
   { NULL }
 };
 
+static const char KLC_utf8_bom[] = "\xEF\xBB\xBF";
+
+static size_t KLC_utf8_pointsize(char sc) {
+  unsigned char c = (unsigned char) sc;
+  if (c <= 0x7F) {
+    return 1;
+  } else if (c >= 0xC0 && c <= 0xDF) {
+    return 2;
+  } else if (c >= 0xE0 && c <= 0xEF) {
+    return 3;
+  } else if (c >= 0xF0 && c <= 0xF7) {
+    return 4;
+  }
+  /* Invalid */
+  return 0;
+}
+
+static KLC_char32 KLC_utf8_next(const char* s, size_t len) {
+  size_t i;
+  KLC_char32 c = *s;
+  for (i = 1; i < len; i++) {
+    s++;
+    c <<= 7;
+    c |= *s & 0xFF;
+  }
+  return c;
+}
+
+static KLC_bool KLC_utf8_has_bom(const char* s) {
+  return strncmp(s, KLC_utf8_bom, 3) == 0;
+}
+
+static KLC_char32* KLC_utf8_to_utf32(const char* s, size_t bytesize, size_t* size) {
+  size_t i = 0, len = 0;
+  KLC_char32* buf = (KLC_char32*) malloc(sizeof(KLC_char32) * (bytesize + 1));
+  while (i < bytesize) {
+    size_t ps = KLC_utf8_pointsize(s[i]);
+    if (ps == 0 || i + ps > bytesize) {
+      /* TODO: Invalid utf-8 encoding, better error handling */
+      free(buf);
+      return NULL;
+    }
+    buf[len++] = KLC_utf8_next(s + i, ps);
+    i += ps;
+  }
+  buf[len] = 0;
+  *size = len;
+  return buf;
+}
+
 void KLC_push_frame(const char* filename, const char* function, long ln) {
   KLC_stacktrace[KLC_stacktrace_size].filename = filename;
   KLC_stacktrace[KLC_stacktrace_size].function = function;
@@ -490,8 +540,8 @@ KLC_bool KLCNint_mLt(KLC_int a, KLC_int b) {
 }
 
 KLCNString* KLCNint_mRepr(KLC_int i) {
-  char buffer[50];
-  sprintf(buffer, "%ld", i);
+  char buffer[128];
+  sprintf(buffer, KLC_INT_FMT, i);
   return KLC_mkstr(buffer);
 }
 
@@ -579,7 +629,7 @@ KLC_var KLCNWeakReference_mgetNullable(KLCNWeakReference* wr) {
 
 void KLC_deleteString(KLC_header* robj, KLC_header** dq) {
   KLCNString* obj = (KLCNString*) robj;
-  free(obj->buffer);
+  free(obj->utf8);
   free(obj->utf32);
   #if KLC_OS_WINDOWS
     free(obj->wstr);
@@ -598,13 +648,10 @@ int KLC_check_ascii(const char* str) {
 
 KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii) {
   KLCNString* obj = (KLCNString*) malloc(sizeof(KLCNString));
-  if (!is_ascii) {
-    KLC_errorf("Non-ascii strings not yet supported");
-  }
   KLC_init_header(&obj->header, &KLC_typeString);
   obj->bytesize = bytesize;
-  obj->nchars = bytesize; /* only true when is_ascii */
-  obj->buffer = str;
+  obj->nchars = is_ascii ? bytesize : 0;
+  obj->utf8 = str;
   obj->utf32 = NULL;
   #if KLC_OS_WINDOWS
     obj->wstr = NULL;
@@ -632,12 +679,12 @@ KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii) {
 
   LPCWSTR KLC_windows_get_wstr(KLCNString* s) {
     if (!s->wstr) {
-      size_t bufsize = MultiByteToWideChar(CP_UTF8, 0, s->buffer, -1, NULL, 0);
+      size_t bufsize = MultiByteToWideChar(CP_UTF8, 0, s->utf8, -1, NULL, 0);
       if (bufsize == 0) {
         KLC_errorf("Windows: UTF-8 to UTF-16 conversion failed");
       }
       s->wstr = (LPWSTR) malloc(2 * bufsize);
-      MultiByteToWideChar(CP_UTF8, 0, s->buffer, -1, s->wstr, bufsize);
+      MultiByteToWideChar(CP_UTF8, 0, s->utf8, -1, s->wstr, bufsize);
     }
     return s->wstr;
   }
@@ -650,13 +697,18 @@ KLCNString* KLC_mkstr(const char *str) {
   return KLC_mkstr_with_buffer(len, buffer, KLC_check_ascii(buffer));
 }
 
-KLC_int KLCNString_mbytesize(KLCNString* s) {
-  /* TODO: This may be lossy. Figure this out */
+static void KLC_String_init_utf32(KLCNString* s) {
+  if (s->bytesize && !s->nchars) {
+    s->utf32 = KLC_utf8_to_utf32(s->utf8, s->bytesize, &s->nchars);
+  }
+}
+
+KLC_int KLCNString_mGETbytesize(KLCNString* s) {
   return (KLC_int) s->bytesize;
 }
 
 KLC_int KLCNString_mGETsize(KLCNString* s) {
-  /* TODO: This may be lossy. Figure this out */
+  KLC_String_init_utf32(s);
   return (KLC_int) s->nchars;
 }
 
@@ -668,7 +720,7 @@ KLCNString* KLCNString_mStr(KLCNString* s) {
 KLCNString* KLCNString_mescape(KLCNString* str) {
   size_t i = 0, j = 0, bs = str->bytesize;
   char* buffer = (char*) malloc(sizeof(char) * (2 * bs + 1));
-  char* s = str->buffer;
+  char* s = str->utf8;
 
   while (i < bs) {
     switch (s[i]) {
@@ -736,21 +788,21 @@ KLCNString* KLCNString_mescape(KLCNString* str) {
 KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b) {
   size_t bytesize = a->bytesize + b->bytesize;
   char* buffer = (char*) malloc(sizeof(char) * (bytesize + 1));
-  strcpy(buffer, a->buffer);
-  strcpy(buffer + a->bytesize, b->buffer);
+  strcpy(buffer, a->utf8);
+  strcpy(buffer + a->bytesize, b->utf8);
   return KLC_mkstr_with_buffer(bytesize, buffer, a->is_ascii && b->is_ascii);
 }
 
 KLC_bool KLCNString_mEq(KLCNString* a, KLCNString* b) {
-  return a->bytesize == b->bytesize && strcmp(a->buffer, b->buffer) == 0;
+  return a->bytesize == b->bytesize && strcmp(a->utf8, b->utf8) == 0;
 }
 
 KLC_bool KLCNString_mLt(KLCNString* a, KLCNString* b) {
-  return strcmp(a->buffer, b->buffer) < 0;
+  return strcmp(a->utf8, b->utf8) < 0;
 }
 
 void KLCNpanic(KLCNString* message) {
-  KLC_errorf("%s", message->buffer);
+  KLC_errorf("%s", message->utf8);
 }
 
 KLCNStringBuilder* KLCNStringBuilder_new() {
@@ -773,7 +825,7 @@ void KLCNStringBuilder_maddstr(KLCNStringBuilder* sb, KLCNString* s) {
       sb->cap *= 2;
       sb->buffer = (char*) realloc(sb->buffer, sizeof(char) * sb->cap);
     }
-    strcpy(sb->buffer + sb->size, s->buffer);
+    strcpy(sb->buffer + sb->size, s->utf8);
     sb->size += s->bytesize;
   }
 }
@@ -917,14 +969,14 @@ void KLC_deleteFile(KLC_header* robj, KLC_header** dq) {
 
 KLCNFile* KLCNFile_new(KLCNString* path, KLCNString* mode) {
   FILE* cfile;
-  if (!KLC_is_valid_file_mode(mode->buffer)) {
-    KLC_errorf("Invalid file mode: %s", mode->buffer);
+  if (!KLC_is_valid_file_mode(mode->utf8)) {
+    KLC_errorf("Invalid file mode: %s", mode->utf8);
   }
-  cfile = fopen(path->buffer, mode->buffer);
+  cfile = fopen(path->utf8, mode->utf8);
   if (!cfile) {
-    KLC_errorf("Failed to open file at %s", path->buffer);
+    KLC_errorf("Failed to open file at %s", path->utf8);
   }
-  return KLC_mkfile(cfile, path->buffer, mode->buffer, 1);
+  return KLC_mkfile(cfile, path->utf8, mode->utf8, 1);
 }
 
 void KLCNFile_mclose(KLCNFile* file) {
@@ -943,7 +995,7 @@ void KLCNFile_mwrite(KLCNFile* file, KLCNString* s) {
         "Trying to write to file that's not in write/append mode (%s)",
         file->name);
   }
-  fwrite(s->buffer, 1, s->bytesize, file->cfile);
+  fwrite(s->utf8, 1, s->bytesize, file->cfile);
 }
 
 KLCNString* KLCNFile_mread(KLCNFile* file) {

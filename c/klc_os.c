@@ -48,7 +48,7 @@ KLCNList* KLCNOperatingSystemInterface_mlistdir(
   DIR* d;
   struct dirent* dir;
   KLCNList* ret = KLC_mklist(0);
-  d = opendir(path->buffer);
+  d = opendir(path->utf8);
   if (!d) {
     /* Read failed. TODO: Better error handling */
     return NULL;
@@ -120,7 +120,7 @@ KLC_bool KLCNOperatingSystemInterface_misfile(
     KLCNString* path) {
 #if KLC_POSIX
   struct stat sb;
-  if (stat(path->buffer, &sb) == 0) {
+  if (stat(path->utf8, &sb) == 0) {
     /* Returns true iff we check that this path is a regular file */
     return !!S_ISREG(sb.st_mode);
   }
@@ -148,7 +148,7 @@ KLC_bool KLCNOperatingSystemInterface_misdir(
     KLCNString* path) {
 #if KLC_POSIX
   struct stat sb;
-  if (stat(path->buffer, &sb) == 0) {
+  if (stat(path->utf8, &sb) == 0) {
     /* Returns true iff we check that this path is a regular file */
     return !!S_ISDIR(sb.st_mode);
   }

@@ -56,7 +56,7 @@ KLCNList* KLCNPOSIXInterface_mreaddir(KLCNPOSIXInterface* p, KLCNString* path) {
   DIR* d;
   struct dirent* dir;
   KLCNList* ret = KLC_mklist(0);
-  d = opendir(path->buffer);
+  d = opendir(path->utf8);
   if (!d) {
     /* Read failed. TODO: Better error handling */
     return NULL;

@@ -4,12 +4,45 @@
 #include <stdio.h>
 #include "klc_plat.h"
 
-#if KLC_POSIX
-/* TODO: Check if this is ok.
- * I don't think inttypes.h was included in
- * the first version of posix.
+/* TODO: Figure out what to do if <stdint.h> isn't available
+ * This is particularly necessary for:
+ *   - figuring out what type to use for KLC_int
+ *     some operations depend on KLC_int being
+ *     able to fit any 'id' sort of value (e.g. ino_t)
+ *
+ *   - 16-bit and 32-bit string character types
+ *
+ * Additionally, I depend on exact fixed width integer
+ * types to be available.
  */
+#if KLC_POSIX
 #include <inttypes.h>
+#else
+#include <stdint.h>
+#endif
+
+typedef uint32_t KLC_char32;
+
+#if KLC_OS_WINDOWS
+typedef wchar_t KLC_char16;
+#else
+typedef uint16_t KLC_char16;
+#endif
+
+/* Try to get KLC_int to be as large as possible
+ * This is important in particular for POSIX.
+ * If we don't know enough about the environment,
+ * just choose long.
+ */
+#if KLC_OS_WINDOWS
+typedef long long KLC_int; /* TODO: Check if this is always ok on Windows */
+#define KLC_INT_FMT "%lld"
+#elif KLC_POSIX
+typedef intmax_t KLC_int;
+#define KLC_INT_FMT "%" PRIiMAX
+#else
+typedef long KLC_int;
+#define KLC_INT_FMT "%ld"
 #endif
 
 #if KLC_OS_WINDOWS
@@ -30,11 +63,6 @@
 typedef struct KLC_stack_frame KLC_stack_frame;
 typedef char KLC_bool;
 
-#if KLC_POSIX
-typedef intmax_t KLC_int;
-#else
-typedef long KLC_int;
-#endif
 
 typedef struct KLC_header KLC_header;
 typedef struct KLC_methodinfo KLC_methodinfo;
@@ -113,8 +141,9 @@ struct KLCNString {
   KLC_header header;
   size_t bytesize; /* number of actual bytes in buffer (utf-8 representation) */
   size_t nchars;   /* number of unicode code points */
-  char* buffer;
-  char* utf32;
+  char* utf8;
+  KLC_char16* utf16;
+  KLC_char32* utf32;
     /* In C89, there's no way to get an integer type that guarantees
      * exactly 32-bits. As such, I want to error on side of correctness and
      * use chars instead for measuring out the utf-32 representation.

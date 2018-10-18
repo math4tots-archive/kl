@@ -117,7 +117,7 @@ extern class WeakReference {
 }
 
 extern class String {
-  int bytesize()
+  int GETbytesize()
   String Add(String b)
   int GETsize()
   String Str()
