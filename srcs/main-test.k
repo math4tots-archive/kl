@@ -337,6 +337,21 @@ void main() {
     assert(OS.isdir('.'))
   }
 
+  // Unicode and slicing
+  {
+    final s = "Hello, 世界"
+    assert(s[1:2] == 'e')
+    assert(s[0:5] == 'Hello')
+    assert('Hello,'[0:5] == 'Hello')
+    assert(s[7:8] == '世')
+    assert(s[7:9] == '世界')
+    assert(s[7:] == '世界')
+    assert(s[:5] == 'Hello')
+    assert(s[0] == 'H')
+    assert(s[s.size - 1] == '界')
+    assert(s[-1] == '界')
+  }
+
   print(OS.name)
   print('OS.getcwd() = ' + str(OS.getcwd()))
   print('OS.posix = ' + str(OS.posix))

@@ -33,8 +33,13 @@ _special_method_names = {
     'GetItem',
     'SetItem',
     'Slice',
+    'SliceAll',
     'SliceLeft',
     'SliceRight',
+    'SetSlice',
+    'SetSliceAll',
+    'SetSliceLeft',
+    'SetSliceRight',
 }
 
 SYMBOLS = [
@@ -2652,13 +2657,66 @@ def parse_one_source(source, env):
                     else:
                         expr = MethodCall(token, expr, f'GET{name}', [])
                         continue
-            elif at('['):
-                args = parse_args(defs, '[', ']')
-                if consume('='):
-                    args.append(parse_expression(defs))
-                    expr = MethodCall(token, expr, 'SetItem', args)
+            elif consume('['):
+                # x[i,...]       GetItem
+                # x[i,...] = v   SetItem
+                # x[a:b]         Slice
+                # x[:b]          SliceRight
+                # x[a:b]         SliceLeft
+                # x[a:b] = v     SetSlice
+                # x[:b] = v      SetSliceRight
+                # x[a:] = v      SetSliceLeft
+                args = []
+                left = right = None
+                is_slice = False
+                if consume(':'):
+                    is_slice = True
+                    if consume(']'):
+                        pass
+                    else:
+                        right = parse_expression(defs)
+                        args.append(right)
+                        expect(']')
+                elif consume(']'):
+                    pass
                 else:
-                    expr = MethodCall(token, expr, 'GetItem', args)
+                    left = parse_expression(defs)
+                    args.append(left)
+                    if consume(':'):
+                        is_slice = True
+                        if consume(']'):
+                            pass
+                        else:
+                            right = parse_expression(defs)
+                            args.append(right)
+                            expect(']')
+                    elif consume(']'):
+                        pass
+                    else:
+                        expect(',')
+                        while not consume(']'):
+                            args.append(parse_expression(defs))
+                            if not consume(','):
+                                expect(']')
+                                break
+                assign = False
+                if consume('='):
+                    assign = True
+                    args.append(parse_expression(defs))
+                if is_slice:
+                    method_name = (
+                        'SliceAll' if left is None and right is None else
+                        'SliceLeft' if right is None else
+                        'SliceRight' if left is None else
+                        'Slice'
+                    )
+                    if assign:
+                        method_name = 'Set' + method_name
+                elif assign:
+                    method_name = 'SetItem'
+                else:
+                    method_name = 'GetItem'
+                expr = MethodCall(token, expr, method_name, args)
                 continue
             break
         return expr
