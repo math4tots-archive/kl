@@ -353,6 +353,11 @@ void main() {
     assert(s[-1] == '界')
   }
 
+  // String joining
+  {
+    assert(','.join([1, 2, 3]) == '1,2,3')
+  }
+
   print(OS.name)
   print('OS.getcwd() = ' + str(OS.getcwd()))
   print('OS.posix = ' + str(OS.posix))

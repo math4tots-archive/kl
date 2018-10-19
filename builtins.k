@@ -130,6 +130,18 @@ extern class String {
   bool Bool() {
     return bool(this.size)
   }
+
+  String join(List args) {
+    final sb = StringBuilder()
+    for (int i = 0; i < args.size; i++) {
+      if (i > 0) {
+        sb.add(this)
+      }
+      sb.add(args[i])
+    }
+    return sb.build()
+  }
+
   String Slice(int start, int end)
 
   String SliceAll() {

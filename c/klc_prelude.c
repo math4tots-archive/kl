@@ -86,9 +86,6 @@ static KLC_char32 KLC_utf8_read_next(const char* s, size_t len) {
   if (KLC_utf8_size_for_point(c) != len) {
     KLC_errorf("FUBAR: Incorrectly read string");
   }
-  if (len == 3) {
-    printf("%x\n", c);
-  }
   return c;
 }
 
