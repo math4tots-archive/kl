@@ -51,7 +51,33 @@ KLC_bool KLCNOperatingSystemInterface_mBool(KLCNOperatingSystemInterface* os) {
 #endif
 }
 
-KLCNList* KLCNOperatingSystemInterface_mlistdir(
+KLC_bool KLCNOperatingSystemInterface_mchdirOrFalse(
+    KLCNOperatingSystemInterface* os,
+    KLCNString* path) {
+  #if KLC_POSIX
+    return chdir(path->utf8) == 0 ? 1 : 0;
+  #elif KLC_OS_WINDOWS
+    return SetCurrentDirectoryW(KLC_windows_get_wstr(path)) ? 1 : 0;
+  #else
+    KLC_errorf("os.chdir not supported for %s", KLC_OS_NAME);
+    return NULL;
+  #endif
+}
+
+KLC_bool KLCNOperatingSystemInterface_mmkdirOrFalse(
+    KLCNOperatingSystemInterface* os,
+    KLCNString* path) {
+  #if KLC_POSIX
+    return mkdir(path->utf8, 0777) == 0 ? 1 : 0;
+  #elif KLC_OS_WINDOWS
+    return CreateDirectoryW(KLC_windows_get_wstr(path), NULL) ? 1 : 0;
+  #else
+    KLC_errorf("os.mkdir not supported for %s", KLC_OS_NAME);
+    return NULL;
+  #endif
+}
+
+KLCNList* KLCNOperatingSystemInterface_mlistdirOrNull(
     KLCNOperatingSystemInterface* os,
     KLCNString* path) {
 #if KLC_POSIX
@@ -96,7 +122,7 @@ KLCNList* KLCNOperatingSystemInterface_mlistdir(
 #endif
 }
 
-KLCNString* KLCNOperatingSystemInterface_mgetcwd(KLCNOperatingSystemInterface* os) {
+KLCNString* KLCNOperatingSystemInterface_mgetcwdOrNull(KLCNOperatingSystemInterface* os) {
 #if KLC_POSIX
   size_t cap = 2, len;
   char* buffer = (char*) malloc(sizeof(char) * cap);

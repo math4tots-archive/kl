@@ -54,7 +54,7 @@ KEYWORDS = {
     'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
     'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
     'for', 'if', 'else', 'while', 'break', 'continue', 'return',
-    'with',
+    'with', 'from', 'import', 'as',
 }
 
 PRIMITIVE_TYPES = {
