@@ -1936,6 +1936,7 @@ def parse(source, env=None):
     env = {
         '@stack': [],
         '@intgen': [0],
+        '@ntempvar': [0],
         '@cache': dict(),
         '@vars': {
             'PLATFORM': plat,
@@ -1972,6 +1973,11 @@ def parse_one_source(source, env):
     cache = env['@cache']
     stack = env['@stack']
     intgen = env['@intgen']
+
+    def mktempvar():
+        i = env['@ntempvar'][0]
+        env['@ntempvar'][0] += 1
+        return f'_KLC_tempvar{i}'
 
     def peek(j=0):
         nonlocal i
@@ -2482,24 +2488,50 @@ def parse_one_source(source, env):
             return While(token, condition, body)
 
         if consume('for'):
-            expect('(')
-            init = []
-            if consume(';'):
-                pass
-            elif at_variable_definition():
-                init.append(parse_variable_definition(defs))
-            else:
-                init.append(ExpressionStatement(token, parse_expression(defs)))
+            if consume('('):
+                init = []
+                if consume(';'):
+                    pass
+                elif at_variable_definition():
+                    init.append(parse_variable_definition(defs))
+                else:
+                    init.append(ExpressionStatement(token, parse_expression(defs)))
+                    expect(';')
+                cond = BoolLiteral(token, True) if at(';') else parse_expression(defs)
                 expect(';')
-            cond = BoolLiteral(token, True) if at(';') else parse_expression(defs)
-            expect(';')
-            incr = ExpressionStatement(token, parse_expression(defs))
-            expect(')')
-            raw_body = parse_block(defs)
-            body = Block(token, raw_body.statements + [incr])
-            return Block(token, init + [
-                While(token, cond, body),
-            ])
+                incr = ExpressionStatement(token, parse_expression(defs))
+                expect(')')
+                raw_body = parse_block(defs)
+                body = Block(token, raw_body.statements + [incr])
+                return Block(token, init + [
+                    While(token, cond, body),
+                ])
+            else:
+                loopvar = expect('NAME').value
+                expect('in')
+                container_expr = parse_expression(defs)
+                body = parse_block(defs)
+                tempvar = mktempvar()
+                return Block(token, [
+                    VariableDefinition(
+                        token,
+                        True,
+                        None,
+                        tempvar,
+                        MethodCall(token, container_expr, 'Iterator', [])),
+                    While(
+                        token,
+                        MethodCall(token, Name(token, tempvar), 'HasNext', []),
+                        Block(token, [
+                            VariableDefinition(
+                                token,
+                                True,
+                                None,
+                                loopvar,
+                                MethodCall(token, Name(token, tempvar), 'Next', [])),
+                            body,
+                        ])),
+                ])
 
         if consume('if'):
             expect('(')

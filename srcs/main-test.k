@@ -358,6 +358,17 @@ void main() {
     assert(','.join([1, 2, 3]) == '1,2,3')
   }
 
+  // Test 'for-in' loop
+  {
+    auto xs = ['aaaa', 'bbb', 'cdef']
+    auto ys = []
+    assert(ys != xs)
+    for x in xs {
+      ys.push(x)
+    }
+    assert(ys == xs)
+  }
+
   print(OS.name)
   print('OS.getcwd() = ' + str(OS.getcwd()))
   print('OS.posix = ' + str(OS.posix))
