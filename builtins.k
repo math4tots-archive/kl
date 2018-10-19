@@ -132,6 +132,12 @@ extern class String {
   }
   String Slice(int start, int end)
 
+  String SliceAll() {
+    // Since Strings are immutable, it's safe to
+    // return this
+    return this
+  }
+
   String SliceLeft(int start) {
     return this.Slice(start, this.size)
   }

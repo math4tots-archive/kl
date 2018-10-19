@@ -347,6 +347,7 @@ void main() {
     assert(s[7:9] == '世界')
     assert(s[7:] == '世界')
     assert(s[:5] == 'Hello')
+    assert(s[:] == s)
     assert(s[0] == 'H')
     assert(s[s.size - 1] == '界')
     assert(s[-1] == '界')
