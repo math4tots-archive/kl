@@ -33,6 +33,16 @@ KLC_bool KLCNOperatingSystemInterface_mGETposix(KLCNOperatingSystemInterface* os
 #endif
 }
 
+KLCNString* KLCNOperatingSystemInterface_mGETsep(KLCNOperatingSystemInterface* os) {
+  return KLC_mkstr(
+    #if KLC_OS_WINDOWS
+      "\\"
+    #else
+      "/"
+    #endif
+  );
+}
+
 KLC_bool KLCNOperatingSystemInterface_mBool(KLCNOperatingSystemInterface* os) {
 #if KLC_OS_UNKNOWN
   return 0;

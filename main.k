@@ -3,4 +3,5 @@
 
 void main() {
   print(OS.getcwd())
+  print(OS.joinpath([OS.getcwd(), '..']))
 }
