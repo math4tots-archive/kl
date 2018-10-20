@@ -7,6 +7,7 @@ import re
 import sys
 import typing
 import subprocess
+import shutil
 
 _scriptdir = os.path.dirname(os.path.realpath(__file__))
 
@@ -392,6 +393,16 @@ class Node(object):
 
 @Namespace
 def C(ns):
+    """
+    C types are stored as simple strings without much structure.
+    Function pointer types are unfortunately not supported
+    due to the fact that they can't be declared very simply.
+
+    Supported types are:
+        primitive types (the name is stored as str)
+        struct types (the name is stored as str)
+        pointer types (name of base type with trailing asterisks)
+    """
 
     @ns
     class N(Node):
@@ -409,7 +420,7 @@ def C(ns):
     class Expression(N):
         def __call__(self, ctx):
             with ctx._bind('src', None):
-                expr = self.expression.translate(ctx)
+                expr = self.translate(ctx)
                 assert isinstance(expr, str), expr
                 return expr
 
@@ -424,12 +435,13 @@ def C(ns):
 
             seen_non_vardef = False
             for statement in self.statements:
-                if isinstance(LocalVariableDefinition) and seen_non_vardef:
+                if (isinstance(statement, LocalVariableDefinition) and
+                        seen_non_vardef):
                     raise Error(
                         [statement.token],
                         'All variable definitions must come at the '
                         'beginning of a block')
-                if not isinstance(LocalVariableDefinition):
+                if not isinstance(statement, LocalVariableDefinition):
                     seen_non_vardef = True
 
         def translate(self, ctx):
@@ -462,6 +474,15 @@ def C(ns):
             ctx.src += f'{self.type} {self.name};'
 
     @ns
+    class Return(Statement):
+        fields = (
+            ('expression', Expression),
+        )
+
+        def translate(self, ctx):
+            ctx.src += f'return {self.expression(ctx)};'
+
+    @ns
     class ExpressionStatement(Statement):
         fields = (
             ('expression', Expression),
@@ -471,10 +492,181 @@ def C(ns):
             ctx.src += f'{self.expression(ctx)};'
 
     @ns
+    class Prefix(Expression):
+        fields = (
+            ('operator', str),
+            ('expression', Expression),
+        )
+
+        def translate(self, ctx):
+            return f'({self.operator} {self.expression(ctx)})'
+
+    @ns
+    class Postfix(Expression):
+        fields = (
+            ('expression', Expression),
+            ('operator', str),
+        )
+
+        def translate(self, ctx):
+            return f'({self.expression(ctx)} {self.operator})'
+
+    @ns
+    class Binop(Expression):
+        fields = (
+            ('left', Expression),
+            ('operator', str),
+            ('right', Expression),
+        )
+
+        def translate(self, ctx):
+            return f'({self.left(ctx)} {self.operator} {self.right(ctx)})'
+
+    @ns
+    class StringLiteral(Expression):
+        fields = (
+            ('value', str),
+        )
+
+        def translate(self, ctx):
+            # TODO: Come up with better way to do this
+            value = (
+                self.value
+                    .replace('\\', '\\\\')
+                    .replace('"', '\\"')
+                    .replace('\n', '\\n')
+                    .replace('\r', '\\r')
+                    .replace('\t', '\\t')
+            )
+            return f'"{value}"'
+
+    @ns
+    class IntLiteral(Expression):
+        fields = (
+            ('value', int),
+        )
+
+        def translate(self, ctx):
+            return f'{self.value}L'
+
+    @ns
+    class FloatLiteral(Expression):
+        fields = (
+            ('value', float),
+        )
+
+        def translate(self, ctx):
+            return str(self.value)
+
+    @ns
+    class Name(Expression):
+        fields = (
+            ('name', str),
+        )
+
+        def translate(self, ctx):
+            return self.name
+
+    @ns
+    class SetName(Expression):
+        fields = (
+            ('name', str),
+            ('expression', Expression),
+        )
+
+        def translate(self, ctx):
+            return f'({self.name} = {self.expression(ctx)})'
+
+    @ns
+    class FunctionCall(Expression):
+        fields = (
+            ('name', str),
+            ('args', List[Expression]),
+        )
+
+        def translate(self, ctx):
+            args = ','.join(e(ctx) for e in self.args)
+            return f'({self.name}({args}))'
+
+    @ns
+    class GetItem(Expression):
+        fields = (
+            ('expression', Expression),
+            ('index', Expression),
+        )
+
+        def translate(self, ctx):
+            expr = self.expression(ctx)
+            index = self.index(ctx)
+            return f'({expr}[{index}])'
+
+    @ns
+    class SetItem(Expression):
+        fields = (
+            ('expression', Expression),
+            ('index', Expression),
+            ('value', Expression),
+        )
+
+        def translate(self, ctx):
+            expr = self.expression(ctx)
+            index = self.index(ctx)
+            value = self.value(ctx)
+            return f'({expr}[{index}] = {value})'
+
+    @ns
+    class DotGet(Expression):
+        fields = (
+            ('expression', Expression),
+            ('name', str),
+        )
+
+        def translate(self, ctx):
+            expr = self.expression(ctx)
+            return f'({expr}.{self.name})'
+
+    @ns
+    class DotSet(Expression):
+        fields = (
+            ('expression', Expression),
+            ('name', str),
+            ('value', Expression),
+        )
+
+        def translate(self, ctx):
+            expr = self.expression(ctx)
+            value = self.value(ctx)
+            return f'({expr}.{self.name} = {value})'
+
+    @ns
+    class ArrowGet(Expression):
+        fields = (
+            ('expression', Expression),
+            ('name', str),
+        )
+
+        def translate(self, ctx):
+            expr = self.expression(ctx)
+            return f'({expr}->{self.name})'
+
+    @ns
+    class ArrowSet(Expression):
+        fields = (
+            ('expression', Expression),
+            ('name', str),
+            ('value', Expression),
+        )
+
+        def translate(self, ctx):
+            expr = self.expression(ctx)
+            value = self.value(ctx)
+            return f'({expr}->{self.name} = {value})'
+
+    @ns
     class TranslationUnit(N):
         fields = (
             ('name', str),
-            ('globals', Global),
+            ('globals', List[Global]),
         )
 
         def write_out(self, basedir=None):
@@ -482,12 +674,10 @@ def C(ns):
                 basedir = os.path.join(_scriptdir, 'gen')
             include_dir = os.path.join(basedir, 'include')
             source_dir = os.path.join(basedir, 'source')
-            os.makedirs(include_dir, exist_ok=True)
-            os.makedirs(source_dir, exist_ok=True)
             include_fn = os.path.join(include_dir, f'{self.name}.h')
             source_fn = os.path.join(source_dir, f'{self.name}.c')
-            hdr = FractalStringBuilder()
-            src = FractalStringBuilder()
+            hdr = FractalStringBuilder(0)
+            src = FractalStringBuilder(0)
             self.translate(hdr, src)
             hdr = str(hdr)
             src = str(src)
@@ -504,9 +694,11 @@ def C(ns):
             ctx.typedefs = hdr.spawn()
             ctx.protos = hdr.spawn()
             ctx.structs = hdr.spawn()
+            ctx.externvars = hdr.spawn()
             hdr += f'#endif/*{self.name.upper()}_H*/'
 
             src += f'#include "{self.name}.h"'
+            ctx.vars = src.spawn()
             ctx.src = src.spawn()
 
             for g in self.globals:
@@ -533,7 +725,7 @@ def C(ns):
         @property
         def proto(self):
             params = ', '.join(f'{p.type} {p.name}' for p in self.parameters)
-            return f'{self.return_type} {self.name} ({params})'
+            return f'{self.return_type} {self.name}({params})'
 
         def translate(self, ctx):
             proto = self.proto
@@ -558,6 +750,61 @@ def C(ns):
                 out += f'{field.type} {field.name};'
             ctx.structs += '};'
 
+    @ns
+    class GlobalVariableDefinition(Global, BaseVariableDefinition):
+        def translate(self, ctx):
+            proto = f'{self.type} {self.name}'
+            ctx.externvars += f'extern {proto};'
+            ctx.vars += f'{proto};'
 
-print(C)
-print(C.TranslationUnit)
+
+def reset_gen_directory(basedir=None):
+    if basedir is None:
+        basedir = os.path.join(_scriptdir, 'gen')
+    include_dir = os.path.join(basedir, 'include')
+    source_dir = os.path.join(basedir, 'source')
+    cdir = os.path.join(_scriptdir, 'c')
+    idir = os.path.join(_scriptdir, 'include')
+    shutil.rmtree(basedir)
+    os.makedirs(include_dir, exist_ok=True)
+    os.makedirs(source_dir, exist_ok=True)
+    for fn in os.listdir(idir):
+        shutil.copy(os.path.join(idir, fn), include_dir)
+    for fn in os.listdir(cdir):
+        shutil.copy(os.path.join(cdir, fn), source_dir)
+
+
+def build_all(exe_name=None):
+    """Only works on linux for now"""
+    exe_name = 'a.out' if exe_name is None else exe_name
+    include_dir = os.path.join(_scriptdir, 'gen', 'include')
+    source_dir = os.path.join(_scriptdir, 'gen', 'source')
+    subprocess.run(
+        f"gcc -std=c89 -Wall -Werror -Wpedantic -I{include_dir} "
+        f"{source_dir}/*.c -o {exe_name}",
+        shell=True,
+        check=True,
+    )
+
+t = lex('')[0]
+tu = C.TranslationUnit(t, 'main', [
+    C.Include(t, 'klc_runtime.h'),
+    C.FunctionDefinition(t, 'int', 'main', [], C.Block(t, [
+        C.LocalVariableDefinition(t, 'int', 'x'),
+        C.ExpressionStatement(t,
+            C.FunctionCall(t, 'printf', [
+                C.StringLiteral(t, 'Hello world!\n'),
+            ])),
+        C.ExpressionStatement(t, C.SetName(t, 'x', C.IntLiteral(t, 18))),
+        C.ExpressionStatement(t,
+            C.FunctionCall(t, 'printf', [
+                C.StringLiteral(t, 'x = %d\n'),
+                C.Name(t, 'x'),
+            ])),
+        C.Return(t, C.IntLiteral(t, 0)),
+    ]))
+])
+
+reset_gen_directory()
+tu.write_out()
+build_all()

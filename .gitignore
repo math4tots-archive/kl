@@ -3,6 +3,6 @@
 *.exe
 *.dSYM
 a.out
-main.c
-main.cc
+c/main.c
 klc_os.cc
+experimental/gen/
