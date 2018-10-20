@@ -11,6 +11,12 @@ class Bar {
   }
 }
 
+class class_with_lower_case_name {
+  void foo() {
+    panic('foo')
+  }
+}
+
 class Baz {
   int a
 
@@ -369,6 +375,16 @@ void main() {
     assert(ys == xs)
   }
 
+  // Test names with upper case Z in them
+  // because we use the letter 'Z' to escape special
+  // characters, it's kind of important to test these
+  // corner cases with 'Z'
+  {
+    Zz zz = Zz()
+    assert(str(zz) == '<Zz instance>')
+    assert(str(zz.getZ()) == '<Zz instance>')
+  }
+
   print(OS.name)
   print('OS.getcwd() = ' + str(OS.getcwd()))
   print('OS.posix = ' + str(OS.posix))
@@ -383,3 +399,18 @@ void main() {
   print('data.size = ' + str(data.size))
   print('After reading main.c')
 }
+
+
+int Zzz = 915
+
+// Test a function with 'Z' in the name
+int zZ() {
+  return Zzz
+}
+
+class Zz {
+  Zz getZ() {
+    return this
+  }
+}
+

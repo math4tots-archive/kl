@@ -23,65 +23,65 @@ bool _Ge(var a, var b)
 // actually implemented in the C code.
 // TODO: Implement a more elegant mechanism for enumerating
 // primitive type methods.
-String null_mRepr(var x) {
+String `null:Repr`(var x) {
   return 'null'
 }
-bool null_mBool(var x) {
+bool `null:Bool`(var x) {
   return false
 }
-bool null_mEq(var a, var b) {
+bool `null:Eq`(var a, var b) {
   return a is b
 }
 
-String bool_mRepr(bool b) {
+String `bool:Repr`(bool b) {
   return b ? 'true' : 'false'
 }
-bool bool_mBool(bool b) {
+bool `bool:Bool`(bool b) {
   return b;
 }
-bool bool_mEq(bool a, bool b) {
+bool `bool:Eq`(bool a, bool b) {
   return a is b;
 }
 
-int int_mAdd(int a, int b)
-int int_mSub(int a, int b)
-int int_mMul(int a, int b)
-int int_mDiv(int a, int b)
-int int_mMod(int a, int b)
-bool int_mEq(int a, int b)
-bool int_mLt(int a, int b)
-String int_mRepr(int a)
-bool int_mBool(int x) {
+int `int:Add`(int a, int b)
+int `int:Sub`(int a, int b)
+int `int:Mul`(int a, int b)
+int `int:Div`(int a, int b)
+int `int:Mod`(int a, int b)
+bool `int:Eq`(int a, int b)
+bool `int:Lt`(int a, int b)
+String `int:Repr`(int a)
+bool `int:Bool`(int x) {
   return x != 0
 }
 
-double double_mAdd(double a, double b)
-double double_mSub(double a, double b)
-double double_mMul(double a, double b)
-double double_mDiv(double a, double b)
-bool double_mEq(double a, double b)
-bool double_mLt(double a, double b)
-String double_mRepr(double a)
-bool double_mBool(double x) {
+double `double:Add`(double a, double b)
+double `double:Sub`(double a, double b)
+double `double:Mul`(double a, double b)
+double `double:Div`(double a, double b)
+bool `double:Eq`(double a, double b)
+bool `double:Lt`(double a, double b)
+String `double:Repr`(double a)
+bool `double:Bool`(double x) {
   return x != 0.0
 }
 
-String function_mGETname(function f)
-String function_mRepr(function f) {
+String `function:GETname`(function f)
+String `function:Repr`(function f) {
   return '<function ' + f.name + '>'
 }
-bool function_mBool(function f) {
+bool `function:Bool`(function f) {
   return true
 }
 
-String type_mGETname(type t)
-String type_mRepr(type t) {
+String `type:GETname`(type t)
+String `type:Repr`(type t) {
   return '<type ' + t.name + '>'
 }
-bool type_mBool(type t) {
+bool `type:Bool`(type t) {
   return true
 }
-bool type_mEq(type a, type b)
+bool `type:Eq`(type a, type b)
 
 trait Object() {
   bool Eq(var other) {

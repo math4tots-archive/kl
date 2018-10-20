@@ -11,7 +11,7 @@
 #include <windows.h>
 #endif
 
-KLCNOperatingSystemInterface* KLCN_initOS() {
+KLCNOperatingSystemInterface* KLCNOSZEinit() {
   KLCNOperatingSystemInterface* os =
     (KLCNOperatingSystemInterface*) malloc(sizeof(KLCNOperatingSystemInterface));
   KLC_init_header(&os->header, &KLC_typeOperatingSystemInterface);
@@ -21,11 +21,11 @@ KLCNOperatingSystemInterface* KLCN_initOS() {
 void KLC_deleteOperatingSystemInterface(KLC_header* robj, KLC_header** dq) {
 }
 
-KLCNString* KLCNOperatingSystemInterface_mGETname(KLCNOperatingSystemInterface* os) {
+KLCNString* KLCNOperatingSystemInterfaceZFGETname(KLCNOperatingSystemInterface* os) {
   return KLC_mkstr(KLC_OS_NAME);
 }
 
-KLC_bool KLCNOperatingSystemInterface_mGETposix(KLCNOperatingSystemInterface* os) {
+KLC_bool KLCNOperatingSystemInterfaceZFGETposix(KLCNOperatingSystemInterface* os) {
 #if KLC_POSIX
   return 1;
 #else
@@ -33,7 +33,7 @@ KLC_bool KLCNOperatingSystemInterface_mGETposix(KLCNOperatingSystemInterface* os
 #endif
 }
 
-KLCNString* KLCNOperatingSystemInterface_mGETsep(KLCNOperatingSystemInterface* os) {
+KLCNString* KLCNOperatingSystemInterfaceZFGETsep(KLCNOperatingSystemInterface* os) {
   return KLC_mkstr(
     #if KLC_OS_WINDOWS
       "\\"
@@ -43,7 +43,7 @@ KLCNString* KLCNOperatingSystemInterface_mGETsep(KLCNOperatingSystemInterface* o
   );
 }
 
-KLC_bool KLCNOperatingSystemInterface_mBool(KLCNOperatingSystemInterface* os) {
+KLC_bool KLCNOperatingSystemInterfaceZFBool(KLCNOperatingSystemInterface* os) {
 #if KLC_OS_UNKNOWN
   return 0;
 #else
@@ -51,7 +51,7 @@ KLC_bool KLCNOperatingSystemInterface_mBool(KLCNOperatingSystemInterface* os) {
 #endif
 }
 
-KLC_bool KLCNOperatingSystemInterface_mchdirOrFalse(
+KLC_bool KLCNOperatingSystemInterfaceZFchdirOrFalse(
     KLCNOperatingSystemInterface* os,
     KLCNString* path) {
   #if KLC_POSIX
@@ -64,7 +64,7 @@ KLC_bool KLCNOperatingSystemInterface_mchdirOrFalse(
   #endif
 }
 
-KLC_bool KLCNOperatingSystemInterface_mmkdirOrFalse(
+KLC_bool KLCNOperatingSystemInterfaceZFmkdirOrFalse(
     KLCNOperatingSystemInterface* os,
     KLCNString* path) {
   #if KLC_POSIX
@@ -77,7 +77,7 @@ KLC_bool KLCNOperatingSystemInterface_mmkdirOrFalse(
   #endif
 }
 
-KLCNList* KLCNOperatingSystemInterface_mlistdirOrNull(
+KLCNList* KLCNOperatingSystemInterfaceZFlistdirOrNull(
     KLCNOperatingSystemInterface* os,
     KLCNString* path) {
 #if KLC_POSIX
@@ -91,7 +91,7 @@ KLCNList* KLCNOperatingSystemInterface_mlistdirOrNull(
   }
   while ((dir = readdir(d)) != NULL) {
     KLC_header* dirname = (KLC_header*) KLC_mkstr(dir->d_name);
-    KLCNList_mpush(ret, KLC_object_to_var(dirname));
+    KLCNListZFpush(ret, KLC_object_to_var(dirname));
     KLC_release(dirname);
   }
   closedir(d);
@@ -99,7 +99,7 @@ KLCNList* KLCNOperatingSystemInterface_mlistdirOrNull(
 #elif KLC_OS_WINDOWS
   /* TODO: Use unicode versions of these functions */
   KLCNString* suffix = KLC_mkstr("\\*");
-  KLCNString* pattern = KLCNString_mAdd(path, suffix);
+  KLCNString* pattern = KLCNStringZFAdd(path, suffix);
   WIN32_FIND_DATAW data;
   HANDLE hFind = FindFirstFileW(KLC_windows_get_wstr(pattern), &data);
   KLCNList* ret = KLC_mklist(0);
@@ -109,7 +109,7 @@ KLCNList* KLCNOperatingSystemInterface_mlistdirOrNull(
   }
   do {
     KLC_header* name = (KLC_header*) KLC_windows_string_from_wstr(data.cFileName);
-    KLCNList_mpush(ret, KLC_object_to_var(name));
+    KLCNListZFpush(ret, KLC_object_to_var(name));
     KLC_release(name);
   } while (FindNextFileW(hFind, &data));
   FindClose(hFind);
@@ -122,7 +122,7 @@ KLCNList* KLCNOperatingSystemInterface_mlistdirOrNull(
 #endif
 }
 
-KLCNString* KLCNOperatingSystemInterface_mgetcwdOrNull(KLCNOperatingSystemInterface* os) {
+KLCNString* KLCNOperatingSystemInterfaceZFgetcwdOrNull(KLCNOperatingSystemInterface* os) {
 #if KLC_POSIX
   size_t cap = 2, len;
   char* buffer = (char*) malloc(sizeof(char) * cap);
@@ -151,7 +151,7 @@ KLCNString* KLCNOperatingSystemInterface_mgetcwdOrNull(KLCNOperatingSystemInterf
 #endif
 }
 
-KLC_bool KLCNOperatingSystemInterface_misfile(
+KLC_bool KLCNOperatingSystemInterfaceZFisfile(
     KLCNOperatingSystemInterface* os,
     KLCNString* path) {
 #if KLC_POSIX
@@ -179,7 +179,7 @@ KLC_bool KLCNOperatingSystemInterface_misfile(
 #endif
 }
 
-KLC_bool KLCNOperatingSystemInterface_misdir(
+KLC_bool KLCNOperatingSystemInterfaceZFisdir(
     KLCNOperatingSystemInterface* os,
     KLCNString* path) {
 #if KLC_POSIX

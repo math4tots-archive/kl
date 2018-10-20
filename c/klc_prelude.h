@@ -211,10 +211,10 @@ void KLC_release(KLC_header *obj);
 KLC_bool KLC_var_to_bool(KLC_var v);
 KLC_var KLC_int_to_var(KLC_int i);
 KLC_var KLC_object_to_var(KLC_header* obj);
-void KLCNFile_mclose(KLCNFile* file);
+void KLCNFileZFclose(KLCNFile* file);
 KLCNList* KLC_mklist(size_t cap);
-void KLCNList_mpush(KLCNList* list, KLC_var v);
-KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b);
+void KLCNListZFpush(KLCNList* list, KLC_var v);
+KLCNString* KLCNStringZFAdd(KLCNString* a, KLCNString* b);
 
 #if KLC_OS_WINDOWS
 LPCWSTR KLC_windows_get_wstr(KLCNString* s);

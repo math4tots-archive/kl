@@ -4,9 +4,10 @@ import argparse
 import contextlib
 import os
 import re
+import string
+import subprocess
 import sys
 import typing
-import subprocess
 
 _scriptdir = os.path.dirname(os.path.realpath(__file__))
 
@@ -94,6 +95,64 @@ with open(os.path.join(_scriptdir, 'c', 'klc_prelude.c')) as f:
 
 with open(os.path.join(_scriptdir, 'builtins.k')) as f:
     BUILTINS = f.read()
+
+
+_safe_chars = set(
+    string.ascii_lowercase +
+    string.ascii_uppercase +
+    ''.join(map(str, range(10)))) - {'Z'}
+
+
+def encode(name):
+    return 'KLCN' + encode0(name)
+
+
+def encode0(name):
+    """Encode a name so that it's safe to use as a C symbol
+
+    Characters allowed in name:
+        digits 0-9
+        lower case letters a-z
+        upper case letters A-Z
+        underscore _
+        special characters:
+            dot          (.)
+            dollar sign  ($)
+            percent      (%)
+            hash         (#) -> for <main> (just '#' by itself),
+                                global variable init function names (#init),
+                                'new' function (#new)
+            colon        (:) -> for method names <class>:<method>
+
+
+    The special characters are to be used by the compiler for special
+    generated names (e.g. auto-generated functions).
+
+    The encoding mostly allows letters and digits to be themselves,
+    except capital 'Z' is used as an escape character, to encode all
+    other kinds of characters.
+    """
+    chars = []
+    for c in name:
+        if c == 'Z':
+            chars.append('ZZ')
+        elif c == '_':
+            chars.append('ZA')
+        elif c == '.':
+            chars.append('ZB')
+        elif c == '$':
+            chars.append('ZC')
+        elif c == '%':
+            chars.append('ZD')
+        elif c == '#':
+            chars.append('ZE')
+        elif c == ':':
+            chars.append('ZF')
+        elif c in _safe_chars:
+            chars.append(c)
+        else:
+            raise Error([], f'Invalid character {c} in name {name}')
+    return ''.join(chars)
 
 
 class InverseSet:
@@ -291,6 +350,9 @@ def _make_lexer():
     name_pattern = RegexPattern(
         '\w+', type='NAME', value_callback=lambda value: value)
 
+    escaped_name_pattern = RegexPattern(
+        '`[^`]+`', type='NAME', value_callback=lambda value: value[1:-1])
+
     def string_pattern_value_callback(value: str) -> str:
         return str(eval(value))  # type: ignore
 
@@ -321,6 +383,7 @@ def _make_lexer():
                 float_pattern,
                 int_pattern,
                 name_pattern,
+                escaped_name_pattern,
                 symbols_pattern,
             ],
             ignore_pattern=whitespace_and_comment_pattern)
@@ -636,7 +699,7 @@ class TranslationContext(object):
             return f'{self.cname(name)}*'
 
     def cname(self, name):
-        return f'KLCN{name}'
+        return encode(name)
 
     def czero(self, name):
         if name == 'type':
@@ -662,7 +725,7 @@ class TranslationContext(object):
         elif type_ in PRIMITIVE_TYPES:
             return f'KLC_var_to_{type_}({cname})'
         else:
-            return f'({self.cdecltype(type_)}) KLC_var_to_object({cname}, &KLC_type{type_})'
+            return f'({self.cdecltype(type_)}) KLC_var_to_object({cname}, &KLC_type{encode0(type_)})'
 
 
 class Name(Expression):
@@ -675,7 +738,7 @@ class Name(Expression):
         if isinstance(defn, GlobalVariableDefinition):
             etype = defn.type
             tempvar = ctx.mktemp(etype)
-            ctx.src += f'{tempvar} = KLC_get_global{defn.name}();'
+            ctx.src += f'{tempvar} = KLC_get_global{encode(defn.name)}();'
             return (etype, tempvar)
         elif isinstance(defn, BaseVariableDefinition):
             etype = defn.type
@@ -685,11 +748,11 @@ class Name(Expression):
             return (etype, tempvar)
         elif isinstance(defn, ClassDefinition):
             tempvar = ctx.mktemp('type')
-            ctx.src += f'{tempvar} = &KLC_type{defn.name};'
+            ctx.src += f'{tempvar} = &KLC_type{encode0(defn.name)};'
             return 'type', tempvar
         elif isinstance(defn, FunctionDefinition):
             tempvar = ctx.mktemp('function')
-            ctx.src += f'{tempvar} = &KLC_functioninfo{defn.name};'
+            ctx.src += f'{tempvar} = &KLC_functioninfo{encode(defn.name)};'
             return 'function', tempvar
         else:
             raise Error([self.token, defn.token],
@@ -842,7 +905,7 @@ class ListDisplay(Expression):
         xvar = ctx.mktemp('List')
         ctx.src += f'{xvar} = KLC_mklist({len(argvars)});'
         for arg in argvars:
-            ctx.src += f'KLCNList_mpush({xvar}, {arg});'
+            ctx.src += f'{encode("List:push")}({xvar}, {arg});'
         return 'List', xvar
 
 
@@ -1061,8 +1124,8 @@ class FunctionCall(Expression):
             for arg in self.args:
                 argtype, argtempvar = arg.translate(ctx)
                 argtriples.append((arg.token, argtype, argtempvar))
-            malloc_name = f'KLC_malloc{defn.name}'
-            fname = f'{defn.name}_new'
+            malloc_name = f'KLC_malloc{encode0(defn.name)}'
+            fname = f'{defn.name}#new'
             fdefn = ctx.scope.get(fname, [self.token])
             if not isinstance(fdefn, FunctionDefinition):
                 raise Error([self.token], f'FUBAR: shadowed function name')
@@ -1152,7 +1215,7 @@ def _translate_mcall(ctx, token, name, argtriples):
         if ownertype in PRIMITIVE_TYPES:
             if name not in _primitive_method_names[ownertype]:
                 raise _no_such_method_error(token, name, ownertype)
-            fname = f'{ownertype}_m{name}'
+            fname = f'{ownertype}:{name}'
         else:
             cdef = ctx.scope.get(ownertype, [token])
             assert isinstance(cdef, ClassDefinition), cdef
@@ -1592,25 +1655,27 @@ class GlobalVariableDefinition(GlobalDefinition):
     )
 
     def translate(self, ctx):
+        n = encode(self.name)
+        ifn = encode(self.name + '#init')
         ctype = ctx.cdecltype(self.type)
-        ctx.hdr += f'{ctype} KLC_get_global{self.name}();'
-        ctx.src += f'int KLC_initialized_global{self.name} = 0;'
-        ctx.src += f'{ctype} KLC_global{self.name} = {ctx.czero(self.type)};'
+        ctx.hdr += f'{ctype} KLC_get_global{n}();'
+        ctx.src += f'int KLC_initialized_global{n} = 0;'
+        ctx.src += f'{ctype} KLC_global{n} = {ctx.czero(self.type)};'
 
-        ctx.src += f'{ctype} KLC_get_global{self.name}() ' '{'
-        ctx.src += f'  if (!KLC_initialized_global{self.name}) ' '{'
-        ctx.src += f'    KLC_global{self.name} = KLCN_init{self.name}();'
-        ctx.src += f'    KLC_initialized_global{self.name} = 1;'
+        ctx.src += f'{ctype} KLC_get_global{n}() ' '{'
+        ctx.src += f'  if (!KLC_initialized_global{n}) ' '{'
+        ctx.src += f'    KLC_global{n} = {ifn}();'
+        ctx.src += f'    KLC_initialized_global{n} = 1;'
         if self.type in PRIMITIVE_TYPES:
             pass
         elif self.type == 'var':
-            ctx.src += f'    KLC_release_var_on_exit(KLC_global{self.name});'
+            ctx.src += f'    KLC_release_var_on_exit(KLC_global{n});'
         else:
-            ctx.src += f'    KLC_release_object_on_exit((KLC_header*) KLC_global{self.name});'
+            ctx.src += f'    KLC_release_object_on_exit((KLC_header*) KLC_global{n});'
         ctx.src += '  }'
         src1 = ctx.src.spawn(1)
-        src1 += _cretain(ctx, self.type, f'KLC_global{self.name}')
-        src1 += f'return KLC_global{self.name};'
+        src1 += _cretain(ctx, self.type, f'KLC_global{n}')
+        src1 += f'return KLC_global{n};'
         ctx.src += '}'
 
 
@@ -1625,7 +1690,7 @@ class FunctionDefinition(GlobalDefinition):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for m in ('Eq', 'Lt'):
-            if self.name.endswith(f'_m{m}'):
+            if self.name.endswith(f':{m}'):
                 if self.return_type != 'bool':
                     raise Error([self.token],
                                 f'{m} methods must return bool')
@@ -1646,7 +1711,7 @@ class FunctionDefinition(GlobalDefinition):
         return f'{crt} {cname}({cparams})'
 
     def untyped_cproto(self, ctx):
-        return f'KLC_var KLC_untyped{self.name}(int argc, KLC_var* argv)'
+        return f'KLC_var KLC_untyped{encode(self.name)}(int argc, KLC_var* argv)'
 
     def translate(self, gctx: GlobalTranslationContext):
         ctx = gctx.fctx(self)
@@ -1671,9 +1736,9 @@ class FunctionDefinition(GlobalDefinition):
     def _translate_untyped(self, ctx):
         name = self.name
         ctx.hdr += self.untyped_cproto(ctx) + ';'
-        ctx.hdr += f'KLC_functioninfo KLC_functioninfo{name} = ' '{'
+        ctx.hdr += f'KLC_functioninfo KLC_functioninfo{encode(name)} = ' '{'
         ctx.hdr += f'  "{name}",'
-        ctx.hdr += f'  KLC_untyped{self.name},'
+        ctx.hdr += f'  KLC_untyped{encode(self.name)},'
         ctx.hdr += '};'
         ctx.src += self.untyped_cproto(ctx) + '{'
         src = ctx.src.spawn(1)
@@ -1707,35 +1772,29 @@ def _write_ctypeinfo(src, cname, methodmap, use_null_deleter=False,
     # For primitive types, it's silly to have a deleter, so
     # use_null_deleter allows caller to control this
 
-    del_name = _delname(cname)
+    cn = encode0(cname)
+
+    del_name = _delname(cn)
     if methodmap or untyped_methods:
         # If there are 'extern' methods, add entries for them here
         if untyped_methods is not None:
             for mname in untyped_methods:
-                methodmap[mname] = f'{cname}_m{mname}'
-        src += f'static KLC_methodinfo KLC_methodarray{cname}[] = ' '{'
+                methodmap[mname] = f'{cname}:{mname}'
+        src += f'static KLC_methodinfo KLC_methodarray{cn}[] = ' '{'
         for mname, mfname in sorted(methodmap.items()):
-            src += '  {' f'"{mname}", KLC_untyped{mfname}' '},'
+            src += '  {' f'"{mname}", KLC_untyped{encode(mfname)}' '},'
         src += '};'
 
-    src += f'static KLC_methodlist KLC_methodlist{cname} = ' '{'
+    src += f'static KLC_methodlist KLC_methodlist{cn} = ' '{'
     src += f'  {len(methodmap)},'
-    src += f'  KLC_methodarray{cname},' if methodmap else '  NULL,'
+    src += f'  KLC_methodarray{cn},' if methodmap else '  NULL,'
     src += '};'
 
-    src += f'KLC_typeinfo KLC_type{cname} = ' '{'
+    src += f'KLC_typeinfo KLC_type{cn} = ' '{'
     src += f'  "{cname}",'
     src += '  NULL,' if use_null_deleter else f'  &{del_name},'
-    src += f'  &KLC_methodlist{cname},'
+    src += f'  &KLC_methodlist{cn},'
     src += '};'
-
-
-def _check_type_name(token, name):
-    if '_' in name:
-        raise Error([token], 'Class and trait names cannot have underscores')
-    if name[:1].lower() == name[:1]:
-        raise Error([token],
-                    'Class and trait names must start with uppercase letter')
 
 
 def _check_all_are_traits(token, traits, ctx):
@@ -1760,7 +1819,6 @@ class TraitDefinition(GlobalDefinition):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        _check_type_name(self.token, self.name)
 
     def translate(self, ctx: GlobalTranslationContext):
         # Verify that there's no circular trait inheritance,
@@ -1788,7 +1846,7 @@ def _compute_method_map(token, cname, method_names, trait_names, ctx, stack=None
         raise Error([tdef.token for tdef in stack],
                     f'Circular trait inheritance')
     _check_all_are_traits(token, trait_names, ctx)
-    method_map = {mname: f'{cname}_m{mname}' for mname in method_names}
+    method_map = {mname: f'{cname}:{mname}' for mname in method_names}
     traits = [ctx.scope.get(n, [token]) for n in trait_names]
     stack.append(cname)
     # MRO is DFS
@@ -1813,7 +1871,6 @@ class ClassDefinition(TypeDefinition):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        _check_type_name(self.token, self.name)
         if self.untyped_methods and self.name != 'Closure':
             raise Error(
                 [self.token],
@@ -1836,11 +1893,12 @@ class ClassDefinition(TypeDefinition):
     def translate(self, ctx: GlobalTranslationContext):
         _check_all_are_traits(self.token, self.traits, ctx)
         name = self.name
+        n0 = encode0(name)
         cname = ctx.cname(name)
         cdecltype = ctx.cdecltype(name)
 
-        del_name = _delname(name)
-        malloc_name = f'KLC_malloc{name}'
+        del_name = _delname(n0)
+        malloc_name = f'KLC_malloc{n0}'
 
         delete_proto = f'void {del_name}(KLC_header* robj, KLC_header** dq)'
         malloc_proto = f'{cdecltype} {malloc_name}()'
@@ -1848,7 +1906,7 @@ class ClassDefinition(TypeDefinition):
         ctx.hdr += delete_proto + ';'
         ctx.hdr += malloc_proto + ';'
 
-        ctx.hdr += f'extern KLC_typeinfo KLC_type{name};'
+        ctx.hdr += f'extern KLC_typeinfo KLC_type{n0};'
 
         _write_ctypeinfo(
             src=ctx.src,
@@ -1884,7 +1942,7 @@ class ClassDefinition(TypeDefinition):
 
         ctx.src += malloc_proto + ' {'
         ctx.src += f'  {cdecltype} obj = ({cdecltype}) malloc(sizeof({cname}));'
-        ctx.src += f'  KLC_init_header(&obj->header, &KLC_type{name});'
+        ctx.src += f'  KLC_init_header(&obj->header, &KLC_type{n0});'
         for field in self.fields:
             cfname = ctx.cname(field.name)
             ctx.src += f'  obj->{cfname} = {ctx.czero(field.type)};'
@@ -1894,11 +1952,11 @@ class ClassDefinition(TypeDefinition):
     def _translate_field_implementations(self, ctx):
         this_proto = f"{ctx.cdecltype(self.name)} {ctx.cname('this')}"
         for field in self.fields:
-            field_ref = f'KLCNthis->{ctx.cname(field.name)}'
+            field_ref = f'{encode("this")}->{ctx.cname(field.name)}'
             ctype = ctx.cdecltype(field.type)
 
             ## GETTER
-            getter_name = f'{self.name}_mGET{field.name}'
+            getter_name = f'{self.name}:GET{field.name}'
             getter_cname = ctx.cname(getter_name)
             getter_proto = f'{ctype} {getter_cname}({this_proto})'
             ctx.src += getter_proto + '{'
@@ -1908,7 +1966,7 @@ class ClassDefinition(TypeDefinition):
             sp += f'return {field_ref};'
 
             # SETTER
-            setter_name = f'{self.name}_mSET{field.name}'
+            setter_name = f'{self.name}:SET{field.name}'
             setter_cname = ctx.cname(setter_name)
             setter_proto = f'{ctype} {setter_cname}({this_proto}, {ctype} v)'
             ctx.src += setter_proto + '{'
@@ -1961,6 +2019,7 @@ def _is_special_method_name(name):
             any(name.startswith(p) for p in _special_method_prefixes))
 
 def _check_method_name(token, name):
+    # TODO: Consider removing this restriction
     if _has_upper(name[0]) and not _is_special_method_name(name):
         raise Error(
             [token],
@@ -2242,7 +2301,7 @@ def parse_one_source(source, env):
         vtype = expect('NAME').value
         vname = expect('NAME').value
         defs.append(GlobalVariableDefinition(token, extern, vtype, vname))
-        ifname = f'_init{vname}'
+        ifname = f'{vname}#init'
         if extern:
             initf = FunctionDefinition(
                 token,
@@ -2319,7 +2378,7 @@ def parse_one_source(source, env):
                         [newdef.token, peek()],
                         'Only one constructor definition is allowed for '
                         'a class')
-                fname = f'{name}_new'
+                fname = f'{name}#new'
                 mtoken = expect('new')
                 declparams = parse_params()
                 if extern:
@@ -2363,8 +2422,8 @@ def parse_one_source(source, env):
 
                 # GET and SET methods are implemented specially
                 # during the class translation
-                getter_name = f'{name}_mGET{fname}'
-                setter_name = f'{name}_mSET{fname}'
+                getter_name = f'{name}:GET{fname}'
+                setter_name = f'{name}:SET{fname}'
                 defs.append(FunctionDefinition(
                     ftoken,
                     ftype,
@@ -2396,7 +2455,7 @@ def parse_one_source(source, env):
 
                 # A method is mapped to a function with a special name,
                 # and an implicit first parameter.
-                fname = f'{name}_m{mname}'
+                fname = f'{name}:{mname}'
 
                 mark_method(mname, token)
 
@@ -2409,8 +2468,8 @@ def parse_one_source(source, env):
             defs.append(FunctionDefinition(
                 token,
                 'void',
-                f'{name}_new',
-                [Parameter(mtoken, name, 'this')],
+                f'{name}#new',
+                [Parameter(token, name, 'this')],
                 Block(token, [])))
 
         method_names = sorted(method_to_token_table)
@@ -2434,7 +2493,7 @@ def parse_one_source(source, env):
 
             # A method is mapped to a function with a special name,
             # and an implicit first parameter.
-            fname = f'{name}_m{mname}'
+            fname = f'{name}:{mname}'
             params = [Parameter(mtoken, 'var', 'this')] + params
 
             if mname in method_to_token_table:

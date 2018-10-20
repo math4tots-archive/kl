@@ -65,9 +65,9 @@ KLCNList* KLCNPOSIXInterface_mreaddir(KLCNPOSIXInterface* p, KLCNString* path) {
     KLC_header* dirname = (KLC_header*) KLC_mkstr(dir->d_name);
     ino_t ino = dir->d_ino;
     KLCNList* pair = KLC_mklist(2);
-    KLCNList_mpush(pair, KLC_int_to_var((KLC_int) ino));
-    KLCNList_mpush(pair, KLC_object_to_var(dirname));
-    KLCNList_mpush(ret, KLC_object_to_var((KLC_header*) pair));
+    KLCNListZFpush(pair, KLC_int_to_var((KLC_int) ino));
+    KLCNListZFpush(pair, KLC_object_to_var(dirname));
+    KLCNListZFpush(ret, KLC_object_to_var((KLC_header*) pair));
     KLC_release(dirname);
     KLC_release((KLC_header*) pair);
   }

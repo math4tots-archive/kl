@@ -262,7 +262,7 @@ void KLC_release_var(KLC_var v) {
   }
 }
 
-KLC_bool KLCN_Is(KLC_var a, KLC_var b) {
+KLC_bool KLCNZAIs(KLC_var a, KLC_var b) {
   if (a.tag != b.tag) {
     return 0;
   }
@@ -283,11 +283,11 @@ KLC_bool KLCN_Is(KLC_var a, KLC_var b) {
   return 0;
 }
 
-KLC_bool KLCN_IsNot(KLC_var a, KLC_var b) {
-  return !KLCN_Is(a, b);
+KLC_bool KLCNZAIsNot(KLC_var a, KLC_var b) {
+  return !KLCNZAIs(a, b);
 }
 
-KLC_bool KLCN_Eq(KLC_var a, KLC_var b) {
+KLC_bool KLCNZAEq(KLC_var a, KLC_var b) {
   if (a.tag == b.tag) {
     switch (a.tag) {
       case KLC_TAG_BOOL:
@@ -327,11 +327,11 @@ KLC_bool KLCN_Eq(KLC_var a, KLC_var b) {
   return 0;
 }
 
-KLC_bool KLCN_Ne(KLC_var a, KLC_var b) {
-  return !KLCN_Eq(a, b);
+KLC_bool KLCNZANe(KLC_var a, KLC_var b) {
+  return !KLCNZAEq(a, b);
 }
 
-KLC_bool KLCN_Lt(KLC_var a, KLC_var b) {
+KLC_bool KLCNZALt(KLC_var a, KLC_var b) {
   if (a.tag == b.tag) {
     switch (a.tag) {
       case KLC_TAG_INT:
@@ -352,16 +352,16 @@ KLC_bool KLCN_Lt(KLC_var a, KLC_var b) {
   }
 }
 
-KLC_bool KLCN_Gt(KLC_var a, KLC_var b) {
-  return KLCN_Lt(b, a);
+KLC_bool KLCNZAGt(KLC_var a, KLC_var b) {
+  return KLCNZALt(b, a);
 }
 
-KLC_bool KLCN_Le(KLC_var a, KLC_var b) {
-  return !KLCN_Lt(b, a);
+KLC_bool KLCNZALe(KLC_var a, KLC_var b) {
+  return !KLCNZALt(b, a);
 }
 
-KLC_bool KLCN_Ge(KLC_var a, KLC_var b) {
-  return !KLCN_Lt(a, b);
+KLC_bool KLCNZAGe(KLC_var a, KLC_var b) {
+  return !KLCNZALt(a, b);
 }
 
 KLC_bool KLCNbool(KLC_var v) {
@@ -563,87 +563,87 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {
   }
 }
 
-KLC_int KLCNint_mAdd(KLC_int a, KLC_int b) {
+KLC_int KLCNintZFAdd(KLC_int a, KLC_int b) {
   return a + b;
 }
 
-KLC_int KLCNint_mSub(KLC_int a, KLC_int b) {
+KLC_int KLCNintZFSub(KLC_int a, KLC_int b) {
   return a - b;
 }
 
-KLC_int KLCNint_mMul(KLC_int a, KLC_int b) {
+KLC_int KLCNintZFMul(KLC_int a, KLC_int b) {
   return a * b;
 }
 
-KLC_int KLCNint_mDiv(KLC_int a, KLC_int b) {
+KLC_int KLCNintZFDiv(KLC_int a, KLC_int b) {
   return a / b;
 }
 
-KLC_int KLCNint_mMod(KLC_int a, KLC_int b) {
+KLC_int KLCNintZFMod(KLC_int a, KLC_int b) {
   return a % b;
 }
 
-KLC_bool KLCNint_mEq(KLC_int a, KLC_int b) {
+KLC_bool KLCNintZFEq(KLC_int a, KLC_int b) {
   return a == b;
 }
 
-KLC_bool KLCNint_mNe(KLC_int a, KLC_int b) {
+KLC_bool KLCNintZFNe(KLC_int a, KLC_int b) {
   return a != b;
 }
 
-KLC_bool KLCNint_mLt(KLC_int a, KLC_int b) {
+KLC_bool KLCNintZFLt(KLC_int a, KLC_int b) {
   return a < b;
 }
 
-KLCNString* KLCNint_mRepr(KLC_int i) {
+KLCNString* KLCNintZFRepr(KLC_int i) {
   char buffer[128];
   sprintf(buffer, KLC_INT_FMT, i);
   return KLC_mkstr(buffer);
 }
 
-double KLCNdouble_mAdd(double a, double b) {
+double KLCNdoubleZFAdd(double a, double b) {
   return a + b;
 }
 
-double KLCNdouble_mSub(double a, double b) {
+double KLCNdoubleZFSub(double a, double b) {
   return a - b;
 }
 
-double KLCNdouble_mMul(double a, double b) {
+double KLCNdoubleZFMul(double a, double b) {
   return a * b;
 }
 
-double KLCNdouble_mDiv(double a, double b) {
+double KLCNdoubleZFDiv(double a, double b) {
   return a / b;
 }
 
-KLC_bool KLCNdouble_mEq(double a, double b) {
+KLC_bool KLCNdoubleZFEq(double a, double b) {
   return a == b;
 }
 
-KLC_bool KLCNdouble_mNe(double a, double b) {
+KLC_bool KLCNdoubleZFNe(double a, double b) {
   return a != b;
 }
 
-KLC_bool KLCNdouble_mLt(double a, double b) {
+KLC_bool KLCNdoubleZFLt(double a, double b) {
   return a < b;
 }
 
-KLCNString* KLCNdouble_mRepr(double d) {
+KLCNString* KLCNdoubleZFRepr(double d) {
   char buffer[80];
   sprintf(buffer, "%f", d);
   return KLC_mkstr(buffer);
 }
 
-KLCNString* KLCNfunction_mGETname(KLC_function f) {
+KLCNString* KLCNfunctionZFGETname(KLC_function f) {
   return KLC_mkstr(f->name);
 }
 
-KLCNString* KLCNtype_mGETname(KLC_type t) {
+KLCNString* KLCNtypeZFGETname(KLC_type t) {
   return KLC_mkstr(t->name);
 }
 
-KLC_bool KLCNtype_mEq(KLC_type a, KLC_type b) {
+KLC_bool KLCNtypeZFEq(KLC_type a, KLC_type b) {
   return a == b;
 }
 
@@ -662,7 +662,7 @@ void KLC_deleteWeakReference(KLC_header* robj, KLC_header** dq) {
   }
 }
 
-KLCNWeakReference* KLCNWeakReference_new(KLC_var v) {
+KLCNWeakReference* KLCNWeakReferenceZEnew(KLC_var v) {
   KLCNWeakReference* wr = (KLCNWeakReference*) malloc(sizeof(KLCNWeakReference));
   KLC_init_header(&wr->header, &KLC_typeWeakReference);
   if (v.tag != KLC_TAG_OBJECT) {
@@ -678,7 +678,7 @@ KLCNWeakReference* KLCNWeakReference_new(KLC_var v) {
   return wr;
 }
 
-KLC_var KLCNWeakReference_mgetNullable(KLCNWeakReference* wr) {
+KLC_var KLCNWeakReferenceZFgetNullable(KLCNWeakReference* wr) {
   KLC_retain(wr->obj); /* retain to use as return */
   return KLC_object_to_var(wr->obj);
 }
@@ -759,21 +759,21 @@ static void KLC_String_init_utf32(KLCNString* s) {
   }
 }
 
-KLC_int KLCNString_mGETbytesize(KLCNString* s) {
+KLC_int KLCNStringZFGETbytesize(KLCNString* s) {
   return (KLC_int) s->bytesize;
 }
 
-KLC_int KLCNString_mGETsize(KLCNString* s) {
+KLC_int KLCNStringZFGETsize(KLCNString* s) {
   KLC_String_init_utf32(s);
   return (KLC_int) s->nchars;
 }
 
-KLCNString* KLCNString_mStr(KLCNString* s) {
+KLCNString* KLCNStringZFStr(KLCNString* s) {
   KLC_retain((KLC_header*) s);
   return s;
 }
 
-KLCNString* KLCNString_mescape(KLCNString* str) {
+KLCNString* KLCNStringZFescape(KLCNString* str) {
   size_t i = 0, j = 0, bs = str->bytesize;
   char* buffer = (char*) malloc(sizeof(char) * (2 * bs + 1));
   char* s = str->utf8;
@@ -841,7 +841,7 @@ KLCNString* KLCNString_mescape(KLCNString* str) {
   return KLC_mkstr_with_buffer(j, buffer, KLC_check_ascii(buffer));
 }
 
-KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b) {
+KLCNString* KLCNStringZFAdd(KLCNString* a, KLCNString* b) {
   size_t bytesize = a->bytesize + b->bytesize;
   char* buffer = (char*) malloc(sizeof(char) * (bytesize + 1));
   strcpy(buffer, a->utf8);
@@ -849,15 +849,15 @@ KLCNString* KLCNString_mAdd(KLCNString* a, KLCNString* b) {
   return KLC_mkstr_with_buffer(bytesize, buffer, a->is_ascii && b->is_ascii);
 }
 
-KLC_bool KLCNString_mEq(KLCNString* a, KLCNString* b) {
+KLC_bool KLCNStringZFEq(KLCNString* a, KLCNString* b) {
   return a->bytesize == b->bytesize && strcmp(a->utf8, b->utf8) == 0;
 }
 
-KLC_bool KLCNString_mLt(KLCNString* a, KLCNString* b) {
+KLC_bool KLCNStringZFLt(KLCNString* a, KLCNString* b) {
   return strcmp(a->utf8, b->utf8) < 0;
 }
 
-KLCNString* KLCNString_mSlice(KLCNString* s, KLC_int a, KLC_int b) {
+KLCNString* KLCNStringZFSlice(KLCNString* s, KLC_int a, KLC_int b) {
   size_t len;
   KLC_String_init_utf32(s);
   len = s->nchars;
@@ -915,7 +915,7 @@ void KLCNpanic(KLCNString* message) {
   KLC_errorf("%s", message->utf8);
 }
 
-KLCNStringBuilder* KLCNStringBuilder_new() {
+KLCNStringBuilder* KLCNStringBuilderZEnew() {
   KLCNStringBuilder* obj = (KLCNStringBuilder*) malloc(sizeof(KLCNStringBuilder));
   KLC_init_header(&obj->header, &KLC_typeStringBuilder);
   obj->size = obj->cap = 0;
@@ -928,7 +928,7 @@ void KLC_deleteStringBuilder(KLC_header* robj, KLC_header** dq) {
   free(obj->buffer);
 }
 
-void KLCNStringBuilder_maddstr(KLCNStringBuilder* sb, KLCNString* s) {
+void KLCNStringBuilderZFaddstr(KLCNStringBuilder* sb, KLCNString* s) {
   if (s->bytesize) {
     if (sb->size + s->bytesize + 1 > sb->cap) {
       sb->cap += s->bytesize + 16;
@@ -940,7 +940,7 @@ void KLCNStringBuilder_maddstr(KLCNStringBuilder* sb, KLCNString* s) {
   }
 }
 
-KLCNString* KLCNStringBuilder_mbuild(KLCNStringBuilder* sb) {
+KLCNString* KLCNStringBuilderZFbuild(KLCNStringBuilder* sb) {
   if (sb->size) {
     size_t bytesize = sb->size;
     char* buffer = (char*) realloc(sb->buffer, sizeof(char) * (sb->size + 1));
@@ -970,7 +970,7 @@ void KLC_deleteList(KLC_header* robj, KLC_header** dq) {
   free(list->buffer);
 }
 
-void KLCNList_mpush(KLCNList* list, KLC_var v) {
+void KLCNListZFpush(KLCNList* list, KLC_var v) {
   if (list->size >= list->cap) {
     list->cap += 4;
     list->cap *= 2;
@@ -980,7 +980,7 @@ void KLCNList_mpush(KLCNList* list, KLC_var v) {
   KLC_retain_var(v);
 }
 
-KLC_var KLCNList_mGetItem(KLCNList* list, KLC_int i) {
+KLC_var KLCNListZFGetItem(KLCNList* list, KLC_int i) {
   if (i < 0) {
     i += list->size;
   }
@@ -991,7 +991,7 @@ KLC_var KLCNList_mGetItem(KLCNList* list, KLC_int i) {
   return list->buffer[i];
 }
 
-KLC_var KLCNList_mSetItem(KLCNList* list, KLC_int i, KLC_var v) {
+KLC_var KLCNListZFSetItem(KLCNList* list, KLC_int i, KLC_var v) {
   if (i < 0) {
     i += list->size;
   }
@@ -1004,11 +1004,11 @@ KLC_var KLCNList_mSetItem(KLCNList* list, KLC_int i, KLC_var v) {
   return v;
 }
 
-KLC_int KLCNList_mGETsize(KLCNList* list) {
+KLC_int KLCNListZFGETsize(KLCNList* list) {
   return (KLC_int) list->size;
 }
 
-KLC_var KLCNClosure_new(KLCNList* captures, KLC_function f) {
+KLC_var KLCNClosureZEnew(KLCNList* captures, KLC_function f) {
   KLCNClosure* closure = (KLCNClosure*) malloc(sizeof(KLCNClosure));
   KLC_init_header(&closure->header, &KLC_typeClosure);
   KLC_retain((KLC_header*) captures);
@@ -1022,7 +1022,7 @@ void KLC_deleteClosure(KLC_header* robj, KLC_header** dq) {
   KLC_partial_release((KLC_header*) closure->captures, dq);
 }
 
-KLC_var KLC_untypedClosure_mCall(int argc, KLC_var* argv) {
+KLC_var KLC_untypedKLCNClosureZFCall(int argc, KLC_var* argv) {
   KLCNClosure* closure;
   if (argc < 1) {
     KLC_errorf("method call with no receiver");
@@ -1074,10 +1074,10 @@ KLCNFile* KLC_mkfile(FILE* cfile,
 void KLC_deleteFile(KLC_header* robj, KLC_header** dq) {
   KLCNFile* file = (KLCNFile*) robj;
   free(file->name);
-  KLCNFile_mclose(file);
+  KLCNFileZFclose(file);
 }
 
-KLCNFile* KLCNFile_new(KLCNString* path, KLCNString* mode) {
+KLCNFile* KLCNFileZEnew(KLCNString* path, KLCNString* mode) {
   FILE* cfile;
   if (!KLC_is_valid_file_mode(mode->utf8)) {
     KLC_errorf("Invalid file mode: %s", mode->utf8);
@@ -1089,14 +1089,14 @@ KLCNFile* KLCNFile_new(KLCNString* path, KLCNString* mode) {
   return KLC_mkfile(cfile, path->utf8, mode->utf8, 1);
 }
 
-void KLCNFile_mclose(KLCNFile* file) {
+void KLCNFileZFclose(KLCNFile* file) {
   if (file->cfile && file->should_close) {
     fclose(file->cfile);
     file->cfile = NULL;
   }
 }
 
-void KLCNFile_mwrite(KLCNFile* file, KLCNString* s) {
+void KLCNFileZFwrite(KLCNFile* file, KLCNString* s) {
   if (!file->cfile) {
     KLC_errorf("Trying to write to closed file");
   }
@@ -1108,7 +1108,7 @@ void KLCNFile_mwrite(KLCNFile* file, KLCNString* s) {
   fwrite(s->utf8, 1, s->bytesize, file->cfile);
 }
 
-KLCNString* KLCNFile_mread(KLCNFile* file) {
+KLCNString* KLCNFileZFread(KLCNFile* file) {
   size_t cap, i, read_size, last;
   char* buffer;
 
@@ -1141,19 +1141,19 @@ KLCNString* KLCNFile_mread(KLCNFile* file) {
   return KLC_mkstr_with_buffer(i, buffer, KLC_check_ascii(buffer));
 }
 
-KLCNFile* KLCN_initSTDIN() {
+KLCNFile* KLCNSTDINZEinit() {
   return KLC_mkfile(stdin, ":STDIN", "r", 0);
 }
 
-KLCNFile* KLCN_initSTDOUT() {
+KLCNFile* KLCNSTDOUTZEinit() {
   return KLC_mkfile(stdout, ":STDOUT", "w", 0);
 }
 
-KLCNFile* KLCN_initSTDERR() {
+KLCNFile* KLCNSTDERRZEinit() {
   return KLC_mkfile(stderr, ":STDERR", "w", 0);
 }
 
-KLCNList* KLCN_initARGS() {
+KLCNList* KLCNARGSZEinit() {
 #if KLC_WIN_APP
   KLCNList* args;
   int argc, i;
@@ -1162,7 +1162,7 @@ KLCNList* KLCN_initARGS() {
   args = KLC_mklist(argc);
   for (i = 0; i < argc; i++) {
     KLC_header* arg = (KLC_header*) KLC_windows_string_from_wstr(argv[i]);
-    KLCNList_mpush(args, KLC_object_to_var(arg));
+    KLCNListZFpush(args, KLC_object_to_var(arg));
     KLC_release(arg);
   }
   LocalFree(argv);
@@ -1171,7 +1171,7 @@ KLCNList* KLCN_initARGS() {
   int i;
   for (i = 0; i < KLC_argc; i++) {
     KLC_header* arg = (KLC_header*) KLC_mkstr(KLC_argv[i]);
-    KLCNList_mpush(args, KLC_object_to_var(arg));
+    KLCNListZFpush(args, KLC_object_to_var(arg));
     KLC_release(arg);
   }
 #endif

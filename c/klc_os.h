@@ -11,18 +11,18 @@ struct KLCNOperatingSystemInterface {
 
 extern KLC_typeinfo KLC_typeOperatingSystemInterface;
 
-KLCNOperatingSystemInterface* KLCN_initOS();
+KLCNOperatingSystemInterface* KLCNOSZEinit();
 void KLC_deleteOperatingSystemInterface(KLC_header* robj, KLC_header** dq);
-KLCNString* KLCNOperatingSystemInterface_mGETname(KLCNOperatingSystemInterface*);
-KLC_bool KLCNOperatingSystemInterface_mGETposix(KLCNOperatingSystemInterface*);
-KLC_bool KLCNOperatingSystemInterface_mBool(KLCNOperatingSystemInterface*);
-KLCNList* KLCNOperatingSystemInterface_mlistdir(
+KLCNString* KLCNOperatingSystemInterfaceZFGETname(KLCNOperatingSystemInterface*);
+KLC_bool KLCNOperatingSystemInterfaceZFGETposix(KLCNOperatingSystemInterface*);
+KLC_bool KLCNOperatingSystemInterfaceZFBool(KLCNOperatingSystemInterface*);
+KLCNList* KLCNOperatingSystemInterfaceZFlistdir(
   KLCNOperatingSystemInterface*,
   KLCNString*);
-KLC_bool KLCNOperatingSystemInterface_misfile(
+KLC_bool KLCNOperatingSystemInterfaceZFisfile(
     KLCNOperatingSystemInterface* os,
     KLCNString* path);
-KLC_bool KLCNOperatingSystemInterface_misdir(
+KLC_bool KLCNOperatingSystemInterfaceZFisdir(
     KLCNOperatingSystemInterface* os,
     KLCNString* path);
 
