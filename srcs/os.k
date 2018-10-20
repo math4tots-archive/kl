@@ -1,7 +1,7 @@
 #(append C_HEADERS 'klc_os.h')
 #(append C_SOURCES 'klc_os.c')
 
-extern class OperatingSystemInterface {
+extern class Interface {
   String GETname()
   bool GETposix()
 
@@ -53,4 +53,23 @@ extern class OperatingSystemInterface {
   }
 }
 
-extern OperatingSystemInterface OS
+extern Interface OS
+
+bool isdir(String path) {
+  return OS.isdir(path)
+}
+
+bool isfile(String path) {
+  return OS.isfile(path)
+}
+
+List listdir(String path) {
+  return OS.listdir(path)
+}
+
+String name = OS.name
+bool posix = OS.posix
+
+String getcwd() {
+  return OS.getcwd()
+}

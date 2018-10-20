@@ -3,27 +3,27 @@
 #include "klc_prelude.h"
 
 
-typedef struct KLCNOperatingSystemInterface KLCNOperatingSystemInterface;
+typedef struct KLCNosZBInterface KLCNosZBInterface;
 
-struct KLCNOperatingSystemInterface {
+struct KLCNosZBInterface {
   KLC_header header;
 };
 
-extern KLC_typeinfo KLC_typeOperatingSystemInterface;
+extern KLC_typeinfo KLC_typeosZBInterface;
 
-KLCNOperatingSystemInterface* KLCNOSZEinit();
-void KLC_deleteOperatingSystemInterface(KLC_header* robj, KLC_header** dq);
-KLCNString* KLCNOperatingSystemInterfaceZFGETname(KLCNOperatingSystemInterface*);
-KLC_bool KLCNOperatingSystemInterfaceZFGETposix(KLCNOperatingSystemInterface*);
-KLC_bool KLCNOperatingSystemInterfaceZFBool(KLCNOperatingSystemInterface*);
-KLCNList* KLCNOperatingSystemInterfaceZFlistdir(
-  KLCNOperatingSystemInterface*,
+KLCNosZBInterface* KLCNOSZEinit();
+void KLC_deleteosZBInterface(KLC_header* robj, KLC_header** dq);
+KLCNString* KLCNosZBInterfaceZFGETname(KLCNosZBInterface*);
+KLC_bool KLCNosZBInterfaceZFGETposix(KLCNosZBInterface*);
+KLC_bool KLCNosZBInterfaceZFBool(KLCNosZBInterface*);
+KLCNList* KLCNosZBInterfaceZFlistdir(
+  KLCNosZBInterface*,
   KLCNString*);
-KLC_bool KLCNOperatingSystemInterfaceZFisfile(
-    KLCNOperatingSystemInterface* os,
+KLC_bool KLCNosZBInterfaceZFisfile(
+    KLCNosZBInterface* os,
     KLCNString* path);
-KLC_bool KLCNOperatingSystemInterfaceZFisdir(
-    KLCNOperatingSystemInterface* os,
+KLC_bool KLCNosZBInterfaceZFisdir(
+    KLCNosZBInterface* os,
     KLCNString* path);
 
 #endif/*klc_os_h*/

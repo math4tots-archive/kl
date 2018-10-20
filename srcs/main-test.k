@@ -1,6 +1,4 @@
-#include "./a"
-#include "./b"
-#include "os"
+import os
 
 class Bar {
   double d
@@ -187,10 +185,10 @@ void main() {
     bar.s = 'bar.s content'
     assert(bar.s == 'bar.s content')
     assert(bar.f() == 10)
-    assert(str(bar) == '<Bar instance>')
+    assert(str(bar) == '<#.Bar instance>')
 
     Baz baz = Baz(15)
-    assert(str(baz) == '<Baz instance>')
+    assert(str(baz) == '<#.Baz instance>')
     assert(baz.a == 15)
 
     bar.d = 10.
@@ -340,7 +338,7 @@ void main() {
 
   // Directory stuff
   {
-    assert(OS.isdir('.'))
+    assert(os.isdir('.'))
   }
 
   // Unicode and slicing
@@ -381,19 +379,19 @@ void main() {
   // corner cases with 'Z'
   {
     Zz zz = Zz()
-    assert(str(zz) == '<Zz instance>')
-    assert(str(zz.getZ()) == '<Zz instance>')
+    assert(str(zz) == '<#.Zz instance>')
+    assert(str(zz.getZ()) == '<#.Zz instance>')
   }
 
-  print(OS.name)
-  print('OS.getcwd() = ' + str(OS.getcwd()))
-  print('OS.posix = ' + str(OS.posix))
-  print('OS.isdir("c/hw.c") = ' + str(OS.isdir("c/hw.c")))
-  print('OS.isdir("srcs") = ' + str(OS.isdir("srcs")))
-  print('OS.isfile("c/hw.c") = ' + str(OS.isfile("c/hw.c")))
-  print('OS.isfile("srcs") = ' + str(OS.isfile("srcs")))
+  print(os.name)
+  print('os.getcwd() = ' + str(os.getcwd()))
+  print('os.posix = ' + str(os.posix))
+  print('os.isdir("c/hw.c") = ' + str(os.isdir("c/hw.c")))
+  print('os.isdir("srcs") = ' + str(os.isdir("srcs")))
+  print('os.isfile("c/hw.c") = ' + str(os.isfile("c/hw.c")))
+  print('os.isfile("srcs") = ' + str(os.isfile("srcs")))
   print('ARGS = ' + str(ARGS))
-  print(OS.listdir('.'))
+  print(os.listdir('.'))
   print('Hello world!')
   final data = File('c/hw.c', 'r').read()
   print('data.size = ' + str(data.size))

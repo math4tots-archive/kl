@@ -122,6 +122,7 @@ def encode0(name):
             hash         (#) -> for <main> (just '#' by itself),
                                 global variable init function names (#init),
                                 'new' function (#new)
+                                temporary variables (#tempvar#i)
             colon        (:) -> for method names <class>:<method>
 
 
@@ -524,7 +525,7 @@ class Scope(object):
             scope = scope.parent
 
     def _missing_name_err(self, name, tokens):
-        return Error(tokens, f'Name {name} not defined in this scope')
+        return Error(tokens, f'Name {name} is not defined')
 
     def pull(self, name, tokens):
         """Pull a name from parent scope.
@@ -1982,7 +1983,7 @@ class ClassDefinition(TypeDefinition):
             sp += 'return v;'
 
 
-def parse(source, env=None):
+def parse(source, local_prefix, env):
     plat = sys.platform
 
     # NOTE: This is really for documentation purposes, so that
@@ -2001,7 +2002,7 @@ def parse(source, env=None):
             'PLATFORM': plat,
         },
     } if env is None else env
-    main_node = parse_one_source(source, env)
+    main_node = parse_one_source(source, local_prefix, env)
     defs = list(main_node.definitions)
     for lib_node in env['@cache'].values():
         defs.extend(lib_node.definitions)
@@ -2026,18 +2027,147 @@ def _check_method_name(token, name):
             f'Only special methods may start with an upper case letter')
 
 
-def parse_one_source(source, env):
+def peek_local_symbols(tokens):
+    """Figure out what classes, traits, functions and variables
+    are declared in this file.
+    The parser needs to know this information ahead of time
+    in order to be able to properly qualify names.
+    """
+    i = 0
+
+    def peek(j=0):
+        return tokens[min(i + j, len(tokens) - 1)]
+
+    def at(type, j=0):
+        return peek(j).type == type
+
+    def at_seq(types, j=0):
+        return all(at(t, i) for i, t in enumerate(types, j))
+
+    def gettok():
+        nonlocal i
+        token = peek()
+        i += 1
+        return token
+
+    def at_function():
+        return at_seq(['NAME', 'NAME', '('])
+
+    def at_class():
+        return at('class')
+
+    def at_trait():
+        return at('trait')
+
+    def at_vardef():
+        return (
+            at_seq(['NAME', 'NAME', '=']) or
+            at_seq(['NAME', 'NAME', '\n']))
+
+    def skip_to_matching():
+        op = peek().type
+        # if op is not one of these, there is a bug in this file,
+        # this function must be called at one of these places
+        cl = {
+            '(': ')',
+            '[': ']',
+            '{': '}',
+        }[op]
+        depth = 1
+        gettok()
+        while depth:
+            t = gettok().type
+            if t == op:
+                depth += 1
+            elif t == cl:
+                depth -= 1
+
+    def expect(type):
+        if not at(type):
+            raise Error([peek()], f'Expected {type} but got {peek()}')
+        return gettok()
+
+    symbols = set()
+
+    while not at('EOF'):
+        if at_function() or at_vardef():
+            expect('NAME')
+            symbols.add(expect('NAME').value)
+        elif at_class() or at_trait():
+            gettok()
+            symbols.add(expect('NAME').value)
+        elif at('(') or at('[') or at('{'):
+            skip_to_matching()
+        else:
+            gettok()
+
+    return symbols
+
+
+def update_tokens(tokens, i, module_map):
+    """
+    Creates a new list of tokens to take care of issues
+    with namespacing.
+
+    The first i tokens are copied as is. It's assumed that
+    the first i tokens are 'import' statements, so there's
+    no need to touch these.
+
+    whenever we sees a module alias, we will
+    expect to see a '.name', and resolve that full
+    name into a single NAME token.
+    """
+    new_tokens = tokens[:i]
+    while i < len(tokens):
+        token = tokens[i]
+        if (token.type == '.' and
+                i + 1 < len(tokens) and
+                tokens[i + 1].type == 'NAME'):
+            # If dot is followed by a NAME, we probably don't
+            # want to update that NAME
+            new_tokens.append(token)
+            new_tokens.append(tokens[i + 1])
+            i += 2
+            continue
+        if token.type == 'NAME' and token.value in module_map:
+            module_name = module_map[token.value]
+            if (i + 2 < len(tokens) and
+                    tokens[i + 1].type == '.' and
+                    tokens[i + 2].type == 'NAME'):
+                new_name = f'{module_name}.{tokens[i + 2].value}'
+                i += 3
+                new_tokens.append(Token(
+                    type='NAME',
+                    value=new_name,
+                    source=token.source,
+                    i=token.i))
+                continue
+            raise Error(
+                [token],
+                'Module aliases must be followed by a dot and NAME')
+        # In most cases, we just want to take that token as is
+        i += 1
+        new_tokens.append(token)
+    return new_tokens
+
+
+
+def parse_one_source(source, local_prefix, env):
     tokens = lex(source)
     i = 0
     indent_stack = []
     cache = env['@cache']
     stack = env['@stack']
     intgen = env['@intgen']
+    module_map = dict()
+    local_symbols = (
+        set() if local_prefix is None else peek_local_symbols(tokens)
+    )
 
     def mktempvar():
         i = env['@ntempvar'][0]
         env['@ntempvar'][0] += 1
-        return f'_KLC_tempvar{i}'
+        return f'#tempvar#{i}'
 
     def peek(j=0):
         nonlocal i
@@ -2061,10 +2191,6 @@ def parse_one_source(source, env):
     def gettok():
         nonlocal i
         token = peek()
-        if token.type == 'NAME' and '__' in token.value:
-            raise Error(
-                [token],
-                'Double underscores are not allowed in identifiers')
         i += 1
         return token
 
@@ -2101,10 +2227,18 @@ def parse_one_source(source, env):
     def at_delim(j=0):
         return at(';', j) or at('\n', j)
 
+    def replace_tokens_with_update():
+        # TODO: *Sigh* this is a hack.
+        nonlocal tokens
+        tokens = update_tokens(tokens, i, module_map)
+
     def parse_program():
         consume_delim()
         token = peek()
         defs = []
+        while at('import'):
+            parse_import(defs)
+        replace_tokens_with_update()
         while not at('EOF'):
             parse_global_definition(defs)
             consume_delim()
@@ -2135,50 +2269,41 @@ def parse_one_source(source, env):
 
         raise Error([peek()], f'Expected class, function or variable definition')
 
+    def parse_import(defs):
+        token = expect('import')
+        parts = [expect('NAME').value]
+        while consume('.'):
+            parts.append(expect('NAME').value)
+        alias = expect('NAME').value if consume('as') else parts[-1]
+        expect_delim()
+        name = '.'.join(parts)
+        module_map[alias] = name
+        upath = os.path.abspath(os.path.realpath(
+            os.path.join(_scriptdir, 'srcs', name.replace('.', os.sep) + '.k')
+        ))
+
+        if upath in cache:
+            return
+
+        if upath in [p for p, _ in stack]:
+            toks = [t for _, t in stack]
+            raise Error(toks + [token], 'import cycle')
+
+        if not os.path.isfile(upath):
+            raise Error([token], f'File {upath} ({upath}) does not exist')
+
+        with open(upath) as f:
+            data = f.read()
+
+        try:
+            stack.append((upath, token))
+            cache[upath] = parse_one_source(Source(upath, data), name, env)
+        finally:
+            stack.pop()
+
     def parse_macro(defs):
         token = expect('#')
-        if at_name('include'):
-            # 'include' directives are handled specially.
-            # Conditional includes are not allowed.
-            expect_name('include')
-            upath = expect('STRING').value
-            consume_delim()
-
-            if upath.startswith('/'):
-                pass
-            elif upath.startswith('./'):
-                upath = os.path.join(
-                    os.path.dirname(source.filename),
-                    *upath.split('/')[1:],
-                )
-            else:
-                upath = os.path.join(
-                    _scriptdir,
-                    'srcs',
-                    upath,
-                )
-
-            upath = os.path.abspath(os.path.realpath(upath + '.k'))
-
-            if upath in [p for p, _ in stack]:
-                toks = [t for _, t in stack]
-                raise Error(toks + [token], '#include cycle')
-
-            if upath in cache:
-                return
-
-            if not os.path.isfile(upath):
-                raise Error([token], f'File {upath} ({upath}) does not exist')
-
-            with open(upath) as f:
-                data = f.read()
-
-            try:
-                stack.append((upath, token))
-                cache[upath] = parse_one_source(Source(upath, data), env)
-            finally:
-                stack.pop()
-        elif at('('):
+        if at('('):
             parse_macro_expression()()
         else:
             raise Error([peek()], f'Unrecognized macro type')
@@ -2294,12 +2419,20 @@ def parse_one_source(source, env):
                 [token],
                 f'Expected macro expression but got {repr(token.type)}')
 
+    def expect_maybe_exported_name():
+        name = expect('NAME').value
+        if name in local_symbols:
+            name = f'{local_prefix}.{name}'
+        return name
+
+    def expect_type():
+        return expect_maybe_exported_name()
 
     def parse_global_variable_definition(defs):
         token = peek()
         extern = bool(consume('extern'))
-        vtype = expect('NAME').value
-        vname = expect('NAME').value
+        vtype = expect_type()
+        vname = expect_exported_name()
         defs.append(GlobalVariableDefinition(token, extern, vtype, vname))
         ifname = f'{vname}#init'
         if extern:
@@ -2333,9 +2466,9 @@ def parse_one_source(source, env):
 
     def parse_function_definition(defs):
         token = peek()
-        return_type = expect('NAME').value
+        return_type = expect_type()
         nametoken = peek()
-        name = expect('NAME').value
+        name = expect_exported_name()
         if name[:1].lower() != name[:1]:
             raise Error(
                 [nametoken],
@@ -2348,11 +2481,25 @@ def parse_one_source(source, env):
             expect_delim()
         defs.append(FunctionDefinition(token, return_type, name, params, body))
 
+    def expect_non_exported_name():
+        token = peek()
+        name = expect('NAME').value
+        if local_prefix is not None and name in local_symbols:
+            raise Error([token], f'Global name {name} cannot be used here')
+        return name
+
+    def expect_exported_name():
+        name = expect('NAME').value
+        if local_prefix is None:
+            return name
+        assert name in local_symbols, (name, local_symbols)
+        return f'{local_prefix}.{name}'
+
     def parse_class_definition(defs):
         token = peek()
         extern = bool(consume('extern'))
         expect('class')
-        name = expect('NAME').value
+        name = expect_exported_name()
         traits = parse_trait_list()
         method_to_token_table = dict()
         member_to_token_table = dict()
@@ -2414,7 +2561,7 @@ def parse_one_source(source, env):
                         'Extern classes cannot declare fields '
                         f'(in definition of class {name})')
                 ftoken = peek()
-                ftype = expect('NAME').value
+                ftype = expect_type()
                 fname = expect('NAME').value
                 mark_member(fname, ftoken)
                 expect_delim()
@@ -2447,7 +2594,7 @@ def parse_one_source(source, env):
                 mark_member(ufname, uftoken)
             else:
                 mtoken = peek()
-                rtype = expect('NAME').value
+                rtype = expect_type()
                 mname = expect('NAME').value
                 _check_method_name(mtoken, mname)
                 params = [Parameter(mtoken, name, 'this')] + parse_params()
@@ -2478,14 +2625,14 @@ def parse_one_source(source, env):
 
     def parse_trait_definition(defs):
         token = expect('trait')
-        name = expect('NAME').value
+        name = expect_exported_name()
         method_to_token_table = dict()
         traits = parse_trait_list()
         expect('{')
         consume_delim()
         while not consume('}'):
             mtoken = peek()
-            rtype = expect('NAME').value
+            rtype = expect_type()
             mname = expect('NAME').value
             params = parse_params()
             body = parse_block(defs)
@@ -2513,7 +2660,7 @@ def parse_one_source(source, env):
         if consume('('):
             traits = []
             while not consume(')'):
-                traits.append(expect('NAME').value)
+                traits.append(expect_type())
                 if not consume(','):
                     expect(')')
                     break
@@ -2567,7 +2714,7 @@ def parse_one_source(source, env):
                     While(token, cond, body),
                 ])
             else:
-                loopvar = expect('NAME').value
+                loopvar = expect_non_exported_name()
                 expect('in')
                 container_expr = parse_expression(defs)
                 body = parse_block(defs)
@@ -2732,7 +2879,7 @@ def parse_one_source(source, env):
             token = peek()
             if consume('.'):
                 if consume('('):
-                    cast_type = expect('NAME').value
+                    cast_type = expect_type()
                     expect(')')
                     expr = Cast(token, expr, cast_type)
                     continue
@@ -2819,16 +2966,17 @@ def parse_one_source(source, env):
         if consume('def'):
             next_int = intgen[0]
             intgen[0] += 1
-            lambda_name = f'_lambda{next_int}'
-            return_type = expect('NAME').value
+            lambda_name = f'lambda#{next_int}'
+            return_type = expect_type()
             capture_params = []
             if consume('['):
                 while not consume(']'):
                     if at('NAME') and at('NAME', 1):
-                        type_ = expect('NAME').value
+                        type_ = expect_type()
                     else:
                         type_ = 'var'
-                    capture_params.append(Parameter(peek(), type_, expect('NAME').value))
+                    capture_params.append(Parameter(
+                        peek(), type_, expect_non_exported_name()))
                     if not consume(','):
                         expect(']')
                         break
@@ -2864,7 +3012,7 @@ def parse_one_source(source, env):
         if consume('null'):
             type_ = 'var'
             if consume('('):
-                type_ = expect('NAME').value
+                type_ = expect_type()
                 expect(')')
             return NullLiteral(token, type_)
 
@@ -2883,7 +3031,7 @@ def parse_one_source(source, env):
             return DoubleLiteral(token, value)
 
         if at('NAME'):
-            name = expect('NAME').value
+            name = expect_maybe_exported_name()
             if consume('++'):
                 return SetName(token, name, MethodCall(
                     token, Name(token, name), 'Add', [IntLiteral(token, 1)]))
@@ -2917,8 +3065,8 @@ def parse_one_source(source, env):
             vartype = None
         else:
             final = False
-            vartype = expect('NAME').value
-        name = expect('NAME').value
+            vartype = expect_type()
+        name = expect_non_exported_name()
         value = parse_expression(defs) if consume('=') else None
         expect_delim()
         if final and value is None:
@@ -2942,8 +3090,8 @@ def parse_one_source(source, env):
         expect('(')
         while not consume(')'):
             paramtoken = peek()
-            paramtype = expect('NAME').value
-            paramname = expect('NAME').value
+            paramtype = expect_type()
+            paramname = expect_non_exported_name()
             params.append(Parameter(paramtoken, paramtype, paramname))
             if not consume(','):
                 expect(')')
@@ -2968,8 +3116,8 @@ def main():
         with open(args.kfile) as f:
             data = f.read()
         source = Source(args.kfile, data)
-        builtins_node = parse(Source('<builtin>', BUILTINS))
-        node = parse(source, builtins_node.env)
+        builtins_node = parse(Source('<builtin>', BUILTINS), None, None)
+        node = parse(source, '#', builtins_node.env)
         program = Program(
             node.token,
             node.definitions + builtins_node.definitions,

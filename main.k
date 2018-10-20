@@ -1,15 +1,14 @@
-#include "os"
-#include "posix"
+import os
 
 void main() {
-  print(OS.getcwd())
-  print(OS.joinpath([OS.getcwd(), '..']))
+  print(os.getcwd())
+  print(os.joinpath([os.getcwd(), '..']))
 
-  final start = OS.getcwd()
+  final start = os.getcwd()
   for (int i = 0; i < 1000; i++) {
-    OS.mkdir('foo')
-    OS.chdir('foo')
-    print('i = ' + str(i) + ', ' + str(OS.getcwd().size) + ', ' + OS.getcwd())
+    os.mkdir('foo')
+    os.chdir('foo')
+    print('i = ' + str(i) + ', ' + str(os.getcwd().size) + ', ' + os.getcwd())
   }
   print('done!')
 }

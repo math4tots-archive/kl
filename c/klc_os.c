@@ -11,21 +11,21 @@
 #include <windows.h>
 #endif
 
-KLCNOperatingSystemInterface* KLCNOSZEinit() {
-  KLCNOperatingSystemInterface* os =
-    (KLCNOperatingSystemInterface*) malloc(sizeof(KLCNOperatingSystemInterface));
-  KLC_init_header(&os->header, &KLC_typeOperatingSystemInterface);
+KLCNosZBInterface* KLCNosZBOSZEinit() {
+  KLCNosZBInterface* os =
+    (KLCNosZBInterface*) malloc(sizeof(KLCNosZBInterface));
+  KLC_init_header(&os->header, &KLC_typeosZBInterface);
   return os;
 }
 
-void KLC_deleteOperatingSystemInterface(KLC_header* robj, KLC_header** dq) {
+void KLC_deleteosZBInterface(KLC_header* robj, KLC_header** dq) {
 }
 
-KLCNString* KLCNOperatingSystemInterfaceZFGETname(KLCNOperatingSystemInterface* os) {
+KLCNString* KLCNosZBInterfaceZFGETname(KLCNosZBInterface* os) {
   return KLC_mkstr(KLC_OS_NAME);
 }
 
-KLC_bool KLCNOperatingSystemInterfaceZFGETposix(KLCNOperatingSystemInterface* os) {
+KLC_bool KLCNosZBInterfaceZFGETposix(KLCNosZBInterface* os) {
 #if KLC_POSIX
   return 1;
 #else
@@ -33,7 +33,7 @@ KLC_bool KLCNOperatingSystemInterfaceZFGETposix(KLCNOperatingSystemInterface* os
 #endif
 }
 
-KLCNString* KLCNOperatingSystemInterfaceZFGETsep(KLCNOperatingSystemInterface* os) {
+KLCNString* KLCNosZBInterfaceZFGETsep(KLCNosZBInterface* os) {
   return KLC_mkstr(
     #if KLC_OS_WINDOWS
       "\\"
@@ -43,7 +43,7 @@ KLCNString* KLCNOperatingSystemInterfaceZFGETsep(KLCNOperatingSystemInterface* o
   );
 }
 
-KLC_bool KLCNOperatingSystemInterfaceZFBool(KLCNOperatingSystemInterface* os) {
+KLC_bool KLCNosZBInterfaceZFBool(KLCNosZBInterface* os) {
 #if KLC_OS_UNKNOWN
   return 0;
 #else
@@ -51,8 +51,8 @@ KLC_bool KLCNOperatingSystemInterfaceZFBool(KLCNOperatingSystemInterface* os) {
 #endif
 }
 
-KLC_bool KLCNOperatingSystemInterfaceZFchdirOrFalse(
-    KLCNOperatingSystemInterface* os,
+KLC_bool KLCNosZBInterfaceZFchdirOrFalse(
+    KLCNosZBInterface* os,
     KLCNString* path) {
   #if KLC_POSIX
     return chdir(path->utf8) == 0 ? 1 : 0;
@@ -64,8 +64,8 @@ KLC_bool KLCNOperatingSystemInterfaceZFchdirOrFalse(
   #endif
 }
 
-KLC_bool KLCNOperatingSystemInterfaceZFmkdirOrFalse(
-    KLCNOperatingSystemInterface* os,
+KLC_bool KLCNosZBInterfaceZFmkdirOrFalse(
+    KLCNosZBInterface* os,
     KLCNString* path) {
   #if KLC_POSIX
     return mkdir(path->utf8, 0777) == 0 ? 1 : 0;
@@ -77,8 +77,8 @@ KLC_bool KLCNOperatingSystemInterfaceZFmkdirOrFalse(
   #endif
 }
 
-KLCNList* KLCNOperatingSystemInterfaceZFlistdirOrNull(
-    KLCNOperatingSystemInterface* os,
+KLCNList* KLCNosZBInterfaceZFlistdirOrNull(
+    KLCNosZBInterface* os,
     KLCNString* path) {
 #if KLC_POSIX
   DIR* d;
@@ -122,7 +122,7 @@ KLCNList* KLCNOperatingSystemInterfaceZFlistdirOrNull(
 #endif
 }
 
-KLCNString* KLCNOperatingSystemInterfaceZFgetcwdOrNull(KLCNOperatingSystemInterface* os) {
+KLCNString* KLCNosZBInterfaceZFgetcwdOrNull(KLCNosZBInterface* os) {
 #if KLC_POSIX
   size_t cap = 2, len;
   char* buffer = (char*) malloc(sizeof(char) * cap);
@@ -151,8 +151,8 @@ KLCNString* KLCNOperatingSystemInterfaceZFgetcwdOrNull(KLCNOperatingSystemInterf
 #endif
 }
 
-KLC_bool KLCNOperatingSystemInterfaceZFisfile(
-    KLCNOperatingSystemInterface* os,
+KLC_bool KLCNosZBInterfaceZFisfile(
+    KLCNosZBInterface* os,
     KLCNString* path) {
 #if KLC_POSIX
   struct stat sb;
@@ -179,8 +179,8 @@ KLC_bool KLCNOperatingSystemInterfaceZFisfile(
 #endif
 }
 
-KLC_bool KLCNOperatingSystemInterfaceZFisdir(
-    KLCNOperatingSystemInterface* os,
+KLC_bool KLCNosZBInterfaceZFisdir(
+    KLCNosZBInterface* os,
     KLCNString* path) {
 #if KLC_POSIX
   struct stat sb;

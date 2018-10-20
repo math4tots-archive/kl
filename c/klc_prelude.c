@@ -1184,7 +1184,7 @@ void KLCNassert(KLC_var cond) {
   }
 }
 
-void KLCNmain();
+void KLCNZEZBmain();
 
 #if KLC_WIN_APP
 int CALLBACK wWinMain(
@@ -1193,7 +1193,7 @@ int CALLBACK wWinMain(
     _In_ LPWSTR lpCmdLine,
     _In_ int nCmdShow) {
   KLC_lpCmdLine = lpCmdLine;
-  KLCNmain();
+  KLCNZEZBmain();
   KLC_release_queued_before_exit();
   return 0;
 }
@@ -1201,7 +1201,7 @@ int CALLBACK wWinMain(
 int main(int argc, const char** argv) {
   KLC_argc = argc;
   KLC_argv = argv;
-  KLCNmain();
+  KLCNZEZBmain();
   KLC_release_queued_before_exit();
   return 0;
 }
