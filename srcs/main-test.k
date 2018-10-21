@@ -385,7 +385,6 @@ void main() {
 
   print(os.name)
   print('os.getcwd() = ' + str(os.getcwd()))
-  print('os.posix = ' + str(os.posix))
   print('os.isdir("c/hw.c") = ' + str(os.isdir("c/hw.c")))
   print('os.isdir("srcs") = ' + str(os.isdir("srcs")))
   print('os.isfile("c/hw.c") = ' + str(os.isfile("c/hw.c")))

@@ -11,29 +11,11 @@
 #include <windows.h>
 #endif
 
-KLCNosZBInterface* KLCNosZBOSZEinit() {
-  KLCNosZBInterface* os =
-    (KLCNosZBInterface*) malloc(sizeof(KLCNosZBInterface));
-  KLC_init_header(&os->header, &KLC_typeosZBInterface);
-  return os;
-}
-
-void KLC_deleteosZBInterface(KLC_header* robj, KLC_header** dq) {
-}
-
-KLCNString* KLCNosZBInterfaceZFGETname(KLCNosZBInterface* os) {
+KLCNString* KLCNosZBnameZEinit() {
   return KLC_mkstr(KLC_OS_NAME);
 }
 
-KLC_bool KLCNosZBInterfaceZFGETposix(KLCNosZBInterface* os) {
-#if KLC_POSIX
-  return 1;
-#else
-  return 0;
-#endif
-}
-
-KLCNString* KLCNosZBInterfaceZFGETsep(KLCNosZBInterface* os) {
+KLCNString* KLCNosZBsepZEinit() {
   return KLC_mkstr(
     #if KLC_OS_WINDOWS
       "\\"
@@ -43,17 +25,7 @@ KLCNString* KLCNosZBInterfaceZFGETsep(KLCNosZBInterface* os) {
   );
 }
 
-KLC_bool KLCNosZBInterfaceZFBool(KLCNosZBInterface* os) {
-#if KLC_OS_UNKNOWN
-  return 0;
-#else
-  return 1;
-#endif
-}
-
-KLC_bool KLCNosZBInterfaceZFchdirOrFalse(
-    KLCNosZBInterface* os,
-    KLCNString* path) {
+KLC_bool KLCNosZBchdirOrFalse(KLCNString* path) {
   #if KLC_POSIX
     return chdir(path->utf8) == 0 ? 1 : 0;
   #elif KLC_OS_WINDOWS
@@ -64,9 +36,7 @@ KLC_bool KLCNosZBInterfaceZFchdirOrFalse(
   #endif
 }
 
-KLC_bool KLCNosZBInterfaceZFmkdirOrFalse(
-    KLCNosZBInterface* os,
-    KLCNString* path) {
+KLC_bool KLCNosZBmkdirOrFalse(KLCNString* path) {
   #if KLC_POSIX
     return mkdir(path->utf8, 0777) == 0 ? 1 : 0;
   #elif KLC_OS_WINDOWS
@@ -77,9 +47,7 @@ KLC_bool KLCNosZBInterfaceZFmkdirOrFalse(
   #endif
 }
 
-KLCNList* KLCNosZBInterfaceZFlistdirOrNull(
-    KLCNosZBInterface* os,
-    KLCNString* path) {
+KLCNList* KLCNosZBlistdirOrNull(KLCNString* path) {
 #if KLC_POSIX
   DIR* d;
   struct dirent* dir;
@@ -122,7 +90,7 @@ KLCNList* KLCNosZBInterfaceZFlistdirOrNull(
 #endif
 }
 
-KLCNString* KLCNosZBInterfaceZFgetcwdOrNull(KLCNosZBInterface* os) {
+KLCNString* KLCNosZBgetcwdOrNull() {
 #if KLC_POSIX
   size_t cap = 2, len;
   char* buffer = (char*) malloc(sizeof(char) * cap);
@@ -151,9 +119,7 @@ KLCNString* KLCNosZBInterfaceZFgetcwdOrNull(KLCNosZBInterface* os) {
 #endif
 }
 
-KLC_bool KLCNosZBInterfaceZFisfile(
-    KLCNosZBInterface* os,
-    KLCNString* path) {
+KLC_bool KLCNosZBisfile(KLCNString* path) {
 #if KLC_POSIX
   struct stat sb;
   if (stat(path->utf8, &sb) == 0) {
@@ -179,9 +145,7 @@ KLC_bool KLCNosZBInterfaceZFisfile(
 #endif
 }
 
-KLC_bool KLCNosZBInterfaceZFisdir(
-    KLCNosZBInterface* os,
-    KLCNString* path) {
+KLC_bool KLCNosZBisdir(KLCNString* path) {
 #if KLC_POSIX
   struct stat sb;
   if (stat(path->utf8, &sb) == 0) {
