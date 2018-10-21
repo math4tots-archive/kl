@@ -2279,7 +2279,7 @@ def parse_one_source(source, local_prefix, env):
         name = '.'.join(parts)
         module_map[alias] = name
         upath = os.path.abspath(os.path.realpath(
-            os.path.join(_scriptdir, 'srcs', name.replace('.', os.sep) + '.k')
+            os.path.join(_scriptdir, 'lib', name.replace('.', os.sep) + '.k')
         ))
 
         if upath in cache:
