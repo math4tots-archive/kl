@@ -4,27 +4,26 @@
 extern String name
 extern String sep
 
-bool chdirOrFalse(String path)
-bool mkdirOrFalse(String path)
+Try tryChdir(String path)
+Try tryMkdir(String path)
+Try tryListdir(String path)
+Try tryGetcwd()
+
 bool isfile(String path)
 bool isdir(String path)
-List listdirOrNull(String path)
-String getcwdOrNull()
 
 List listdir(String path) {
-  final ret = listdirOrNull(path)
-  if (ret is null) {
-    panic('Failed to listdir ' + str(path))
-  }
-  return ret
+  return tryListdir(path).getOrElse(def var[String path](var error) {
+    panic('Failed to listdir (' + path + '): ' + str(error))
+    return null
+  }).(List)
 }
 
 String getcwd() {
-  final ret = getcwdOrNull()
-  if (ret is null) {
-    panic('Failed to getcwd')
-  }
-  return ret
+  return tryGetcwd().getOrElse(def var(var error) {
+    panic('Failed getcwd: ' + str(error))
+    return null
+  }).(String)
 }
 
 String joinpath(List parts) {
@@ -32,13 +31,15 @@ String joinpath(List parts) {
 }
 
 void chdir(String path) {
-  if (!chdirOrFalse(path)) {
-    panic('chdir failed for ' + str(path))
-  }
+  tryChdir(path).getOrElse(def var[String path](var error) {
+    panic('Failed to chdir (' + path + '): ' + str(error))
+    return null
+  })
 }
 
 void mkdir(String path) {
-  if (!mkdirOrFalse(path)) {
-    panic('mkdir failed for ' + path)
-  }
+  tryMkdir(path).getOrElse(def var[String path](var error) {
+    panic('Failed to mkdir (' + path + '): ' + str(error))
+    return null
+  })
 }

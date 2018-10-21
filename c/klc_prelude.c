@@ -1141,6 +1141,36 @@ KLCNString* KLCNFileZFread(KLCNFile* file) {
   return KLC_mkstr_with_buffer(i, buffer, KLC_check_ascii(buffer));
 }
 
+KLCNTry* KLCNTryZEnew(KLC_bool success, KLC_var value) {
+  KLCNTry* obj = (KLCNTry*) malloc(sizeof(KLCNTry));
+  KLC_init_header(&obj->header, &KLC_typeTry);
+  KLC_retain_var(value);
+  obj->success = success;
+  obj->value = value;
+  return obj;
+}
+
+KLC_bool KLCNTryZFBool(KLCNTry* t) {
+  return t->success;
+}
+
+KLC_var KLCNTryZFgetRawValue(KLCNTry* t) {
+  KLC_retain_var(t->value);
+  return t->value;
+}
+
+void KLC_deleteTry(KLC_header* robj, KLC_header** dq) {
+  KLCNTry* obj = (KLCNTry*) robj;
+  KLC_partial_release_var(obj->value, dq);
+}
+
+KLCNTry* KLC_failm(const char* message) {
+  KLCNString* s = KLC_mkstr(message);
+  KLCNTry* t = KLCNTryZEnew(0, KLC_object_to_var((KLC_header*) s));
+  KLC_release((KLC_header*) s);
+  return t;
+}
+
 KLCNFile* KLCNSTDINZEinit() {
   return KLC_mkfile(stdin, ":STDIN", "r", 0);
 }

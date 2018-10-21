@@ -297,3 +297,25 @@ class ListIterator {
     return value
   }
 }
+
+extern class Try {
+  new(bool success, var value)
+  bool Bool()
+  var getRawValue()
+
+  var getOrElse(var callback) {
+    var value = this.getRawValue()
+    if (!this) {
+      return callback(value)
+    }
+    return value
+  }
+
+  var getOrDie() {
+    var value = this.getRawValue()
+    if (!this) {
+      panic(str(value))
+    }
+    return value
+  }
+}

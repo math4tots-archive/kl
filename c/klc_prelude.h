@@ -79,6 +79,7 @@ typedef struct KLCNString KLCNString;
 typedef struct KLCNStringBuilder KLCNStringBuilder;
 typedef struct KLCNList KLCNList;
 typedef struct KLCNFile KLCNFile;
+typedef struct KLCNTry KLCNTry;
 
 struct KLC_stack_frame {
   const char* filename;
@@ -174,6 +175,12 @@ struct KLCNFile {
   KLC_bool should_close;
 };
 
+struct KLCNTry {
+  KLC_header header;
+  KLC_var value;
+  KLC_bool success;
+};
+
 #if KLC_OS_WINDOWS
 extern HINSTANCE KLC_hInstance;
 #endif
@@ -191,6 +198,7 @@ extern KLC_typeinfo KLC_typeStringBuilder;
 extern KLC_typeinfo KLC_typeList;
 extern KLC_typeinfo KLC_typeClosure;
 extern KLC_typeinfo KLC_typeFile;
+extern KLC_typeinfo KLC_typeTry;
 
 extern const KLC_var KLC_null;
 
@@ -215,6 +223,8 @@ void KLCNFileZFclose(KLCNFile* file);
 KLCNList* KLC_mklist(size_t cap);
 void KLCNListZFpush(KLCNList* list, KLC_var v);
 KLCNString* KLCNStringZFAdd(KLCNString* a, KLCNString* b);
+KLCNTry* KLCNTryZEnew(KLC_bool success, KLC_var value);
+KLCNTry* KLC_failm(const char*);
 
 #if KLC_OS_WINDOWS
 LPCWSTR KLC_windows_get_wstr(KLCNString* s);
