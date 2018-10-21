@@ -73,8 +73,8 @@ KLCNTry* KLCNosZBtryListdir(KLCNString* path) {
   KLCNTry* t;
   d = opendir(path->utf8);
   if (!d) {
-    /* Read failed. TODO: Better error message */
-    return KLC_failm("os.listdir failed");
+    int errval = errno;
+    return KLC_failm(strerror(errval));
   }
   while ((dir = readdir(d)) != NULL) {
     KLC_header* dirname = (KLC_header*) KLC_mkstr(dir->d_name);
