@@ -73,3 +73,15 @@ bool posix = OS.posix
 String getcwd() {
   return OS.getcwd()
 }
+
+String joinpath(List parts) {
+  return OS.sep.join(parts)
+}
+
+void mkdir(String path) {
+  OS.mkdir(path)
+}
+
+void chdir(String path) {
+  OS.chdir(path)
+}
