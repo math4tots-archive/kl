@@ -414,6 +414,18 @@ class Map {
     this._size = 0
   }
 
+  bool Eq(Map other) {
+    if (this.size != other.size) {
+      return false
+    }
+    for key in this {
+      if (key not in other or this[key] != other[key]) {
+        return false
+      }
+    }
+    return true
+  }
+
   void _resizeBuckets(int newSize) {
     final oldBuckets = this._buckets
     this._buckets = [null] * newSize
@@ -594,6 +606,10 @@ class Set {
 
   new() {
     this._map = Map()
+  }
+
+  bool Eq(Set other) {
+    return this._map == other._map
   }
 
   int GETsize() {

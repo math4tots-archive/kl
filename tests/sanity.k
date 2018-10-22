@@ -418,6 +418,9 @@ void main() {
     assert(3 in m2)
     assert(m2.size == 2)
     assert(str({1: 2}) == '{1: 2}')
+    assert({1: 2} == {1: 2})
+    assert(m2 == {3: 4, 1: 2})
+    assert(m2 != {1: 2})
   }
 
   // Set
@@ -432,6 +435,8 @@ void main() {
     assert(2 in s2)
     assert(3 in s2)
     assert(s2.size == 3)
+    assert({1, 2, 3} == {1, 2, 3})
+    assert({1, 2, 3} != {1, 2})
   }
 
   print(os.name)
