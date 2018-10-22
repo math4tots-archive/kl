@@ -9,5 +9,7 @@ extern KLC_typeinfo KLC_typeosZBnetZBSocket;
 
 KLCNTry* KLCNosZBnetZBtryOpenSocket(KLC_int domain, KLC_int type, KLC_int protocol);
 void KLC_deleteosZBnetZBSocket(KLC_header*, KLC_header**);
+KLCNTry* KLCNosZBnetZBSocketZFtryBindIp4(KLCNosZBnetZBSocket* sock, KLC_int port, KLC_int addr);
+KLC_int KLCNosZBnetZBinetZAaddr(KLCNString* s);
 
 #endif/*klc_os_net_h*/
