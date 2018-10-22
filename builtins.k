@@ -318,4 +318,13 @@ extern class Try {
     }
     return value
   }
+
+  String Repr() {
+    final value = repr(this.getRawValue())
+    return (
+      this ?
+        ('<Try(Success) ' + value + '>') :
+        ('<Try(Failue) ' + value + '>')
+    )
+  }
 }

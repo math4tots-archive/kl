@@ -2996,8 +2996,9 @@ def parse_one_source(source, local_prefix, env):
             ])
 
         if consume('('):
-            expr = parse_expression(defs)
-            expect(')')
+            with skipping_newlines(True):
+                expr = parse_expression(defs)
+                expect(')')
             return expr
 
         if consume('['):

@@ -15,7 +15,7 @@ KLCNString* KLCNosZBnameZEinit() {
   return KLC_mkstr(KLC_OS_NAME);
 }
 
-KLCNString* KLCNosZBsepZEinit() {
+KLCNString* KLCNosZBpathZBsepZEinit() {
   return KLC_mkstr(
     #if KLC_OS_WINDOWS
       "\\"

@@ -4,8 +4,8 @@
 
 
 void KLC_deleteosZBInterface(KLC_header* robj, KLC_header** dq);
-KLCNString* KLCNosZBnameZEinit();
-KLCNString* KLCNosZBsepZEinit();
+KLCNString* KLCNosZBpathZBnameZEinit();
+KLCNString* KLCNosZBpathZBsepZEinit();
 KLCNList* KLCNosZBlistdir(KLCNString*);
 KLC_bool KLCNosZBisfile(KLCNString* path);
 KLC_bool KLCNosZBisdir(KLCNString* path);

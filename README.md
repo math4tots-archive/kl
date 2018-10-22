@@ -15,7 +15,7 @@ So to play with this you need:
 Example usage of the compiler:
 
 ```
-python3 klc.py srcs/main-test.k > main.c && gcc -std=c89 main.c && ./a.out
+klc tests/sanity.k && ./a.out
 ```
 
 ## TL;DR

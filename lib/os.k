@@ -2,7 +2,6 @@
 #(append C_SOURCES 'klc_os.c')
 
 extern String name
-extern String sep
 
 Try tryChdir(String path)
 Try tryMkdir(String path)
@@ -24,10 +23,6 @@ String getcwd() {
     panic('Failed getcwd: ' + str(error))
     return null
   }).(String)
-}
-
-String joinpath(List parts) {
-  return sep.join(parts)
 }
 
 void chdir(String path) {
