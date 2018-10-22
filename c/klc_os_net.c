@@ -54,6 +54,7 @@ KLCNTry* KLCNosZBnetZBSocketZFtryShutdown(KLCNosZBnetZBSocket* sock) {
 
 KLCNTry* KLCNosZBnetZBSocketZFtryBindIp4(KLCNosZBnetZBSocket* sock, KLC_int port, KLC_int addr) {
   struct sockaddr_in sa;
+  memset(&sa, 0, sizeof(struct sockaddr_in));
   sa.sin_family = AF_INET;
   sa.sin_addr.s_addr = addr;
   sa.sin_port = port;
