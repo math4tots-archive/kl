@@ -384,6 +384,31 @@ void main() {
     assert(str(zz.getZ()) == '<#.Zz instance>')
   }
 
+  // Test Map
+  {
+    final m = Map()
+    assert(m.size == 0)
+    m[5] = 10
+    assert(m.size == 1)
+    assert(m[5] == 10)
+    m[2] = 'hi'
+    assert(m.size == 2)
+    assert(m[2] == 'hi')
+    assert(m[5] == 10)
+    m[5] = 'world'
+    assert(m.size == 2)
+    assert(m[5] == 'world')
+    m['a'] = 'b'
+    assert(m.size == 3)
+    assert(m['a'] == 'b')
+    assert('a' in m)
+    assert('b' not in m)
+    assert(20 not in m)
+    print('m.size = ' + str(m.size))
+    print(m._buckets)
+    print('m[5] = ' + str(m[5]))
+  }
+
   print(os.name)
   print('os.getcwd() = ' + str(os.getcwd()))
   print('os.isdir("c/hw.c") = ' + str(os.isdir("c/hw.c")))

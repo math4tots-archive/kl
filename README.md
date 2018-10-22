@@ -95,6 +95,10 @@ void main() {
 
 ## TODO
 
+* (should be easy) implement `HashCode` for `String`
+* Consider adding a `Tuple` type like Python
+  Or maybe consider freezing a `List` like in Ruby.
+  Relevant consideration for the hash table.
 * cleaner lambda expressions
   Lambda expressions have now been implemented,
   but due to the limitations of the current way things are done,

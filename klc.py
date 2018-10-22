@@ -41,6 +41,7 @@ _special_method_names = {
     'SetSliceAll',
     'SetSliceLeft',
     'SetSliceRight',
+    'HashCode',
 }
 
 SYMBOLS = [
@@ -74,6 +75,7 @@ _primitive_method_names = {
         'Eq', 'Lt',
         'Add', 'Sub', 'Mul', 'Div', 'Mod',
         'Repr', 'Bool',
+        'HashCode',
     ],
     'double': [
         'Eq', 'Lt',

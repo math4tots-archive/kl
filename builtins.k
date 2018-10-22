@@ -54,6 +54,9 @@ String `int:Repr`(int a)
 bool `int:Bool`(int x) {
   return x != 0
 }
+int `int:HashCode`(int x) {
+  return x
+}
 
 double `double:Add`(double a, double b)
 double `double:Sub`(double a, double b)
@@ -86,6 +89,11 @@ bool `type:Eq`(type a, type b)
 trait Object() {
   bool Eq(var other) {
     return this is other
+  }
+  int HashCode() {
+    // TODO: Change to using pointer value
+    // by default
+    return 0
   }
   String Repr() {
     type t = type(this)
@@ -263,6 +271,16 @@ extern class List(Iterable) {
     return true
   }
 
+  List Mul(int rep) {
+    final ret = []
+    for (int i = 0; i < rep; i++) {
+      for item in this {
+        ret.push(item)
+      }
+    }
+    return ret
+  }
+
   bool Contains(var x) {
     int size = this.size
     for (int i = 0; i < size; i++) {
@@ -326,5 +344,107 @@ extern class Try {
         ('<Try(Success) ' + value + '>') :
         ('<Try(Failue) ' + value + '>')
     )
+  }
+}
+
+class Map {
+  // Dead simple hash table implementation
+  //   contains a list of buckets,
+  //   each bucket is a list of entries,
+  //   each entry is a triple of [hash, key, value]
+  List _buckets
+  int _size
+
+  new() {
+    // Buckets count should never be zero
+    this._buckets = [null]
+    this._size = 0
+  }
+
+  void _resizeBuckets(int newSize) {
+    final oldBuckets = this._buckets
+    this._buckets = [null] * newSize
+    this._size = 0
+    for bucket in oldBuckets {
+      if (bucket is not null) {
+        for entry in bucket.(List) {
+          int hash = entry[0].(int)
+          var key = entry[1]
+          var value = entry[2]
+          this._insertWithHash(hash, key, value)
+        }
+      }
+    }
+  }
+
+  List _bucketFor(int hash) {
+    final index = hash % this._buckets.size
+    if (this._buckets[index] is null) {
+      this._buckets[index] = []
+    }
+    return this._buckets[index].(List)
+  }
+
+  void _maybeResize() {
+    if (this._buckets.size <= 2 * this._size) {
+      this._resizeBuckets(2 * (this._buckets.size + this._size + 8))
+    }
+  }
+
+  void _insertWithHash(int hash, var key, var value) {
+    final bucket = this._bucketFor(hash)
+
+    // First check if this value exists. If so, just update
+    // the existing value.
+    for entry in bucket {
+      if (entry[0].(int) == hash and entry[1] == key) {
+        entry[2] = value
+        return
+      }
+    }
+
+    // Otherwise, create a new entry
+    bucket.push([hash, key, value])
+    this._size = this._size + 1
+    this._maybeResize()
+  }
+
+  void _insert(var key, var value) {
+    this._insertWithHash(key.HashCode().(int), key, value)
+  }
+
+  List _findWithHash(int hash, var key) {
+    final bucket = this._bucketFor(hash)
+    for entry in bucket {
+      if (entry[0].(int) == hash and entry[1] == key) {
+        return entry.(List)
+      }
+    }
+    return null(List)
+  }
+
+  List _findKey(var key) {
+    return this._findWithHash(key.HashCode().(int), key)
+  }
+
+  bool Contains(var key) {
+    return this._findKey(key) is not null
+  }
+
+  var GetItem(var key) {
+    final entry = this._findKey(key)
+    if (entry is null) {
+      panic('Key ' + str(key) + ' not found')
+    }
+    return entry[2]
+  }
+
+  var SetItem(var key, var value) {
+    this._insert(key, value)
+    return value
+  }
+
+  int GETsize() {
+    return this._size
   }
 }
