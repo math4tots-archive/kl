@@ -236,6 +236,14 @@ trait Iterable {
   }
 }
 
+List ListFromIterable(var iterable) {
+  final ret = []
+  for x in iterable {
+    ret.push(x)
+  }
+  return ret
+}
+
 extern class List(Iterable) {
   int GETsize()
   var GetItem(int i)
@@ -471,7 +479,11 @@ class Map {
     for (int i = 0; i < bucket.size; i++) {
       final entry = bucket[i].(List)
       if (entry[0].(int) == hash and entry[1] == key) {
-        this._buckets[index] = bucket[:i] + bucket[i + 1:]
+        if (bucket.size == 1) {
+          this._buckets[index] = null
+        } else {
+          this._buckets[index] = bucket[:i] + bucket[i + 1:]
+        }
         this._size = this._size - 1
         return true
       }
@@ -498,5 +510,84 @@ class Map {
 
   int GETsize() {
     return this._size
+  }
+
+  MapIterator Iterator() {
+    return MapIterator(this)
+  }
+}
+
+class MapIterator {
+  List _buckets
+  int _i
+  int _j
+
+  new(Map m) {
+    this._buckets = m._buckets
+    this._i = 0  // index to pick which bucket,
+    this._j = 0  // index to pick which entry in the bucket
+    this._skipEmpty()
+  }
+
+  void _skipEmpty() {
+    List bs = this._buckets
+    int nb = bs.size
+    int i = this._i
+    int j = this._j
+    if (i < nb and bs[i] is not null and j >= bs[i].(List).size) {
+      j = 0
+      i++
+    }
+    if (i < nb and bs[i] is null) {
+      i++
+      while (i < nb and bs[i] is null) {
+        i++
+      }
+      j = 0
+    }
+    this._i = i
+    this._j = j
+  }
+
+  bool HasNext() {
+    return this._i < this._buckets.size
+  }
+
+  var Next() {
+    if (!this.HasNext()) {
+      panic('MapIterator:Next no more')
+    }
+    var next = this._buckets[this._i][this._j]
+    this._j = this._j + 1
+    this._skipEmpty()
+    return next
+  }
+}
+
+class Set {
+  Map _map
+
+  new() {
+    this._map = Map()
+  }
+
+  int GETsize() {
+    return this._map.size
+  }
+
+  void add(var key) {
+    this._map[key] = 1
+  }
+
+  bool Contains(var key) {
+    return key in this._map
+  }
+
+  bool remove(var key) {
+    return this._map.remove(key)
+  }
+
+  MapIterator Iterator() {
+    return this._map.Iterator()
   }
 }

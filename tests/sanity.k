@@ -400,6 +400,7 @@ void main() {
     assert(m[5] == 'world')
     m['a'] = 'b'
     assert(m.size == 3)
+    print(ListFromIterable(m))
     assert(m['a'] == 'b')
     assert('a' in m)
     assert('b' not in m)

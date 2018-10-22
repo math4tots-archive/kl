@@ -2471,10 +2471,6 @@ def parse_one_source(source, local_prefix, env):
         return_type = expect_type()
         nametoken = peek()
         name = expect_exported_name()
-        if name[:1].lower() != name[:1]:
-            raise Error(
-                [nametoken],
-                f'Function names should not start with uppercase letters')
         params = parse_params()
         if at('{'):
             body = parse_block(defs)
