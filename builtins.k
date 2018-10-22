@@ -557,11 +557,20 @@ class MapIterator {
     if (!this.HasNext()) {
       panic('MapIterator:Next no more')
     }
-    var next = this._buckets[this._i][this._j]
+    var next = this._buckets[this._i].(List)[this._j].(List)[1]
     this._j = this._j + 1
     this._skipEmpty()
     return next
   }
+}
+
+Map MapFromPairs(List pairs) {
+  final ret = Map()
+  for pairvar in pairs {
+    final pair = pairvar.(List)
+    ret[pair[0]] = pair[1]
+  }
+  return ret
 }
 
 class Set {
@@ -590,4 +599,12 @@ class Set {
   MapIterator Iterator() {
     return this._map.Iterator()
   }
+}
+
+Set SetFromList(List list) {
+  final ret = Set()
+  for x in list {
+    ret.add(x)
+  }
+  return ret
 }

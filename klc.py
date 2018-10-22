@@ -3008,6 +3008,42 @@ def parse_one_source(source, local_prefix, env):
                     break
             return ListDisplay(token, exprs)
 
+        if consume('{'):
+            with skipping_newlines(True):
+                if consume('}'):
+                    return FunctionCall(token, 'Set', [])
+                if consume(':'):
+                    expect('}')
+                    return FunctionCall(token, 'Map', [])
+                key = parse_expression(defs)
+                if consume(':'):
+                    value = parse_expression(defs)
+                    pairs = [ListDisplay(token, [key, value])]
+                    if consume(','):
+                        while not consume('}'):
+                            key = parse_expression(defs)
+                            expect(':')
+                            value = parse_expression(defs)
+                            pairs.append(ListDisplay(token, [key, value]))
+                            if not consume(','):
+                                expect('}')
+                                break
+                    else:
+                        expect('}')
+                    return FunctionCall(token, 'MapFromPairs', [
+                        ListDisplay(token, pairs)
+                    ])
+                args = [key]
+                if consume(','):
+                    while not consume('}'):
+                        args.append(parse_expression(defs))
+                        if not consume(','):
+                            expect('}')
+                            break
+                else:
+                    expect('}')
+                return FunctionCall(token, 'SetFromList', [ListDisplay(token, args)])
+
         if consume('null'):
             type_ = 'var'
             if consume('('):

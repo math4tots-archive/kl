@@ -409,6 +409,27 @@ void main() {
     m.remove(5)
     assert(m.size == 2)
     assert(5 not in m)
+
+    final m2 = {
+      1: 2,
+      3: 4,
+    }
+    assert(1 in m2)
+    assert(3 in m2)
+    assert(m2.size == 2)
+  }
+
+  // Set
+  {
+    final s = Set()
+    assert(s.size == 0)
+    s.add(1)
+    assert(s.size == 1)
+    final s2 = {1, 2, 3}
+    assert(1 in s2)
+    assert(2 in s2)
+    assert(3 in s2)
+    assert(s2.size == 3)
   }
 
   print(os.name)
