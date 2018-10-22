@@ -404,9 +404,10 @@ void main() {
     assert('a' in m)
     assert('b' not in m)
     assert(20 not in m)
-    print('m.size = ' + str(m.size))
-    print(m._buckets)
-    print('m[5] = ' + str(m[5]))
+    assert(5 in m)
+    m.remove(5)
+    assert(m.size == 2)
+    assert(5 not in m)
   }
 
   print(os.name)

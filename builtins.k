@@ -294,6 +294,43 @@ extern class List(Iterable) {
   ListIterator Iterator() {
     return ListIterator(this)
   }
+
+  List Slice(int a, int b) {
+    if (a < 0) {
+      a = a + this.size
+    }
+    if (b < 0) {
+      b = b + this.size
+    }
+    final ret = []
+    for (int i = a; i < b; i++) {
+      ret.push(this[i])
+    }
+    return ret
+  }
+
+  List SliceRight(int b) {
+    return this.Slice(0, b)
+  }
+
+  List SliceLeft(int a) {
+    return this.Slice(a, this.size)
+  }
+
+  List SliceAll() {
+    return this.Slice(0, this.size)
+  }
+
+  List Add(List other) {
+    final ret = []
+    for x in this {
+      ret.push(x)
+    }
+    for x in other {
+      ret.push(x)
+    }
+    return ret
+  }
 }
 
 class ListIterator {
@@ -425,6 +462,21 @@ class Map {
 
   List _findKey(var key) {
     return this._findWithHash(key.HashCode().(int), key)
+  }
+
+  bool remove(var key) {
+    int hash = key.HashCode().(int)
+    int index = hash % this._buckets.size
+    final bucket = this._buckets[index].(List)
+    for (int i = 0; i < bucket.size; i++) {
+      final entry = bucket[i].(List)
+      if (entry[0].(int) == hash and entry[1] == key) {
+        this._buckets[index] = bucket[:i] + bucket[i + 1:]
+        this._size = this._size - 1
+        return true
+      }
+    }
+    return false
   }
 
   bool Contains(var key) {
