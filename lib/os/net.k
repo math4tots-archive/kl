@@ -12,12 +12,12 @@ extern int IPPROTO_UDP
 extern class Socket {
   Try tryShutdown()
   void shutdown() {
-    this.tryShutdown().getOrDie()
+    this.tryShutdown().orDie()
   }
 }
 
 Try tryOpenSocket(int domain, int type, int protocol)
 
 Socket openSocket(int domain, int type, int protocol) {
-  return tryOpenSocket(domain, type, protocol).getOrDie().(Socket)
+  return tryOpenSocket(domain, type, protocol).orDie().(Socket)
 }

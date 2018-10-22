@@ -303,7 +303,7 @@ extern class Try {
   bool Bool()
   var getRawValue()
 
-  var getOrElse(var callback) {
+  var orElse(var callback) {
     var value = this.getRawValue()
     if (!this) {
       return callback(value)
@@ -311,7 +311,7 @@ extern class Try {
     return value
   }
 
-  var getOrDie() {
+  var orDie() {
     var value = this.getRawValue()
     if (!this) {
       panic(str(value))

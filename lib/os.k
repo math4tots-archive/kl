@@ -12,28 +12,28 @@ bool isfile(String path)
 bool isdir(String path)
 
 List listdir(String path) {
-  return tryListdir(path).getOrElse(def var[String path](var error) {
+  return tryListdir(path).orElse(def var[String path](var error) {
     panic('Failed to listdir (' + path + '): ' + str(error))
     return null
   }).(List)
 }
 
 String getcwd() {
-  return tryGetcwd().getOrElse(def var(var error) {
+  return tryGetcwd().orElse(def var(var error) {
     panic('Failed getcwd: ' + str(error))
     return null
   }).(String)
 }
 
 void chdir(String path) {
-  tryChdir(path).getOrElse(def var[String path](var error) {
+  tryChdir(path).orElse(def var[String path](var error) {
     panic('Failed to chdir (' + path + '): ' + str(error))
     return null
   })
 }
 
 void mkdir(String path) {
-  tryMkdir(path).getOrElse(def var[String path](var error) {
+  tryMkdir(path).orElse(def var[String path](var error) {
     panic('Failed to mkdir (' + path + '): ' + str(error))
     return null
   })
