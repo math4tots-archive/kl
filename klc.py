@@ -2668,12 +2668,13 @@ def parse_one_source(source, local_prefix, env):
 
     def parse_block(defs):
         token = expect('{')
-        consume_delim()
-        statements = []
-        while not consume('}'):
-            statements.append(parse_statement(defs))
+        with skipping_newlines(False):
             consume_delim()
-        return Block(token, statements)
+            statements = []
+            while not consume('}'):
+                statements.append(parse_statement(defs))
+                consume_delim()
+            return Block(token, statements)
 
     def parse_statement(defs):
         token = peek()
@@ -3112,13 +3113,14 @@ def parse_one_source(source, local_prefix, env):
 
     def parse_args(defs, opener='(', closer=')'):
         args = []
-        expect(opener)
-        while not consume(closer):
-            args.append(parse_expression(defs))
-            if not consume(','):
-                expect(closer)
-                break
-        return args
+        with skipping_newlines(True):
+            expect(opener)
+            while not consume(closer):
+                args.append(parse_expression(defs))
+                if not consume(','):
+                    expect(closer)
+                    break
+            return args
 
     def parse_params():
         params = []

@@ -417,6 +417,7 @@ void main() {
     assert(1 in m2)
     assert(3 in m2)
     assert(m2.size == 2)
+    assert(str({1: 2}) == '{1: 2}')
   }
 
   // Set
@@ -425,6 +426,7 @@ void main() {
     assert(s.size == 0)
     s.add(1)
     assert(s.size == 1)
+    assert(str({1}) == '{1}')
     final s2 = {1, 2, 3}
     assert(1 in s2)
     assert(2 in s2)

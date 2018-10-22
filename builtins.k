@@ -339,6 +339,14 @@ extern class List(Iterable) {
     }
     return ret
   }
+
+  List map(var f) {
+    final ret = []
+    for x in this {
+      ret.push(f(x))
+    }
+    return ret
+  }
 }
 
 class ListIterator {
@@ -515,6 +523,14 @@ class Map {
   MapIterator Iterator() {
     return MapIterator(this)
   }
+
+  String Repr() {
+    return '{' + ', '.join(
+      ListFromIterable(this).map(def String[Map this](var key) {
+        return repr(key) + ': ' + repr(this[key])
+      })
+    ) + '}'
+  }
 }
 
 class MapIterator {
@@ -598,6 +614,10 @@ class Set {
 
   MapIterator Iterator() {
     return this._map.Iterator()
+  }
+
+  String Repr() {
+    return '{' + ', '.join(ListFromIterable(this).map(repr)) + '}'
   }
 }
 
