@@ -3147,14 +3147,46 @@ parser.add_argument('--out-file', '-o', default=None)
 parser.add_argument('--opt', '-O', type=int, default=1)
 parser.add_argument('--debug', '-g', action='store_true', default=False)
 parser.add_argument('--no-debug', dest='debug', action='store_false')
+parser.add_argument('--test', '-t', action='store_true', default=False)
+
+
+def find_tests(local_prefix):
+    lib = os.path.join(_scriptdir, 'lib')
+    root = os.path.join(lib, local_prefix.replace('.', os.sep))
+    for base, dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            if filename.endswith('_test.k'):
+                yield os.path.relpath(
+                    os.path.join(base, filename[:-2]), lib
+                ).replace(os.sep, '.')
+
 
 def main():
     try:
         args = parser.parse_args()
-        with open(args.kfile) as f:
-            data = f.read()
-        source = Source(args.kfile, data)
         builtins_node = parse(Source('<builtin>', BUILTINS), None, None)
+
+        if args.test:
+            tests = sorted(find_tests(args.kfile))
+            sb = FractalStringBuilder(0)
+            for i, t in enumerate(tests):
+                sb += f'import {t} as test{i}'
+
+            sb += 'void main() {'
+            sbb = sb.spawn(1)
+            for i, t in enumerate(tests):
+                sbb += f'STDERR.write("Testing {t}... ")'
+                sbb += f'test{i}.test()'
+                sbb += f'STDERR.write("pass\\n")'
+            sb += 'STDERR.write("All tests pass!\\n")'
+            sb += '}'
+
+            source = Source('<test>', str(sb))
+        else:
+            with open(args.kfile) as f:
+                data = f.read()
+            source = Source(args.kfile, data)
+
         node = parse(source, '#', builtins_node.env)
         program = Program(
             node.token,
