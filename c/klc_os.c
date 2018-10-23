@@ -87,6 +87,7 @@ KLCNTry* KLCNosZBtryListdir(KLCNString* path) {
   return t;
 #elif KLC_OS_WINDOWS
   /* TODO: Use unicode versions of these functions */
+  KLCNTry* t;
   KLCNString* suffix = KLC_mkstr("\\*");
   KLCNString* pattern = KLCNStringZFAdd(path, suffix);
   WIN32_FIND_DATAW data;
