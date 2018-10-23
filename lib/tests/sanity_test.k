@@ -64,7 +64,7 @@ String f3(F0 f) {
   return f() + ' world'
 }
 
-void main() {
+void test() {
   {
     assert(true)
     assert(!false)
@@ -186,10 +186,10 @@ void main() {
     bar.s = 'bar.s content'
     assert(bar.s == 'bar.s content')
     assert(bar.f() == 10)
-    assert(str(bar) == '<#.Bar instance>')
+    assert(str(bar) == '<tests.sanity_test.Bar instance>')
 
     Baz baz = Baz(15)
-    assert(str(baz) == '<#.Baz instance>')
+    assert(str(baz) == '<tests.sanity_test.Baz instance>')
     assert(baz.a == 15)
 
     bar.d = 10.
@@ -380,8 +380,8 @@ void main() {
   // corner cases with 'Z'
   {
     Zz zz = Zz()
-    assert(str(zz) == '<#.Zz instance>')
-    assert(str(zz.getZ()) == '<#.Zz instance>')
+    assert(str(zz) == '<tests.sanity_test.Zz instance>')
+    assert(str(zz.getZ()) == '<tests.sanity_test.Zz instance>')
   }
 
   // Test Map
@@ -400,7 +400,7 @@ void main() {
     assert(m[5] == 'world')
     m['a'] = 'b'
     assert(m.size == 3)
-    print(ListFromIterable(m))
+    assert(SetFromList(ListFromIterable(m)) == {"a", 2, 5})
     assert(m['a'] == 'b')
     assert('a' in m)
     assert('b' not in m)
@@ -454,18 +454,18 @@ void main() {
     assert(!wr)
   }
 
-  print(os.name)
-  print('os.getcwd() = ' + str(os.getcwd()))
-  print('os.isdir("c/hw.c") = ' + str(os.isdir("c/hw.c")))
-  print('os.isdir("lib") = ' + str(os.isdir("lib")))
-  print('os.isfile("c/hw.c") = ' + str(os.isfile("c/hw.c")))
-  print('os.isfile("lib") = ' + str(os.isfile("lib")))
-  print('ARGS = ' + str(ARGS))
-  print(os.listdir('.'))
-  print('Hello world!')
-  final data = File('c/hw.c', 'r').read()
-  print('data.size = ' + str(data.size))
-  print('After reading main.c')
+  // print(os.name)
+  // print('os.getcwd() = ' + str(os.getcwd()))
+  // print('os.isdir("c/hw.c") = ' + str(os.isdir("c/hw.c")))
+  // print('os.isdir("lib") = ' + str(os.isdir("lib")))
+  // print('os.isfile("c/hw.c") = ' + str(os.isfile("c/hw.c")))
+  // print('os.isfile("lib") = ' + str(os.isfile("lib")))
+  // print('ARGS = ' + str(ARGS))
+  // print(os.listdir('.'))
+  // print('Hello world!')
+  // final data = File('c/hw.c', 'r').read()
+  // print('data.size = ' + str(data.size))
+  // print('After reading main.c')
 }
 
 
@@ -481,4 +481,3 @@ class Zz {
     return this
   }
 }
-
