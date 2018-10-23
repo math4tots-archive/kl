@@ -122,6 +122,8 @@ extern class WeakReference {
     }
     return obj
   }
+
+  int GETrefcnt()
 }
 
 extern class String {

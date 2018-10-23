@@ -439,6 +439,21 @@ void main() {
     assert({1, 2, 3} != {1, 2})
   }
 
+  // List:SetItem memory leak test
+  {
+    auto key = 'a' + 'b'
+    final m = Map()
+    final wr = WeakReference(key)
+    assert(wr.refcnt == 1)
+    m[key] = 1
+    assert(wr.refcnt == 2)
+    m.remove(key)
+    assert(wr.refcnt == 1)
+    key = null(String)
+    assert(wr.refcnt == 0)
+    assert(!wr)
+  }
+
   print(os.name)
   print('os.getcwd() = ' + str(os.getcwd()))
   print('os.isdir("c/hw.c") = ' + str(os.isdir("c/hw.c")))

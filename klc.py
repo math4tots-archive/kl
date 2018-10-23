@@ -3002,11 +3002,12 @@ def parse_one_source(source, local_prefix, env):
 
         if consume('['):
             exprs = []
-            while not consume(']'):
-                exprs.append(parse_expression(defs))
-                if not consume(','):
-                    expect(']')
-                    break
+            with skipping_newlines(True):
+                while not consume(']'):
+                    exprs.append(parse_expression(defs))
+                    if not consume(','):
+                        expect(']')
+                        break
             return ListDisplay(token, exprs)
 
         if consume('{'):

@@ -683,6 +683,10 @@ KLC_var KLCNWeakReferenceZFgetNullable(KLCNWeakReference* wr) {
   return KLC_object_to_var(wr->obj);
 }
 
+KLC_int KLCNWeakReferenceZFGETrefcnt(KLCNWeakReference* wr) {
+  return wr->obj ? (wr->obj->refcnt + 1) : 0;
+}
+
 void KLC_deleteString(KLC_header* robj, KLC_header** dq) {
   KLCNString* obj = (KLCNString*) robj;
   free(obj->utf8);
@@ -998,9 +1002,10 @@ KLC_var KLCNListZFSetItem(KLCNList* list, KLC_int i, KLC_var v) {
   if (i < 0 || ((size_t) i) >= list->size) {
     KLC_errorf("Index out of bounds (i = %ld, size = %ld)", i, list->size);
   }
-  list->buffer[i] = v;
   KLC_retain_var(v);  /* once for attaching value to list */
   KLC_retain_var(v);  /* once more for using as return value */
+  KLC_release_var(list->buffer[i]);
+  list->buffer[i] = v;
   return v;
 }
 
