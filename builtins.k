@@ -66,6 +66,14 @@ bool `int:Bool`(int x) {
 int `int:HashCode`(int x) {
   return x
 }
+int `int:Pow`(int a, int b) {
+  // TODO: Consider faster exponentiation algorithm
+  int r = 1
+  for (int i = 0; i < b; i++) {
+    r = r * a
+  }
+  return r
+}
 
 double `double:Add`(double a, double b)
 double `double:Sub`(double a, double b)
