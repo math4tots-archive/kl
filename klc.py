@@ -69,22 +69,30 @@ PRIMITIVE_TYPES = {
 }
 
 _primitive_method_names = {
-    'null': ['Repr', 'Bool'],
-    'bool': ['Repr', 'Bool'],
+    'null': [
+        'Eq', 'HashCode',
+        'Repr', 'Bool',
+    ],
+    'bool': [
+        'Eq', 'Lt', 'HashCode',
+        'Repr', 'Bool',
+    ],
     'int': [
-        'Eq', 'Lt',
+        'Eq', 'Lt', 'HashCode',
         'Add', 'Sub', 'Mul', 'Div', 'Mod',
         'Repr', 'Bool',
-        'HashCode',
     ],
     'double': [
-        'Eq', 'Lt',
+        'Eq', 'Lt', 'HashCode',
         'Add', 'Sub', 'Mul', 'Div',
         'Repr', 'Bool',
     ],
-    'function': ['GETname', 'Repr', 'Bool'],
+    'function': [
+        'Eq', 'HashCode',
+        'GETname', 'Repr', 'Bool',
+    ],
     'type': [
-        'Eq',
+        'Eq', 'HashCode',
         'GETname', 'Repr', 'Bool',
     ],
 }

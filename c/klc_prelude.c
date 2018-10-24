@@ -262,6 +262,19 @@ void KLC_release_var(KLC_var v) {
   }
 }
 
+KLC_int KLCNZAIdentityHash(KLC_var x) {
+  switch (x.tag) {
+    case KLC_TAG_FUNCTION:
+      return (KLC_int) x.u.f;
+    case KLC_TAG_TYPE:
+      return (KLC_int) x.u.t;
+    case KLC_TAG_OBJECT:
+      return (KLC_int) x.u.obj;
+  }
+  KLC_errorf("_IdentityHash unsupported for %s", KLC_tag_to_string(x.tag));
+  return 0;
+}
+
 KLC_bool KLCNZAIs(KLC_var a, KLC_var b) {
   if (a.tag != b.tag) {
     return 0;
@@ -557,7 +570,7 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {
       }
     }
     if (!m) {
-      KLC_errorf("No such method '%s' for type '%s'", name, type->name);
+      KLC_errorf("No method '%s' for type '%s'", name, type->name);
     }
     return m->body(argc, argv);
   }
@@ -627,6 +640,26 @@ KLC_bool KLCNdoubleZFNe(double a, double b) {
 
 KLC_bool KLCNdoubleZFLt(double a, double b) {
   return a < b;
+}
+
+KLC_int KLCNdoubleZFHashCode(double a) {
+  /* TODO: Come up with a better hashcode algorithm */
+  /* The ideas behind hashing doubles this way:
+   *   1. because of the equality relationship with int,
+   *      floating point numbers with no fractional part
+   *      needs to have a hashcode same as the integer
+   *      version.
+   *   2. simply rounding to a close integer isn't necessarily
+   *      bad, but the problem is that this normally
+   *      would result in any two doubles with same
+   *      integer parts to land in the same bucket.
+   *      we mitigate this by shfiting up by some number
+   *      of bits.
+   */
+  return
+    (a == (KLC_int) a) ? ((KLC_int) a) :
+    (a <= (1L << 32)) ? ((KLC_int) ((1L << 16) * a)) :
+    ((KLC_int) a);
 }
 
 KLCNString* KLCNdoubleZFRepr(double d) {
@@ -716,6 +749,7 @@ KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii) {
   #if KLC_OS_WINDOWS
     obj->wstr = NULL;
   #endif
+  obj->hash = 0;
   obj->is_ascii = is_ascii;
   return obj;
 }
@@ -770,6 +804,22 @@ KLC_int KLCNStringZFGETbytesize(KLCNString* s) {
 KLC_int KLCNStringZFGETsize(KLCNString* s) {
   KLC_String_init_utf32(s);
   return (KLC_int) s->nchars;
+}
+
+KLC_int KLCNStringZFHashCode(KLCNString* s) {
+  if (s->hash == 0 && s->bytesize != 0) {
+    KLC_int h = 0;
+    const char* utf8 = s->utf8;
+    size_t i, len = s->bytesize;
+    for (i = 0; i < len; i++) {
+      h = 31 * h + (KLC_int) utf8[i];
+    }
+    if (h == 0) {
+      h = 60761;
+    }
+    s->hash = h;
+  }
+  return s->hash;
 }
 
 KLCNString* KLCNStringZFStr(KLCNString* s) {

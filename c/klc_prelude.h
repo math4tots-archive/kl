@@ -152,6 +152,7 @@ struct KLCNString {
   #if KLC_OS_WINDOWS
     LPWSTR wstr;
   #endif
+  KLC_int hash;
   int is_ascii;
 };
 
