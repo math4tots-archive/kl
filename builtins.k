@@ -276,6 +276,7 @@ List ListFromIterable(var iterable) {
 }
 
 extern class List(Iterable) {
+  new(int initSize)
   int GETsize()
   var GetItem(int i)
   var SetItem(int i, var x)
@@ -311,10 +312,12 @@ extern class List(Iterable) {
   }
 
   List Mul(int rep) {
-    final ret = []
+    final ret = List(rep * this.size)
+    int p = 0
     for (int i = 0; i < rep; i++) {
       for item in this {
-        ret.push(item)
+        ret[p] = item
+        p++;
       }
     }
     return ret
@@ -475,7 +478,7 @@ class Map {
 
   void _maybeResize() {
     if (this._buckets.size <= 2 * this._size) {
-      this._resizeBuckets(2 * (this._buckets.size + this._size + 8))
+      this._resizeBuckets(4 * (this._buckets.size + this._size + 8))
     }
   }
 

@@ -5,9 +5,9 @@ int transform(int i) {
 }
 
 void test() {
-  final xs = []
+  final xs = Set()
   for (int i = 0; i < 10 ** 6; i++) {
-    xs.push(i)
+    xs.add(i)
   }
   print('xs.size = ' + str(xs.size))
 }

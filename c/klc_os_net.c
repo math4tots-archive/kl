@@ -54,16 +54,21 @@ KLCNTry* KLCNosZBnetZBSocketZFtryShutdown(KLCNosZBnetZBSocket* sock) {
 }
 
 KLCNTry* KLCNosZBnetZBSocketZFtryBindIp4(KLCNosZBnetZBSocket* sock, KLC_int port, KLC_int addr) {
-  struct sockaddr_in sa;
-  memset(&sa, 0, sizeof(struct sockaddr_in));
-  sa.sin_family = AF_INET;
-  sa.sin_addr.s_addr = addr;
-  sa.sin_port = port;
-  if (bind(sock->socket, (struct sockaddr*) &sa, sizeof sa) == -1) {
-    int errval = errno;
-    return KLC_failm(strerror(errval));
-  }
-  return KLCNTryZEnew(1, KLC_int_to_var(0));
+  #if KLC_POSIX
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof(struct sockaddr_in));
+    sa.sin_family = AF_INET;
+    sa.sin_addr.s_addr = addr;
+    sa.sin_port = port;
+    if (bind(sock->socket, (struct sockaddr*) &sa, sizeof sa) == -1) {
+      int errval = errno;
+      return KLC_failm(strerror(errval));
+    }
+    return KLCNTryZEnew(1, KLC_int_to_var(0));
+  #else
+    KLC_errorf("TODO");
+    return NULL;
+  #endif
 }
 
 void KLC_deleteosZBnetZBSocket(KLC_header* robj, KLC_header** dq) {
@@ -76,27 +81,57 @@ void KLC_deleteosZBnetZBSocket(KLC_header* robj, KLC_header** dq) {
 }
 
 KLC_int KLCNosZBnetZBinetZAaddr(KLCNString* s) {
-  return (KLC_int) inet_addr(s->utf8);
+  #if KLC_POSIX
+    return (KLC_int) inet_addr(s->utf8);
+  #else
+    KLC_errorf("TODO");
+    return 0;
+  #endif
 }
 
 KLC_int KLCNosZBnetZBhtonl(KLC_int x) {
-  return (KLC_int) htonl((KLC_int) x);
+  #if KLC_POSIX
+    return (KLC_int) htonl((KLC_int) x);
+  #else
+    KLC_errorf("NOT SUPPORTED ON THIS PLATFORM");
+    return 0; /* TODO */
+  #endif
 }
 
 KLC_int KLCNosZBnetZBhtons(KLC_int x) {
-  return (KLC_int) htons((KLC_int) x);
+  #if KLC_POSIX
+    return (KLC_int) htons((KLC_int) x);
+  #else
+    KLC_errorf("NOT SUPPORTED ON THIS PLATFORM");
+    return 0; /* TODO */
+  #endif
 }
 
 KLC_int KLCNosZBnetZBntohs(KLC_int x) {
-  return (KLC_int) ntohs((KLC_int) x);
+  #if KLC_POSIX
+    return (KLC_int) ntohs((KLC_int) x);
+  #else
+    KLC_errorf("NOT SUPPORTED ON THIS PLATFORM");
+    return 0; /* TODO */
+  #endif
 }
 
 KLC_int KLCNosZBnetZBntohl(KLC_int x) {
-  return (KLC_int) ntohl((KLC_int) x);
+  #if KLC_POSIX
+    return (KLC_int) ntohl((KLC_int) x);
+  #else
+    KLC_errorf("NOT SUPPORTED ON THIS PLATFORM");
+    return 0; /* TODO */
+  #endif
 }
 
 KLC_int KLCNosZBnetZBINADDRZAANYZEinit() {
-  return INADDR_ANY;
+  #if KLC_POSIX
+    return INADDR_ANY;
+  #else
+    KLC_errorf("NOT SUPPORTED ON THIS PLATFORM");
+    return 0; /* TODO */
+  #endif
 }
 
 KLC_int KLCNosZBnetZBAFZAINET6ZEinit() {

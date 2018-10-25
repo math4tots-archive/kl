@@ -1024,6 +1024,16 @@ void KLC_deleteList(KLC_header* robj, KLC_header** dq) {
   free(list->buffer);
 }
 
+KLCNList* KLCNListZEnew(KLC_int size) {
+  KLCNList* list = KLC_mklist((size_t) size);
+  KLC_int i;
+  for (i = 0; i < size; i++) {
+    list->buffer[i] = KLC_null;
+  }
+  list->size = size;
+  return list;
+}
+
 void KLCNListZFpush(KLCNList* list, KLC_var v) {
   if (list->size >= list->cap) {
     list->cap += 4;
