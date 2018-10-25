@@ -1279,7 +1279,7 @@ void KLCNassert(KLC_var cond) {
   }
 }
 
-void KLCNZEZBmain();
+void KLCNZEZBmain(void);
 
 #if KLC_WIN_APP
 int CALLBACK wWinMain(

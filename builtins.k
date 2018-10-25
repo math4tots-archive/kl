@@ -444,7 +444,7 @@ class Map {
 
   new() {
     // Buckets count should never be zero
-    this._buckets = [null]
+    this._buckets = List(16)
     this._size = 0
   }
 
@@ -462,7 +462,7 @@ class Map {
 
   void _resizeBuckets(int newSize) {
     final oldBuckets = this._buckets
-    this._buckets = [null] * newSize
+    this._buckets = List(newSize)
     this._size = 0
     for bucket in oldBuckets {
       if (bucket is not null) {
@@ -478,7 +478,7 @@ class Map {
 
   void _maybeResize() {
     if (this._buckets.size <= 2 * this._size) {
-      this._resizeBuckets(4 * (this._buckets.size + this._size + 8))
+      this._resizeBuckets(4 * (this._buckets.size + 8))
     }
   }
 

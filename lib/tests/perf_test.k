@@ -6,7 +6,7 @@ int transform(int i) {
 
 void test() {
   final xs = Set()
-  for (int i = 0; i < 10 ** 6; i++) {
+  for (int i = 0; i < 10 ** 7; i++) {
     xs.add(i)
   }
   print('xs.size = ' + str(xs.size))
