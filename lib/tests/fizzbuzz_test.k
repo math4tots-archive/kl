@@ -16,7 +16,7 @@ List fizzbuzz(int n) {
   return ret
 }
 
-void test() {
+void main() {
   assert(fizzbuzz(50) == [
     1,
     2,

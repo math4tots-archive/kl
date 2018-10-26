@@ -4,7 +4,7 @@ int transform(int i) {
   return i % 2 == 0 ? i / 2 : (3 * i + 1)
 }
 
-void test() {
+void main() {
   final xs = Set()
   for (int i = 0; i < 10 ** 7; i++) {
     xs.add(i)

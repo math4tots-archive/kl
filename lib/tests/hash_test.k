@@ -1,6 +1,6 @@
 // Test that things are hashable
 
-void test() {
+void main() {
   final s = {}
   assert(type(s) is Set)
   s.add(10)
@@ -22,10 +22,10 @@ void test() {
   assert(s.size == 3)
   assert(null in s)
 
-  assert(test not in s)
-  s.add(test)
+  assert(main not in s)
+  s.add(main)
   assert(s.size == 4)
-  assert(test in s)
+  assert(main in s)
 
   assert(Set not in s)
   s.add(Set)

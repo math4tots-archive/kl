@@ -64,7 +64,7 @@ String f3(F0 f) {
   return f() + ' world'
 }
 
-void test() {
+void main() {
   {
     assert(true)
     assert(!false)

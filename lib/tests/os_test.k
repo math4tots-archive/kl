@@ -1,7 +1,7 @@
 import os
 import os.path as pt
 
-void test() {
+void main() {
   if (false) {
     print(os.name)
     final p = pt.join(['.', 'c'])

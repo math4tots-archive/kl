@@ -3184,7 +3184,7 @@ def main():
             sbb = sb.spawn(1)
             for i, t in enumerate(tests):
                 sbb += f'STDERR.write("Testing {t}... ")'
-                sbb += f'test{i}.test()'
+                sbb += f'test{i}.main()'
                 sbb += f'STDERR.write("pass\\n")'
             sb += 'STDERR.write("All tests pass!\\n")'
             sb += '}'
