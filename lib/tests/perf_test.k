@@ -6,8 +6,11 @@ int transform(int i) {
 
 void main() {
   final xs = Set()
-  for (int i = 0; i < 10 ** 7; i++) {
+  for (int i = 0; i < 10 ** 6; i++) {
     xs.add(i)
   }
-  print('xs.size = ' + str(xs.size))
+  final ls = ListFromIterable(xs)
+  for x in ls {
+    xs.remove(x)
+  }
 }

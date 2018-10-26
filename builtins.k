@@ -281,6 +281,29 @@ extern class List(Iterable) {
   var GetItem(int i)
   var SetItem(int i, var x)
   void push(var x)
+  void resize(int newSize)
+  var pop()
+
+  bool Bool() {
+    return bool(this.size)
+  }
+
+  void removeSlice(int a, int b) {
+    for (int i = a; i < b; i++) {
+      this[i] = this[i + b - a]
+    }
+    this.resize(this.size - b + a)
+  }
+
+  void removeAt(int index) {
+    this.removeSlice(index, index + 1)
+  }
+
+  void clear() {
+    while (this) {
+      this.pop()
+    }
+  }
 
   String Repr() {
     StringBuilder sb = StringBuilder()

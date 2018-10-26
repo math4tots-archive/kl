@@ -1034,6 +1034,18 @@ KLCNList* KLCNListZEnew(KLC_int size) {
   return list;
 }
 
+void KLCNListZFresize(KLCNList* list, KLC_int ns) {
+  size_t new_size = (size_t) ns;
+  while (list->size > new_size) {
+    KLC_release_var(list->buffer[--list->size]);
+  }
+  list->cap = new_size;
+  list->buffer = (KLC_var*) realloc(list->buffer, sizeof(KLC_var) * list->cap);
+  while (list->size < new_size) {
+    list->buffer[list->size++] = KLC_null;
+  }
+}
+
 void KLCNListZFpush(KLCNList* list, KLC_var v) {
   if (list->size >= list->cap) {
     list->cap += 4;
@@ -1042,6 +1054,13 @@ void KLCNListZFpush(KLCNList* list, KLC_var v) {
   }
   list->buffer[list->size++] = v;
   KLC_retain_var(v);
+}
+
+KLC_var KLCNListZFpop(KLCNList* list) {
+  if (list->size == 0) {
+    KLC_errorf("pop from empty list");
+  }
+  return list->buffer[--list->size];
 }
 
 KLC_var KLCNListZFGetItem(KLCNList* list, KLC_int i) {
