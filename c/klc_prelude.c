@@ -1161,7 +1161,7 @@ void KLC_deleteFile(KLC_header* robj, KLC_header** dq) {
   KLCNFileZFclose(file);
 }
 
-KLCNFile* KLCNFileZEnew(KLCNString* path, KLCNString* mode) {
+KLCNFile* KLCNopen(KLCNString* path, KLCNString* mode) {
   FILE* cfile;
   if (!KLC_is_valid_file_mode(mode->utf8)) {
     KLC_errorf("Invalid file mode: %s", mode->utf8);
@@ -1245,6 +1245,20 @@ KLC_var KLCNTryZFgetRawValue(KLCNTry* t) {
 
 void KLC_deleteTry(KLC_header* robj, KLC_header** dq) {
   KLCNTry* obj = (KLCNTry*) robj;
+  KLC_partial_release_var(obj->value, dq);
+}
+
+KLCNZDWith* KLCNZDWithZEnew(KLC_var v) {
+  KLCNZDWith* obj = (KLCNZDWith*) malloc(sizeof(KLCNZDWith));
+  KLC_init_header(&obj->header, &KLC_typeZDWith);
+  KLC_retain_var(v);
+  obj->value = v;
+  return obj;
+}
+
+void KLC_deleteZDWith(KLC_header* robj, KLC_header** dq) {
+  KLCNZDWith* obj = (KLCNZDWith*) robj;
+  KLC_release_var(KLC_mcall("Exit", 1, &obj->value));
   KLC_partial_release_var(obj->value, dq);
 }
 

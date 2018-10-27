@@ -214,7 +214,6 @@ extern class StringBuilder {
 }
 
 extern class File {
-  new(String path, String mode)
   void close()
   void write(String s)
   String read()
@@ -222,7 +221,15 @@ extern class File {
     this.write(str(x))
     this.write('\n')
   }
+  File Enter() {
+    return this
+  }
+  void Exit() {
+    this.close()
+  }
 }
+
+File open(String path, String mode)
 
 extern class Closure {
   new(List captures, function f)
@@ -256,6 +263,11 @@ String str(var x) {
 
 String repr(var x) {
   return x.Repr().(String)
+}
+
+extern class `%With` {
+  // Helper class for auto-closing in with statements
+  new(var context)
 }
 
 trait Iterable {

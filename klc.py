@@ -42,6 +42,8 @@ _special_method_names = {
     'SetSliceLeft',
     'SetSliceRight',
     'HashCode',
+    'Enter',
+    'Exit',
 }
 
 SYMBOLS = [
@@ -2746,6 +2748,36 @@ def parse_one_source(source, local_prefix, env):
                             body,
                         ])),
                 ])
+
+        if consume('with'):
+            expr = parse_expression(defs)
+            exprtempvar = mktempvar()
+            if consume('as'):
+                name = expect('NAME').value
+            else:
+                name = mktempvar()
+            body = parse_block(defs)
+            return Block(token, [
+                VariableDefinition(
+                    token,
+                    True,
+                    None,
+                    exprtempvar,
+                    expr),
+                VariableDefinition(
+                    token,
+                    True,
+                    None,
+                    name,
+                    MethodCall(token, Name(token, exprtempvar), 'Enter', [])),
+                VariableDefinition(
+                    token,
+                    True,
+                    None,
+                    mktempvar(),
+                    FunctionCall(token, '%With', [Name(token, exprtempvar)])),
+                body,
+            ])
 
         if consume('if'):
             expect('(')
