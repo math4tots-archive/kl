@@ -10,9 +10,14 @@ extern int SOCK_SEQPACKET
 extern int IPPROTO_TCP
 extern int IPPROTO_UDP
 
+// https://stackoverflow.com/questions/6729366/what-is-the-difference-between-af-inet-and-pf-inet-in-socket-programming
+int PF_INET = AF_INET
+int PF_INET6 = AF_INET6
+
 extern class Socket {
   Try tryShutdown()
   Try tryBindIp4(int port, int addr)
+  Try tryClose()
 
   void shutdown() {
     this.tryShutdown().orDie()
@@ -20,6 +25,10 @@ extern class Socket {
 
   void bindIp4(int port, int addr) {
     this.tryBindIp4(port, addr).orDie()
+  }
+
+  void close() {
+    this.tryClose().orDie()
   }
 }
 

@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <unistd.h>
 #endif
 
 struct KLCNosZBnetZBSocket {
@@ -61,6 +62,19 @@ KLCNTry* KLCNosZBnetZBSocketZFtryBindIp4(KLCNosZBnetZBSocket* sock, KLC_int port
     sa.sin_addr.s_addr = addr;
     sa.sin_port = port;
     if (bind(sock->socket, (struct sockaddr*) &sa, sizeof sa) == -1) {
+      int errval = errno;
+      return KLC_failm(strerror(errval));
+    }
+    return KLCNTryZEnew(1, KLC_int_to_var(0));
+  #else
+    KLC_errorf("TODO");
+    return NULL;
+  #endif
+}
+
+KLCNTry* KLCNosZBnetZBSocketZFtryClose(KLCNosZBnetZBSocket* sock) {
+  #if KLC_POSIX
+    if (close(sock->socket) != 0) {
       int errval = errno;
       return KLC_failm(strerror(errval));
     }

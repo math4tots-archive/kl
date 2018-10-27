@@ -1,14 +1,8 @@
-import os
+import os.net
 
+// https://www.csd.uoc.gr/~hy556/material/tutorials/cs556-3rd-tutorial.pdf
 void main() {
-  print(os.getcwd())
-  print(os.joinpath([os.getcwd(), '..']))
-
-  final start = os.getcwd()
-  for (int i = 0; i < 1000; i++) {
-    os.mkdir('foo')
-    os.chdir('foo')
-    print('i = ' + str(i) + ', ' + str(os.getcwd().size) + ', ' + os.getcwd())
-  }
-  print('done!')
+  final socket = net.tryOpenSocket(net.PF_INET, net.SOCK_STREAM, 0).orDie()
+  print(socket)
+  socket.close()
 }

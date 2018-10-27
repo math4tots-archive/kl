@@ -11,5 +11,6 @@ KLCNTry* KLCNosZBnetZBtryOpenSocket(KLC_int domain, KLC_int type, KLC_int protoc
 void KLC_deleteosZBnetZBSocket(KLC_header*, KLC_header**);
 KLCNTry* KLCNosZBnetZBSocketZFtryBindIp4(KLCNosZBnetZBSocket* sock, KLC_int port, KLC_int addr);
 KLC_int KLCNosZBnetZBinetZAaddr(KLCNString* s);
+KLCNTry* KLCNosZBnetZBSocketZFtryClose(KLCNosZBnetZBSocket* sock);
 
 #endif/*klc_os_net_h*/
