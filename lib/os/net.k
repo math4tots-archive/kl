@@ -16,19 +16,34 @@ int PF_INET6 = AF_INET6
 
 extern class Socket {
   Try tryShutdown()
-  Try tryBindIp4(int port, int addr)
+  Try tryBindIp4(int addr, int port)
   Try tryClose()
+  Try tryListen(int backlog)
+  Try tryConnectIp4(int addr, int port)
+  Try tryAcceptIp4()
 
   void shutdown() {
     this.tryShutdown().orDie()
   }
 
-  void bindIp4(int port, int addr) {
-    this.tryBindIp4(port, addr).orDie()
+  void bindIp4(int addr, int port) {
+    this.tryBindIp4(addr, port).orDie()
   }
 
   void close() {
     this.tryClose().orDie()
+  }
+
+  void listen(int backlog) {
+    this.tryListen(backlog).orDie()
+  }
+
+  void connectIp4(int addr, int port) {
+    this.tryConnectIp4(addr, port).orDie()
+  }
+
+  List acceptIp4() {
+    return this.tryAcceptIp4().orDie().(List)
   }
 }
 

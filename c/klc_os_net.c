@@ -54,7 +54,7 @@ KLCNTry* KLCNosZBnetZBSocketZFtryShutdown(KLCNosZBnetZBSocket* sock) {
   #endif
 }
 
-KLCNTry* KLCNosZBnetZBSocketZFtryBindIp4(KLCNosZBnetZBSocket* sock, KLC_int port, KLC_int addr) {
+KLCNTry* KLCNosZBnetZBSocketZFtryBindIp4(KLCNosZBnetZBSocket* sock, KLC_int addr, KLC_int port) {
   #if KLC_POSIX
     struct sockaddr_in sa;
     memset(&sa, 0, sizeof(struct sockaddr_in));
@@ -82,6 +82,57 @@ KLCNTry* KLCNosZBnetZBSocketZFtryClose(KLCNosZBnetZBSocket* sock) {
   #else
     KLC_errorf("TODO");
     return NULL;
+  #endif
+}
+
+KLCNTry* KLCNosZBnetZBSocketZFtryListen(KLCNosZBnetZBSocket* sock, KLC_int backlog) {
+  #if KLC_POSIX
+    if (listen(sock->socket, (int) backlog) != 0) {
+      int errval = errno;
+      return KLC_failm(strerror(errval));
+    }
+    return KLCNTryZEnew(1, KLC_int_to_var(0));
+  #else
+    return KLC_failm("Socket.listen not supported for platform");
+  #endif
+}
+
+KLCNTry* KLCNosZBnetZBSocketZFtryConnectIp4(KLCNosZBnetZBSocket* sock, KLC_int addr, KLC_int port) {
+  #if KLC_POSIX
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof(struct sockaddr_in));
+    sa.sin_family = AF_INET;
+    sa.sin_addr.s_addr = addr;
+    sa.sin_port = port;
+    if (connect(sock->socket, (struct sockaddr*) &sa, sizeof sa) != 0) {
+      int errval = errno;
+      return KLC_failm(strerror(errval));
+    }
+    return KLCNTryZEnew(1, KLC_int_to_var(0));
+  #else
+    return KLC_failm("Socket.connectIp4 not support for platform");
+  #endif
+}
+
+KLCNTry* KLCNosZBnetZBSocketZFtryAcceptIp4(KLCNosZBnetZBSocket* sock) {
+  #if KLC_POSIX
+    struct sockaddr_in sa;
+    socklen_t alen = sizeof(struct sockaddr_in);
+    KLCNList* list;
+    KLCNTry* t;
+    memset(&sa, 0, sizeof(struct sockaddr_in));
+    if (accept(sock->socket, (struct sockaddr*) &sa, &alen) != 0) {
+      int errval = errno;
+      return KLC_failm(strerror(errval));
+    }
+    list = KLC_mklist(2);
+    KLCNListZFpush(list, KLC_int_to_var((KLC_int) sa.sin_addr.s_addr));
+    KLCNListZFpush(list, KLC_int_to_var((KLC_int) sa.sin_port));
+    t = KLCNTryZEnew(1, KLC_object_to_var((KLC_header*) list));
+    KLC_release((KLC_header*) list);
+    return t;
+  #else
+    return KLC_failm("Socket.acceptIp4 not supported for platform");
   #endif
 }
 
