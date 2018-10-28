@@ -20,7 +20,11 @@ extern class Socket {
   Try tryClose()
   Try tryListen(int backlog)
   Try tryConnectIp4(int addr, int port)
-  Try tryAcceptIp4()
+  Try tryAcceptIp4(List addr)
+
+  // file descriptor for sockets is an implementation detail.
+  // Might not return a meaningful value
+  int GET_fd()
 
   void shutdown() {
     this.tryShutdown().orDie()
@@ -42,8 +46,12 @@ extern class Socket {
     this.tryConnectIp4(addr, port).orDie()
   }
 
-  List acceptIp4() {
-    return this.tryAcceptIp4().orDie().(List)
+  Socket acceptIp4(List addr) {
+    return this.tryAcceptIp4(addr).orDie().(Socket)
+  }
+
+  String Repr() {
+    return '<os.net.Socket (' + str(this._fd) + ')>'
   }
 }
 

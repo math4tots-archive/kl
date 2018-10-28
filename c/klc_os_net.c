@@ -18,6 +18,16 @@ struct KLCNosZBnetZBSocket {
   int socket;
 };
 
+static KLCNosZBnetZBSocket* mksocket(int socket, int domain, int type, int protocol) {
+  KLCNosZBnetZBSocket* sock = (KLCNosZBnetZBSocket*) malloc(sizeof(KLCNosZBnetZBSocket));
+  KLC_init_header(&sock->header, &KLC_typeosZBnetZBSocket);
+  sock->domain = domain;
+  sock->type = type;
+  sock->protocol = protocol;
+  sock->socket = socket;
+  return sock;
+}
+
 KLCNTry* KLCNosZBnetZBtryOpenSocket(KLC_int domain, KLC_int type, KLC_int protocol) {
   #if KLC_POSIX
     KLCNTry* t;
@@ -27,12 +37,7 @@ KLCNTry* KLCNosZBnetZBtryOpenSocket(KLC_int domain, KLC_int type, KLC_int protoc
       int errval = errno;
       return KLC_failm(strerror(errval));
     }
-    sock = (KLCNosZBnetZBSocket*) malloc(sizeof(KLCNosZBnetZBSocket));
-    KLC_init_header(&sock->header, &KLC_typeosZBnetZBSocket);
-    sock->domain = domain;
-    sock->type = type;
-    sock->protocol = protocol;
-    sock->socket = s;
+    sock = mksocket(s, domain, type, protocol);
     t = KLCNTryZEnew(1, KLC_object_to_var((KLC_header*) sock));
     KLC_release((KLC_header*) sock);
     return t;
@@ -51,6 +56,14 @@ KLCNTry* KLCNosZBnetZBSocketZFtryShutdown(KLCNosZBnetZBSocket* sock) {
     }
   #else
     return NULL;
+  #endif
+}
+
+KLC_int KLCNosZBnetZBSocketZFGETZAfd(KLCNosZBnetZBSocket* sock) {
+  #if KLC_POSIX
+    return (KLC_int) sock->socket;
+  #else
+    return -1;
   #endif
 }
 
@@ -114,22 +127,27 @@ KLCNTry* KLCNosZBnetZBSocketZFtryConnectIp4(KLCNosZBnetZBSocket* sock, KLC_int a
   #endif
 }
 
-KLCNTry* KLCNosZBnetZBSocketZFtryAcceptIp4(KLCNosZBnetZBSocket* sock) {
+KLCNTry* KLCNosZBnetZBSocketZFtryAcceptIp4(KLCNosZBnetZBSocket* sock, KLCNList* outlist) {
   #if KLC_POSIX
     struct sockaddr_in sa;
     socklen_t alen = sizeof(struct sockaddr_in);
     KLCNList* list;
     KLCNTry* t;
+    int s;
+    KLCNosZBnetZBSocket* outsocket;
     memset(&sa, 0, sizeof(struct sockaddr_in));
-    if (accept(sock->socket, (struct sockaddr*) &sa, &alen) != 0) {
+    s = accept(sock->socket, (struct sockaddr*) &sa, &alen);
+    if (s == -1) {
       int errval = errno;
       return KLC_failm(strerror(errval));
     }
-    list = KLC_mklist(2);
-    KLCNListZFpush(list, KLC_int_to_var((KLC_int) sa.sin_addr.s_addr));
-    KLCNListZFpush(list, KLC_int_to_var((KLC_int) sa.sin_port));
-    t = KLCNTryZEnew(1, KLC_object_to_var((KLC_header*) list));
-    KLC_release((KLC_header*) list);
+    if (outlist != NULL) {
+      KLCNListZFpush(outlist, KLC_int_to_var((KLC_int) sa.sin_addr.s_addr));
+      KLCNListZFpush(outlist, KLC_int_to_var((KLC_int) sa.sin_port));
+    }
+    outsocket = mksocket(s, sock->domain, sock->type, sock->protocol);
+    t = KLCNTryZEnew(1, KLC_object_to_var((KLC_header*) outsocket));
+    KLC_release((KLC_header*) outsocket);
     return t;
   #else
     return KLC_failm("Socket.acceptIp4 not supported for platform");

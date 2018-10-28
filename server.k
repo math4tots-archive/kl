@@ -9,7 +9,10 @@ void runServer() {
   final socket = net.tryOpenSocket(net.PF_INET, net.SOCK_STREAM, 0).orDie()
   socket.bindIp4(net.htonl(net.INADDR_ANY), net.htons(8080))
   socket.listen(10)
-  socket.acceptIp4()
+  final outaddr = []
+  final outsocket = socket.acceptIp4(outaddr)
   print(socket)
+  print(outsocket)
+  print('outaddr = ' + str(outaddr))
   socket.close()
 }
