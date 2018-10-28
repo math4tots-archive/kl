@@ -1,5 +1,5 @@
 import os
-import os.path as pt
+import os.fs
 
 void main() {
   if (false) {
@@ -7,9 +7,9 @@ void main() {
       print(f.read())
     }
     print(os.name)
-    final p = pt.join(['.', 'c'])
-    print(os.listdir(p))
-    print(os.tryListdir(p))
-    print(os.tryListdir(pt.join(['.', 'hi'])))
+    final p = fs.join(['.', 'c'])
+    print(fs.listdir(p))
+    print(fs.tryListdir(p))
+    print(fs.tryListdir(fs.join(['.', 'hi'])))
   }
 }

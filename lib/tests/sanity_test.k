@@ -1,5 +1,5 @@
 import os
-import os.path as pt
+import os.fs
 
 class Bar {
   double d
@@ -339,7 +339,7 @@ void main() {
 
   // Directory stuff
   {
-    assert(os.isdir('.'))
+    assert(fs.isdir('.'))
   }
 
   // Unicode and slicing
@@ -455,13 +455,13 @@ void main() {
   }
 
   // print(os.name)
-  // print('os.getcwd() = ' + str(os.getcwd()))
-  // print('os.isdir("c/hw.c") = ' + str(os.isdir("c/hw.c")))
-  // print('os.isdir("lib") = ' + str(os.isdir("lib")))
-  // print('os.isfile("c/hw.c") = ' + str(os.isfile("c/hw.c")))
-  // print('os.isfile("lib") = ' + str(os.isfile("lib")))
+  // print('fs.getcwd() = ' + str(fs.getcwd()))
+  // print('fs.isdir("c/hw.c") = ' + str(fs.isdir("c/hw.c")))
+  // print('fs.isdir("lib") = ' + str(fs.isdir("lib")))
+  // print('fs.isfile("c/hw.c") = ' + str(fs.isfile("c/hw.c")))
+  // print('fs.isfile("lib") = ' + str(fs.isfile("lib")))
   // print('ARGS = ' + str(ARGS))
-  // print(os.listdir('.'))
+  // print(fs.listdir('.'))
   // print('Hello world!')
   // final data = File('c/hw.c', 'r').read()
   // print('data.size = ' + str(data.size))
