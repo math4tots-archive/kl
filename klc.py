@@ -3193,6 +3193,8 @@ parser.add_argument('--test', '-t', action='store_true', default=False)
 def find_tests(local_prefix):
     lib = os.path.join(_scriptdir, 'lib')
     root = os.path.join(lib, local_prefix.replace('.', os.sep))
+    if root.endswith('_test') and os.path.isfile(root + '.k'):
+        yield local_prefix
     for base, dirnames, filenames in os.walk(root):
         for filename in filenames:
             if filename.endswith('_test.k'):
