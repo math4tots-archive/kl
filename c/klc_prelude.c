@@ -656,9 +656,10 @@ KLC_int KLCNdoubleZFHashCode(double a) {
    *      we mitigate this by shfiting up by some number
    *      of bits.
    */
+  KLC_int one = 1;
   return
     (a == (KLC_int) a) ? ((KLC_int) a) :
-    (a <= (1L << 32)) ? ((KLC_int) ((1L << 16) * a)) :
+    (a <= (one << 32)) ? ((KLC_int) ((one << 16) * a)) :
     ((KLC_int) a);
 }
 
