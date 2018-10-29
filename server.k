@@ -18,6 +18,6 @@ void runServer() {
   buf.set1(0, 10)
   buf.set1(1, 11)
   buf.set1(2, 12)
-  outsocket.sendBuffer(buf, 0)
+  outsocket.sendBuffer(buf)
   socket.close()
 }

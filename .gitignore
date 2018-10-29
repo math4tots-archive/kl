@@ -2,7 +2,7 @@
 *.obj
 *.exe
 *.dSYM
-a.out
+*.out
 c/main.c
 klc_os.cc
 experimental/gen/

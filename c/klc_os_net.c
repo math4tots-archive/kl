@@ -154,7 +154,7 @@ KLCNTry* KLCNosZBnetZBSocketZFtryAcceptIp4(KLCNosZBnetZBSocket* sock, KLCNList* 
   #endif
 }
 
-KLCNTry* KLCNosZBnetZBSocketZFtrySendBuffer(KLCNosZBnetZBSocket* sock, KLCNBuffer* b, KLC_int flags) {
+KLCNTry* KLCNosZBnetZBSocketZFtrySendBufferWithFlags(KLCNosZBnetZBSocket* sock, KLCNBuffer* b, KLC_int flags) {
   #if KLC_POSIX
     ssize_t s = send(sock->socket, b->buf, b->size, (int) flags);
     if (s < 0) {
@@ -167,7 +167,7 @@ KLCNTry* KLCNosZBnetZBSocketZFtrySendBuffer(KLCNosZBnetZBSocket* sock, KLCNBuffe
   #endif
 }
 
-KLCNTry* KLCNosZBnetZBSocketZFtryRecvBuffer(KLCNosZBnetZBSocket* sock, KLCNBuffer* b, KLC_int flags) {
+KLCNTry* KLCNosZBnetZBSocketZFtryRecvBufferWithFlags(KLCNosZBnetZBSocket* sock, KLCNBuffer* b, KLC_int flags) {
   #if KLC_POSIX
     ssize_t s = recv(sock->socket, b->buf, b->size, (int) flags);
     if (s < 0) {

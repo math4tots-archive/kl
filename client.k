@@ -10,7 +10,7 @@ void runClient() {
   print(socket)
   socket.connectIp4(net.inet_addr("127.0.0.1"), net.htons(8080))
   final buf = Buffer(1024)
-  final nread = socket.recvBuffer(buf, 0)
+  final nread = socket.recvBuffer(buf)
   print(buf.dumpstr())
   print('nread = ' + str(nread))
   socket.close()

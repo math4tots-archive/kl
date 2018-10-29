@@ -21,8 +21,8 @@ extern class Socket {
   Try tryListen(int backlog)
   Try tryConnectIp4(int addr, int port)
   Try tryAcceptIp4(List addr)
-  Try trySendBuffer(Buffer buffer, int flags)
-  Try tryRecvBuffer(Buffer buffer, int flags)
+  Try trySendBufferWithFlags(Buffer buffer, int flags)
+  Try tryRecvBufferWithFlags(Buffer buffer, int flags)
 
   // file descriptor for sockets is an implementation detail.
   // Might not return a meaningful value
@@ -52,12 +52,28 @@ extern class Socket {
     return this.tryAcceptIp4(addr).orDie().(Socket)
   }
 
-  int sendBuffer(Buffer buffer, int flags) {
-    return this.trySendBuffer(buffer, flags).orDie().(int)
+  Try trySendBuffer(Buffer buffer) {
+    return this.trySendBufferWithFlags(buffer, 0)
   }
 
-  int recvBuffer(Buffer buffer, int flags) {
-    return this.tryRecvBuffer(buffer, flags).orDie().(int)
+  Try tryRecvBuffer(Buffer buffer) {
+    return this.tryRecvBufferWithFlags(buffer, 0)
+  }
+
+  int sendBufferWithFlags(Buffer buffer, int flags) {
+    return this.trySendBufferWithFlags(buffer, flags).orDie().(int)
+  }
+
+  int recvBufferWithFlags(Buffer buffer, int flags) {
+    return this.tryRecvBufferWithFlags(buffer, flags).orDie().(int)
+  }
+
+  int sendBuffer(Buffer buffer) {
+    return this.trySendBuffer(buffer).orDie().(int)
+  }
+
+  int recvBuffer(Buffer buffer) {
+    return this.tryRecvBuffer(buffer).orDie().(int)
   }
 
   String Repr() {
