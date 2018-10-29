@@ -154,6 +154,32 @@ KLCNTry* KLCNosZBnetZBSocketZFtryAcceptIp4(KLCNosZBnetZBSocket* sock, KLCNList* 
   #endif
 }
 
+KLCNTry* KLCNosZBnetZBSocketZFtrySendBuffer(KLCNosZBnetZBSocket* sock, KLCNBuffer* b, KLC_int flags) {
+  #if KLC_POSIX
+    ssize_t s = send(sock->socket, b->buf, b->size, (int) flags);
+    if (s < 0) {
+      int errval = errno;
+      return KLC_failm(strerror(errval));
+    }
+    return KLCNTryZEnew(1, KLC_int_to_var((KLC_int) s));
+  #else
+    return KLC_failm("Socket.sendBuffer not supported for platform");
+  #endif
+}
+
+KLCNTry* KLCNosZBnetZBSocketZFtryRecvBuffer(KLCNosZBnetZBSocket* sock, KLCNBuffer* b, KLC_int flags) {
+  #if KLC_POSIX
+    ssize_t s = recv(sock->socket, b->buf, b->size, (int) flags);
+    if (s < 0) {
+      int errval = errno;
+      return KLC_failm(strerror(errval));
+    }
+    return KLCNTryZEnew(1, KLC_int_to_var((KLC_int) s));
+  #else
+    return KLC_failm("Socket.recvBuffer not supported for platform");
+  #endif
+}
+
 void KLC_deleteosZBnetZBSocket(KLC_header* robj, KLC_header** dq) {
   #if KLC_POSIX
     KLCNosZBnetZBSocket* s = (KLCNosZBnetZBSocket*) robj;
