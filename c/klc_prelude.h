@@ -251,6 +251,7 @@ void KLCNFileZFclose(KLCNFile* file);
 KLCNList* KLC_mklist(size_t cap);
 void KLCNListZFpush(KLCNList* list, KLC_var v);
 KLCNString* KLCNStringZFAdd(KLCNString* a, KLCNString* b);
+KLCNBuffer* KLC_mkbuf(KLC_int size, char* buf);
 KLCNTry* KLCNTryZEnew(KLC_bool success, KLC_var value);
 KLCNTry* KLC_failm(const char*);
 

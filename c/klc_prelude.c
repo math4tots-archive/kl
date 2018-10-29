@@ -966,6 +966,12 @@ KLCNString* KLCNStringZFSlice(KLCNString* s, KLC_int a, KLC_int b) {
   }
 }
 
+KLCNBuffer* KLCNStringZFencodeUtf8(KLCNString* s) {
+  char* buf = (char*) malloc(sizeof(char) * s->bytesize);
+  memcpy(buf, s->utf8, s->bytesize);
+  return KLC_mkbuf(s->bytesize, buf);
+}
+
 KLC_int KLCNCHARZABITZEinit() {
   return (KLC_int) CHAR_BIT;
 }
@@ -978,12 +984,18 @@ KLC_int KLCNINTZAMINZEinit() {
   return (KLC_int) KLC_INT_MIN;
 }
 
-KLCNBuffer* KLCNBufferZEnew(KLC_int size) {
+KLCNBuffer* KLC_mkbuf(KLC_int size, char* buf) {
   KLCNBuffer* obj = (KLCNBuffer*) malloc(sizeof(KLCNBuffer));
   KLC_init_header(&obj->header, &KLC_typeBuffer);
   obj->size = size;
-  obj->buf = size == 0 ? NULL : (char*) calloc(sizeof(char), size);
+  obj->buf = buf;
   return obj;
+}
+
+KLCNBuffer* KLCNBufferZEnew(KLC_int size) {
+  return KLC_mkbuf(
+    size,
+    size == 0 ? NULL : (char*) calloc(sizeof(char), size));
 }
 
 void KLC_deleteBuffer(KLC_header* robj, KLC_header** dq) {
@@ -991,6 +1003,18 @@ void KLC_deleteBuffer(KLC_header* robj, KLC_header** dq) {
   free(buf->buf);
   buf->size = 0;
   buf->buf = NULL;
+}
+
+KLCNString* KLCNBufferZFdecodeUtf8(KLCNBuffer* buf) {
+  size_t bs = buf->size;
+  char* buffer = (char*) malloc(sizeof(char) * (bs + 1));
+  memcpy(buffer, buf->buf, bs);
+  buffer[bs] = '\0';
+  return KLC_mkstr_with_buffer(bs, buffer, KLC_check_ascii(buffer));
+}
+
+KLC_bool KLCNBufferZFEq(KLCNBuffer* a, KLCNBuffer* b) {
+  return a->size == b->size && memcmp(a->buf, b->buf, a->size) == 0;
 }
 
 KLC_int KLCNBufferZFGETsize(KLCNBuffer* buf) {
@@ -1011,6 +1035,16 @@ void KLCNBufferZFset1(KLCNBuffer* buf, KLC_int i, KLC_int v) {
     KLC_errorf("Index out of bounds " KLC_INT_FMT, i);
   }
   buf->buf[i] = (unsigned char) v;
+}
+
+void KLCNBufferZFresize(KLCNBuffer* buf, KLC_int ns) {
+  size_t old_size = buf->size;
+  size_t new_size = (size_t) ns;
+  buf->size = new_size;
+  buf->buf = (char*) realloc(buf->buf, sizeof(char) * new_size);
+  if (old_size < new_size) {
+    memset(buf->buf + old_size, 0, new_size - old_size);
+  }
 }
 
 void KLCNpanic(KLCNString* message) {

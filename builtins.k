@@ -154,6 +154,17 @@ extern class String {
   String Add(String b)
   int GETsize()
   int HashCode()
+
+  Buffer encodeUtf8()
+
+  Buffer encode(String encoding) {
+    if (encoding == 'utf-8' or encoding == 'utf8') {
+      return this.encodeUtf8()
+    }
+    panic('Unknown encoding ' + encoding)
+    return null(Buffer)
+  }
+
   String Str()
   String Repr() {
     return '"' + this.escape() + '"'
@@ -214,6 +225,17 @@ extern class Buffer {
   int get1(int i)
   void set1(int i, int v)
   int GETsize()
+  bool Eq(Buffer other)
+  String decodeUtf8()
+  void resize(int newSize)
+
+  String decode(String encoding) {
+    if (encoding == 'utf-8' or encoding == 'utf8') {
+      return this.decodeUtf8()
+    }
+    panic('Unknown encoding ' + encoding)
+    return null(String)
+  }
 
   int get2(int i) {
     return this.get1(i) + (2 ** CHAR_BIT) * this.get1(i + 1)
@@ -250,6 +272,15 @@ extern class Buffer {
   String Repr() {
     return 'Buffer(' + str(this.size) + ')'
   }
+}
+
+Buffer BufferFromByteList(List bytes) {
+  int size = bytes.size
+  Buffer ret = Buffer(size)
+  for (int i = 0; i < size; i++) {
+    ret.set1(i, bytes[i].(int))
+  }
+  return ret
 }
 
 extern class StringBuilder {
