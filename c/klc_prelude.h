@@ -21,6 +21,8 @@
 #include <stdint.h>
 #endif
 
+#include <limits.h>
+
 typedef uint32_t KLC_char32;
 
 #if KLC_OS_WINDOWS
@@ -37,12 +39,22 @@ typedef uint16_t KLC_char16;
 #if KLC_OS_WINDOWS
 typedef long long KLC_int; /* TODO: Check if this is always ok on Windows */
 #define KLC_INT_FMT "%lld"
+#define KLC_INT_MAX LLONG_MAX
+#define KLC_INT_MIN LLONG_MIN
 #elif KLC_POSIX
 typedef intmax_t KLC_int;
 #define KLC_INT_FMT "%" PRIiMAX
+#define KLC_INT_MAX INTMAX_MAX
+#define KLC_INT_MIN INTMAX_MIN
 #else
 typedef long KLC_int;
 #define KLC_INT_FMT "%ld"
+#define KLC_INT_MAX LONG_MAX
+#define KLC_INT_MIN LONG_MIN
+#endif
+
+#if KLC_INT_MAX < 4294967296
+#error "KLC_INT is too small to hold 2 ** 32"
 #endif
 
 #if KLC_OS_WINDOWS
@@ -76,6 +88,7 @@ typedef KLC_typeinfo* KLC_type;
 typedef struct KLCNWeakReference KLCNWeakReference;
 typedef struct KLCNClosure KLCNClosure;
 typedef struct KLCNString KLCNString;
+typedef struct KLCNBuffer KLCNBuffer;
 typedef struct KLCNStringBuilder KLCNStringBuilder;
 typedef struct KLCNList KLCNList;
 typedef struct KLCNFile KLCNFile;
@@ -157,6 +170,12 @@ struct KLCNString {
   int is_ascii;
 };
 
+struct KLCNBuffer {
+  KLC_header header;
+  size_t size;
+  char* buf;
+};
+
 struct KLCNList {
   KLC_header header;
   size_t size, cap;
@@ -201,6 +220,7 @@ extern KLC_typeinfo KLC_typetype;
 
 extern KLC_typeinfo KLC_typeWeakReference;
 extern KLC_typeinfo KLC_typeString;
+extern KLC_typeinfo KLC_typeBuffer;
 extern KLC_typeinfo KLC_typeStringBuilder;
 extern KLC_typeinfo KLC_typeList;
 extern KLC_typeinfo KLC_typeClosure;

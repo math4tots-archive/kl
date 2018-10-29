@@ -1,4 +1,3 @@
-
 #(define C_HEADERS [])
 #(define C_SOURCES [
   'main.c'    // This is where the main program is
@@ -198,6 +197,58 @@ extern class String {
       i = i + this.size
     }
     return this.Slice(i, i + 1)
+  }
+}
+
+extern int CHAR_BIT
+extern int INT_MAX
+extern int INT_MIN
+
+extern class Buffer {
+  // Assumes CHAR_BITS = 8
+  // Also, everything is cast to KLC_int.
+  // get4/set4 may not behave as expected if KLC_int
+  // is only 32 bits, since KLC_int is signed.
+  // TODO: Fix this
+  new(int size)
+  int get1(int i)
+  void set1(int i, int v)
+  int GETsize()
+
+  int get2(int i) {
+    return this.get1(i) + (2 ** CHAR_BIT) * this.get1(i + 1)
+  }
+
+  int get4(int i) {
+    return this.get2(i) + (2 ** (2 * CHAR_BIT)) * this.get2(i + 2)
+  }
+
+  void set2(int i, int v) {
+    this.set1(i, v % (2 ** CHAR_BIT))
+    this.set1(i + 1, v / (2 ** CHAR_BIT))
+  }
+
+  void set4(int i, int v) {
+    this.set2(i, v % (2 ** (2 * CHAR_BIT)))
+    this.set2(i + 2, v / (2 ** (2 * CHAR_BIT)))
+  }
+
+  String dumpstr() {
+    final sb = StringBuilder()
+    sb.add('<Buffer ')
+    final size = this.size
+    for (int i = 0; i < size; i++) {
+      if (i != 0) {
+        sb.add(', ')
+      }
+      sb.add(this.get1(i))
+    }
+    sb.add('>')
+    return sb.build()
+  }
+
+  String Repr() {
+    return 'Buffer(' + str(this.size) + ')'
   }
 }
 

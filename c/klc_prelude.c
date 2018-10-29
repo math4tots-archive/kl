@@ -965,6 +965,53 @@ KLCNString* KLCNStringZFSlice(KLCNString* s, KLC_int a, KLC_int b) {
   }
 }
 
+KLC_int KLCNCHARZABITZEinit() {
+  return (KLC_int) CHAR_BIT;
+}
+
+KLC_int KLCNINTZAMAXZEinit() {
+  return (KLC_int) KLC_INT_MAX;
+}
+
+KLC_int KLCNINTZAMINZEinit() {
+  return (KLC_int) KLC_INT_MIN;
+}
+
+KLCNBuffer* KLCNBufferZEnew(KLC_int size) {
+  KLCNBuffer* obj = (KLCNBuffer*) malloc(sizeof(KLCNBuffer));
+  KLC_init_header(&obj->header, &KLC_typeBuffer);
+  obj->size = size;
+  obj->buf = size == 0 ? NULL : (char*) calloc(sizeof(char), size);
+  return obj;
+}
+
+void KLC_deleteBuffer(KLC_header* robj, KLC_header** dq) {
+  KLCNBuffer* buf = (KLCNBuffer*) robj;
+  free(buf->buf);
+  buf->size = 0;
+  buf->buf = NULL;
+}
+
+KLC_int KLCNBufferZFGETsize(KLCNBuffer* buf) {
+  return (KLC_int) buf->size;
+}
+
+KLC_int KLCNBufferZFget1(KLCNBuffer* buf, KLC_int i) {
+  KLC_int x;
+  if (i < 0 || i >= buf->size) {
+    KLC_errorf("Index out of bounds " KLC_INT_FMT, i);
+  }
+  x = (unsigned char) buf->buf[i];
+  return x;
+}
+
+void KLCNBufferZFset1(KLCNBuffer* buf, KLC_int i, KLC_int v) {
+  if (i < 0 || i >= buf->size) {
+    KLC_errorf("Index out of bounds " KLC_INT_FMT, i);
+  }
+  buf->buf[i] = (unsigned char) v;
+}
+
 void KLCNpanic(KLCNString* message) {
   KLC_errorf("%s", message->utf8);
 }
