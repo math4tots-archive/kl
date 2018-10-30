@@ -1,6 +1,7 @@
 void main() {
   misc()
   resize()
+  view()
 }
 
 void misc() {
@@ -35,4 +36,12 @@ void resize() {
   assert(b == BufferFromByteList([]))
   b.resize(16)
   assert(b == BufferFromByteList([0] * 16))
+}
+
+void view() {
+  final b = Buffer(8)
+  final v = b.view(1, 3)
+  assert(v.get1(0) == 0)
+  b.set1(1, 15)
+  assert(v.get1(0) == 15)
 }

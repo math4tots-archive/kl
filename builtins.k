@@ -269,8 +269,51 @@ extern class Buffer {
     return sb.build()
   }
 
+  BufferView view(int start, int end) {
+    return BufferView(this, start, end)
+  }
+
   String Repr() {
     return 'Buffer(' + str(this.size) + ')'
+  }
+}
+
+class BufferView {
+  Buffer buffer
+  int start
+  int end
+
+  new(Buffer buffer, int start, int end) {
+    this.buffer = buffer
+    this.start = start
+    this.end = end
+  }
+
+  int GETsize() {
+    return this.end - this.start
+  }
+
+  void _checkBounds(int i) {
+    if (i < 0 and i >= this.size) {
+      panic('Index out of bounds')
+    }
+  }
+
+  int get1(int i) {
+    this._checkBounds(i)
+    return this.buffer.get1(this.start + i)
+  }
+
+  int get2(int i) {
+    this._checkBounds(i)
+    this._checkBounds(i + 1)
+    return this.buffer.get2(this.start + i)
+  }
+
+  int get4(int i) {
+    this._checkBounds(i)
+    this._checkBounds(i + 3)
+    return this.buffer.get4(this.start + i)
   }
 }
 
