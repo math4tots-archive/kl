@@ -592,6 +592,14 @@ KLC_int KLCNintZFXor(KLC_int a, KLC_int b) {
   return a ^ b;
 }
 
+KLC_int KLCNintZFRshift(KLC_int a, KLC_int b) {
+  return a >> b;
+}
+
+KLC_int KLCNintZFLshift(KLC_int a, KLC_int b) {
+  return a << b;
+}
+
 KLC_int KLCNintZFAdd(KLC_int a, KLC_int b) {
   return a + b;
 }

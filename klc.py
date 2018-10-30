@@ -47,11 +47,13 @@ _special_method_names = {
     'And',
     'Or',
     'Xor',
+    'Lshift',
+    'Rshift',
 }
 
 SYMBOLS = [
     '\n',
-    '||', '&&', '|', '&',
+    '||', '&&', '|', '&', '<<', '>>',
     ';', '#', '?', ':', '!', '++', '--', '**',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
     '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
@@ -86,7 +88,7 @@ _primitive_method_names = {
         'Eq', 'Lt', 'HashCode',
         'Add', 'Sub', 'Mul', 'Div', 'Mod', 'Pow',
         'Repr', 'Bool',
-        'Xor', 'And', 'Or',
+        'Xor', 'And', 'Or', 'Lshift', 'Rshift',
     ],
     'double': [
         'Eq', 'Lt', 'HashCode',
@@ -2890,11 +2892,23 @@ def parse_one_source(source, local_prefix, env):
         return expr
 
     def parse_bitwise_and(defs):
-        expr = parse_additive(defs)
+        expr = parse_bitwise_shift(defs)
         while True:
             token = peek()
             if consume('&'):
-                expr = MethodCall(token, expr, 'And', [parse_additive(defs)])
+                expr = MethodCall(token, expr, 'And', [parse_bitwise_shift(defs)])
+            else:
+                break
+        return expr
+
+    def parse_bitwise_shift(defs):
+        expr = parse_additive(defs)
+        while True:
+            token = peek()
+            if consume('>>'):
+                expr = MethodCall(token, expr, 'Rshift', [parse_additive(defs)])
+            elif consume('<<'):
+                expr = MethodCall(token, expr, 'Lshift', [parse_additive(defs)])
             else:
                 break
         return expr
