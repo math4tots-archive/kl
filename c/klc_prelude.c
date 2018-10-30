@@ -580,6 +580,18 @@ KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv) {
   }
 }
 
+KLC_int KLCNintZFOr(KLC_int a, KLC_int b) {
+  return a | b;
+}
+
+KLC_int KLCNintZFAnd(KLC_int a, KLC_int b) {
+  return a & b;
+}
+
+KLC_int KLCNintZFXor(KLC_int a, KLC_int b) {
+  return a ^ b;
+}
+
 KLC_int KLCNintZFAdd(KLC_int a, KLC_int b) {
   return a + b;
 }

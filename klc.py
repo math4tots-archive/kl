@@ -44,11 +44,14 @@ _special_method_names = {
     'HashCode',
     'Enter',
     'Exit',
+    'And',
+    'Or',
+    'Xor',
 }
 
 SYMBOLS = [
     '\n',
-    '||', '&&',
+    '||', '&&', '|', '&',
     ';', '#', '?', ':', '!', '++', '--', '**',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
     '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
@@ -83,6 +86,7 @@ _primitive_method_names = {
         'Eq', 'Lt', 'HashCode',
         'Add', 'Sub', 'Mul', 'Div', 'Mod', 'Pow',
         'Repr', 'Bool',
+        'Xor', 'And', 'Or',
     ],
     'double': [
         'Eq', 'Lt', 'HashCode',
@@ -2804,7 +2808,7 @@ def parse_one_source(source, local_prefix, env):
         return parse_conditional(defs)
 
     def parse_conditional(defs):
-        expr = parse_or(defs)
+        expr = parse_logical_or(defs)
         token = peek()
         if consume('?'):
             left = parse_expression(defs)
@@ -2813,18 +2817,18 @@ def parse_one_source(source, local_prefix, env):
             return Conditional(token, expr, left, right)
         return expr
 
-    def parse_or(defs):
-        expr = parse_and(defs)
+    def parse_logical_or(defs):
+        expr = parse_logical_and(defs)
         while True:
             token = peek()
             if consume('or'):
-                right = parse_and(defs)
+                right = parse_logical_and(defs)
                 expr = LogicalOr(token, expr, right)
             else:
                 break
         return expr
 
-    def parse_and(defs):
+    def parse_logical_and(defs):
         expr = parse_relational(defs)
         while True:
             token = peek()
@@ -2836,31 +2840,61 @@ def parse_one_source(source, local_prefix, env):
         return expr
 
     def parse_relational(defs):
-        expr = parse_additive(defs)
+        expr = parse_bitwise_or(defs)
         while True:
             token = peek()
             if consume('=='):
-                expr = Equals(token, expr, parse_additive(defs))
+                expr = Equals(token, expr, parse_bitwise_or(defs))
             elif consume('!='):
-                expr = NotEquals(token, expr, parse_additive(defs))
+                expr = NotEquals(token, expr, parse_bitwise_or(defs))
             elif consume('<'):
-                expr = LessThan(token, expr, parse_additive(defs))
+                expr = LessThan(token, expr, parse_bitwise_or(defs))
             elif consume('<='):
-                expr = LessThanOrEqual(token, expr, parse_additive(defs))
+                expr = LessThanOrEqual(token, expr, parse_bitwise_or(defs))
             elif consume('>'):
-                expr = GreaterThan(token, expr, parse_additive(defs))
+                expr = GreaterThan(token, expr, parse_bitwise_or(defs))
             elif consume('>='):
-                expr = GreaterThanOrEqual(token, expr, parse_additive(defs))
+                expr = GreaterThanOrEqual(token, expr, parse_bitwise_or(defs))
             elif consume('is'):
                 if consume('not'):
-                    expr = IsNot(token, expr, parse_additive(defs))
+                    expr = IsNot(token, expr, parse_bitwise_or(defs))
                 else:
-                    expr = Is(token, expr, parse_additive(defs))
+                    expr = Is(token, expr, parse_bitwise_or(defs))
             elif consume('in'):
-                expr = In(token, expr, parse_additive(defs))
+                expr = In(token, expr, parse_bitwise_or(defs))
             elif consume('not'):
                 expect('in')
-                expr = LogicalNot(token, In(token, expr, parse_additive(defs)))
+                expr = LogicalNot(token, In(token, expr, parse_bitwise_or(defs)))
+            else:
+                break
+        return expr
+
+    def parse_bitwise_or(defs):
+        expr = parse_bitwise_xor(defs)
+        while True:
+            token = peek()
+            if consume('|'):
+                expr = MethodCall(token, expr, 'Or', [parse_bitwise_xor(defs)])
+            else:
+                break
+        return expr
+
+    def parse_bitwise_xor(defs):
+        expr = parse_bitwise_and(defs)
+        while True:
+            token = peek()
+            if consume('^'):
+                expr = MethodCall(token, expr, 'Xor', [parse_bitwise_and(defs)])
+            else:
+                break
+        return expr
+
+    def parse_bitwise_and(defs):
+        expr = parse_additive(defs)
+        while True:
+            token = peek()
+            if consume('&'):
+                expr = MethodCall(token, expr, 'And', [parse_additive(defs)])
             else:
                 break
         return expr

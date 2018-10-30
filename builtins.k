@@ -58,6 +58,9 @@ int `int:Div`(int a, int b)
 int `int:Mod`(int a, int b)
 bool `int:Eq`(int a, int b)
 bool `int:Lt`(int a, int b)
+int `int:Xor`(int a, int b)
+int `int:And`(int a, int b)
+int `int:Or`(int a, int b)
 String `int:Repr`(int a)
 bool `int:Bool`(int x) {
   return x != 0
