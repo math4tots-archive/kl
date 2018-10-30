@@ -52,6 +52,36 @@ extern class Socket {
     return this.tryAcceptIp4(addr).orDie().(Socket)
   }
 
+  Buffer recvAllBytes() {
+    // TOOD: tryRecvAllBytes
+    final ret = Buffer(64)
+    bool again = true
+    int lastSize = 0
+    while (again) {
+      final view = ret.view(lastSize, ret.size)
+      final nread = this.recvBufferView(view)
+      if (nread == 0) {
+        again = false
+      } else {
+        lastSize = lastSize + nread
+      }
+    }
+    ret.resize(lastSize)
+    return ret
+  }
+
+  Try trySendString(String s) {
+    return this.trySendBuffer(s.encode('utf-8'))
+  }
+
+  int sendString(String s) {
+    return this.trySendString(s).orDie().(int)
+  }
+
+  String recvAllBytesAsString() {
+    return this.recvAllBytes().decode('utf-8')
+  }
+
   Try trySendBufferWithFlags(Buffer buffer, int flags) {
     return this.trySendBufferView(buffer.view(0, buffer.size))
   }
