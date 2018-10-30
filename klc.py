@@ -3294,9 +3294,10 @@ def run_compiler_for_windows(env, out_file):
 def run_compiler_for_osx(env, out_file, opt, debug):
 
     framework_flags = ''
-
     for framework in env['@vars']['APPLE_FRAMEWORKS']:
         framework_flags += f' -framework {framework}'
+
+    warning_flags = '-Wno-long-long'
 
     run_compiler_for_unix(
         'clang',
@@ -3304,7 +3305,7 @@ def run_compiler_for_osx(env, out_file, opt, debug):
         out_file,
         opt,
         debug,
-        framework_flags)
+        flags=f'{framework_flags} {warning_flags}')
 
 
 def run_compiler_for_linux(env, out_file, opt, debug):

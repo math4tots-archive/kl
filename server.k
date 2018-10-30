@@ -10,6 +10,7 @@ void runServer() {
   socket.bindIp4(net.htonl(net.INADDR_ANY), net.htons(8080))
   socket.listen(10)
   final outaddr = []
+  print('Listening...')
   final outsocket = socket.acceptIp4(outaddr)
   print(socket)
   print(outsocket)
