@@ -21,8 +21,8 @@ extern class Socket {
   Try tryListen(int backlog)
   Try tryConnectIp4(int addr, int port)
   Try tryAcceptIp4(List addr)
-  Try trySendBufferWithFlags(Buffer buffer, int flags)
-  Try tryRecvBufferWithFlags(Buffer buffer, int flags)
+  Try trySendBufferViewWithFlags(BufferView buffer, int flags)
+  Try tryRecvBufferViewWithFlags(BufferView buffer, int flags)
 
   // file descriptor for sockets is an implementation detail.
   // Might not return a meaningful value
@@ -52,12 +52,44 @@ extern class Socket {
     return this.tryAcceptIp4(addr).orDie().(Socket)
   }
 
+  Try trySendBufferWithFlags(Buffer buffer, int flags) {
+    return this.trySendBufferView(buffer.view(0, buffer.size))
+  }
+
+  Try tryRecvBufferWithFlags(Buffer buffer, int flags) {
+    return this.tryRecvBufferView(buffer.view(0, buffer.size))
+  }
+
   Try trySendBuffer(Buffer buffer) {
     return this.trySendBufferWithFlags(buffer, 0)
   }
 
   Try tryRecvBuffer(Buffer buffer) {
     return this.tryRecvBufferWithFlags(buffer, 0)
+  }
+
+  Try trySendBufferView(BufferView buffer) {
+    return this.trySendBufferViewWithFlags(buffer, 0)
+  }
+
+  Try tryRecvBufferView(BufferView buffer) {
+    return this.tryRecvBufferViewWithFlags(buffer, 0)
+  }
+
+  int sendBufferViewWithFlags(BufferView buffer, int flags) {
+    return this.trySendBufferViewWithFlags(buffer, flags).orDie().(int)
+  }
+
+  int recvBufferViewWithFlags(BufferView buffer, int flags) {
+    return this.tryRecvBufferViewWithFlags(buffer, flags).orDie().(int)
+  }
+
+  int sendBufferView(BufferView buffer) {
+    return this.trySendBufferView(buffer).orDie().(int)
+  }
+
+  int recvBufferView(BufferView buffer) {
+    return this.tryRecvBufferView(buffer).orDie().(int)
   }
 
   int sendBufferWithFlags(Buffer buffer, int flags) {

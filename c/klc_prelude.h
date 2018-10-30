@@ -75,7 +75,7 @@ typedef long KLC_int;
 typedef struct KLC_stack_frame KLC_stack_frame;
 typedef char KLC_bool;
 
-
+struct KLCNBufferView;
 typedef struct KLC_header KLC_header;
 typedef struct KLC_methodinfo KLC_methodinfo;
 typedef struct KLC_methodlist KLC_methodlist;
@@ -260,5 +260,11 @@ LPCWSTR KLC_windows_get_wstr(KLCNString* s);
 KLCNString* KLC_windows_string_from_wstr_buffer(LPWSTR s);
 KLCNString* KLC_windows_string_from_wstr(LPCWSTR s);
 #endif
+
+/* Functions defined from builtin.k */
+KLCNBuffer* KLCNBufferViewZFGETbuffer(struct KLCNBufferView*);
+KLC_int KLCNBufferViewZFGETsize(struct KLCNBufferView*);
+KLC_int KLCNBufferViewZFGETstart(struct KLCNBufferView*);
+KLC_int KLCNBufferViewZFGETend(struct KLCNBufferView*);
 
 #endif/*klc_prelude_h*/

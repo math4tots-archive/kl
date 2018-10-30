@@ -10,6 +10,8 @@
 #include <unistd.h>
 #endif
 
+typedef struct KLCNBufferView KLCNBufferView;
+
 struct KLCNosZBnetZBSocket {
   KLC_header header;
   int domain;
@@ -154,9 +156,14 @@ KLCNTry* KLCNosZBnetZBSocketZFtryAcceptIp4(KLCNosZBnetZBSocket* sock, KLCNList* 
   #endif
 }
 
-KLCNTry* KLCNosZBnetZBSocketZFtrySendBufferWithFlags(KLCNosZBnetZBSocket* sock, KLCNBuffer* b, KLC_int flags) {
+KLCNTry* KLCNosZBnetZBSocketZFtrySendBufferViewWithFlags(KLCNosZBnetZBSocket* sock, KLCNBufferView* b, KLC_int flags) {
   #if KLC_POSIX
-    ssize_t s = send(sock->socket, b->buf, b->size, (int) flags);
+    KLCNBuffer* bf = KLCNBufferViewZFGETbuffer(b);
+    KLC_int bstart = KLCNBufferViewZFGETstart(b);
+    KLC_int blen = KLCNBufferViewZFGETsize(b);
+    char* cbuf = bf->buf + bstart;
+    ssize_t s = send(sock->socket, cbuf, blen, (int) flags);
+    KLC_release((KLC_header*) bf);
     if (s < 0) {
       int errval = errno;
       return KLC_failm(strerror(errval));
@@ -167,9 +174,14 @@ KLCNTry* KLCNosZBnetZBSocketZFtrySendBufferWithFlags(KLCNosZBnetZBSocket* sock, 
   #endif
 }
 
-KLCNTry* KLCNosZBnetZBSocketZFtryRecvBufferWithFlags(KLCNosZBnetZBSocket* sock, KLCNBuffer* b, KLC_int flags) {
+KLCNTry* KLCNosZBnetZBSocketZFtryRecvBufferViewWithFlags(KLCNosZBnetZBSocket* sock, KLCNBufferView* b, KLC_int flags) {
   #if KLC_POSIX
-    ssize_t s = recv(sock->socket, b->buf, b->size, (int) flags);
+    KLCNBuffer* bf = KLCNBufferViewZFGETbuffer(b);
+    KLC_int bstart = KLCNBufferViewZFGETstart(b);
+    KLC_int blen = KLCNBufferViewZFGETsize(b);
+    char* cbuf = bf->buf + bstart;
+    ssize_t s = recv(sock->socket, cbuf, blen, (int) flags);
+    KLC_release((KLC_header*) bf);
     if (s < 0) {
       int errval = errno;
       return KLC_failm(strerror(errval));
