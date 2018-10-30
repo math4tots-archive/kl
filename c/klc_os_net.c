@@ -182,6 +182,9 @@ KLCNTry* KLCNosZBnetZBSocketZFtryRecvBufferViewWithFlags(KLCNosZBnetZBSocket* so
     char* cbuf = bf->buf + bstart;
     ssize_t s = recv(sock->socket, cbuf, blen, (int) flags);
     KLC_release((KLC_header*) bf);
+    if (blen <= 0) {
+      return KLC_failm("recvBuffer with non-positive buffer size");
+    }
     if (s < 0) {
       int errval = errno;
       return KLC_failm(strerror(errval));

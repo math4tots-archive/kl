@@ -18,7 +18,10 @@ void runServer() {
     print(outsocket)
     print('outaddr = ' + str(outaddr))
     counter++
-    outsocket.sendString('Hello visitor ' + str(counter))
+    outsocket.sendString('Hello visitor ' + str(counter) + '\n')
+    for (int i = 1; i <= 100000; i++) {
+      outsocket.sendString('line ' + str(i) + '\n')
+    }
     outsocket.close()
     print('sent message~')
   }

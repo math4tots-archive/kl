@@ -52,22 +52,33 @@ extern class Socket {
     return this.tryAcceptIp4(addr).orDie().(Socket)
   }
 
-  Buffer recvAllBytes() {
+  Try tryRecvAllBytes() {
     // TOOD: tryRecvAllBytes
     final ret = Buffer(64)
     bool again = true
     int lastSize = 0
     while (again) {
+      while (lastSize >= ret.size) {
+        final multiplier = ret.size < 16384 ? 8 : 2
+        ret.resize(multiplier * ret.size)
+      }
       final view = ret.view(lastSize, ret.size)
       final nread = this.recvBufferView(view)
       if (nread == 0) {
         again = false
+      } else if (nread < 0) {
+        final errval = errno()
+        return Try(false, strerror(errval))
       } else {
         lastSize = lastSize + nread
       }
     }
     ret.resize(lastSize)
-    return ret
+    return Try(true, ret)
+  }
+
+  Buffer recvAllBytes() {
+    return this.tryRecvAllBytes().orDie().(Buffer)
   }
 
   Try trySendString(String s) {

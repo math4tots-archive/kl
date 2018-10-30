@@ -5,6 +5,10 @@
 
 #define KLC_MAX_STACK_SIZE 1000
 
+#if KLC_POSIX
+#include <errno.h>
+#endif
+
 /* For now we assume that
  * we always want command line programs.
  * But in the future we can enable
@@ -1392,6 +1396,22 @@ void KLCNassert(KLC_var cond) {
   if (!KLC_truthy(cond)) {
     KLC_errorf("Assertion failed");
   }
+}
+
+KLC_int KLCNerrno() {
+  #if KLC_POSIX
+    return errno;
+  #else
+    return -1;
+  #endif
+}
+
+KLCNString* KLCNstrerror(KLC_int en) {
+  #if KLC_POSIX
+    return KLC_mkstr(strerror((int) en));
+  #else
+    return KLC_mkstr("Platform doesn't support error message...");
+  #endif
 }
 
 void KLCNZEZBmain(void);

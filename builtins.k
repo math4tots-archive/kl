@@ -373,6 +373,8 @@ void panic(String message)
 bool bool(var x)
 type type(var x)
 void assert(var x)
+int errno()
+String strerror(int e)
 
 int hash(var x) {
   return x.HashCode().(int)
