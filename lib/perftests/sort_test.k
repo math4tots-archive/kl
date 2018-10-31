@@ -4,5 +4,4 @@ void main() {
     xs.push(str(i))
   }
   xs.sort()
-  print(xs.size)
 }
