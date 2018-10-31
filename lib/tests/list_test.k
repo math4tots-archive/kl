@@ -26,4 +26,17 @@ void main() {
     assert(xs == [])
     assert(wr.refcnt == 0)
   }
+
+  sorts()
+  assert(sorted([3, 2, 1]) == [1, 2, 3])
+}
+
+void sorts() {
+  final xs = [1, 85, 29, 9, 841, 1, 2]
+  xs.sort()
+  assert(xs == [1, 1, 2, 9, 29, 85, 841])
+
+  final ss = ['a', 'b', 'ab', 'd', 'd', 'eb', 'easdf', 'c']
+  ss.sort()
+  assert(ss == ["a", "ab", "b", "c", "d", "d", "easdf", "eb"])
 }

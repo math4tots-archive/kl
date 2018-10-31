@@ -1731,7 +1731,7 @@ class FunctionDefinition(GlobalDefinition):
         return f'{crt} {cname}({cparams})'
 
     def untyped_cproto(self, ctx):
-        return f'KLC_var KLC_untyped{encode(self.name)}(int argc, KLC_var* argv)'
+        return f'KLC_var KLC_untyped{encode(self.name)}(int argc, const KLC_var* argv)'
 
     def translate(self, gctx: GlobalTranslationContext):
         ctx = gctx.fctx(self)

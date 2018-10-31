@@ -81,7 +81,7 @@ typedef struct KLC_methodinfo KLC_methodinfo;
 typedef struct KLC_methodlist KLC_methodlist;
 typedef struct KLC_typeinfo KLC_typeinfo;
 typedef struct KLC_var KLC_var;
-typedef KLC_var (*KLC_fp)(int, KLC_var*); /* untyped function pointer */
+typedef KLC_var (*KLC_fp)(int, const KLC_var*); /* untyped function pointer */
 typedef struct KLC_functioninfo KLC_functioninfo;
 typedef KLC_functioninfo* KLC_function;
 typedef KLC_typeinfo* KLC_type;

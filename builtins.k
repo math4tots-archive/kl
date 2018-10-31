@@ -428,6 +428,7 @@ extern class List(Iterable) {
   void push(var x)
   void resize(int newSize)
   var pop()
+  void sort()
 
   bool Bool() {
     return bool(this.size)
@@ -549,6 +550,12 @@ extern class List(Iterable) {
     }
     return ret
   }
+}
+
+List sorted(var iterable) {
+  final xs = ListFromIterable(iterable)
+  xs.sort()
+  return xs
 }
 
 class ListIterator {
