@@ -49,11 +49,12 @@ _special_method_names = {
     'Xor',
     'Lshift',
     'Rshift',
+    'Invert',
 }
 
 SYMBOLS = [
     '\n',
-    '||', '&&', '|', '&', '<<', '>>',
+    '||', '&&', '|', '&', '<<', '>>', '~',
     ';', '#', '?', ':', '!', '++', '--', '**',
     '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
     '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
@@ -88,7 +89,7 @@ _primitive_method_names = {
         'Eq', 'Lt', 'HashCode',
         'Add', 'Sub', 'Mul', 'Div', 'Mod', 'Pow',
         'Repr', 'Bool',
-        'Xor', 'And', 'Or', 'Lshift', 'Rshift',
+        'Xor', 'And', 'Or', 'Lshift', 'Rshift', 'Invert',
     ],
     'double': [
         'Eq', 'Lt', 'HashCode',
@@ -2942,14 +2943,17 @@ def parse_one_source(source, local_prefix, env):
     def parse_unary(defs):
         token = peek()
         if consume('-'):
-            expr = parse_pow(defs)
+            expr = parse_unary(defs)
             if isinstance(expr, (IntLiteral, DoubleLiteral)):
                 type_ = type(expr)
                 return type_(expr.token, -expr.value)
             else:
                 return MethodCall(token, expr, 'Neg', [])
+        if consume('~'):
+            expr = parse_unary(defs)
+            return MethodCall(token, expr, 'Invert', [])
         if consume('!'):
-            expr = parse_pow(defs)
+            expr = parse_unary(defs)
             return LogicalNot(token, expr)
         return parse_pow(defs)
 

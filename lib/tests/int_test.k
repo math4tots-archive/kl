@@ -14,4 +14,8 @@ void bitwise() {
   assert(-1 >> 1 == -1)
   assert(-2 >> 1 == -1)
   assert(-2 << 1 == -4)
+  assert(~-1 == 0)
+  assert(~0 == -1)
+  assert(~INT_MAX == INT_MIN)
+  assert(~INT_MIN == INT_MAX)
 }

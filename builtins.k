@@ -63,6 +63,7 @@ int `int:And`(int a, int b)
 int `int:Or`(int a, int b)
 int `int:Lshift`(int a, int b)
 int `int:Rshift`(int a, int b)
+int `int:Invert`(int a)
 String `int:Repr`(int a)
 bool `int:Bool`(int x) {
   return x != 0

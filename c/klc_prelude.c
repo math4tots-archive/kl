@@ -600,6 +600,10 @@ KLC_int KLCNintZFLshift(KLC_int a, KLC_int b) {
   return a << b;
 }
 
+KLC_int KLCNintZFInvert(KLC_int a) {
+  return ~a;
+}
+
 KLC_int KLCNintZFAdd(KLC_int a, KLC_int b) {
   return a + b;
 }
