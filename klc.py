@@ -3290,7 +3290,7 @@ def main():
 
         env = program.env
 
-        with open(os.path.join(_scriptdir, 'c', 'main.c'), 'w') as f:
+        with open(os.path.join(_scriptdir, 'c', 'generated_main.c'), 'w') as f:
             f.write(c_src)
 
         run_compiler(env, args.out_file, args.opt, args.debug)

@@ -1,6 +1,6 @@
 #(define C_HEADERS [])
 #(define C_SOURCES [
-  'main.c'    // This is where the main program is
+  'generated_main.c'    // This is where the main program is
 ])
 
 // Frameworks that are required for deploying to darwin targets.
