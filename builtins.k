@@ -576,6 +576,17 @@ List sorted(var iterable) {
   return xs
 }
 
+List reversed(var iterable) {
+  final xs = (
+    type(iterable) == List ? iterable.(List) : ListFromIterable(iterable)
+  )
+  final ret = []
+  for (int i = xs.size - 1; i >= 0; i--) {
+    ret.push(xs[i])
+  }
+  return ret
+}
+
 class ListIterator {
   List list
   int i

@@ -882,6 +882,7 @@ class StringLiteral(Expression):
             .replace('\\', '\\\\')
             .replace('\t', '\\t')
             .replace('\n', '\\n')
+            .replace('\r', '\\r')
             .replace('"', '\\"')
             .replace("'", "\\'"))
         ctx.src += f'{tempvar} = KLC_mkstr("{s}");'

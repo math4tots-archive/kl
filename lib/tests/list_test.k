@@ -29,6 +29,8 @@ void main() {
 
   sorts()
   assert(sorted([3, 2, 1]) == [1, 2, 3])
+
+  rev()
 }
 
 void sorts() {
@@ -39,4 +41,10 @@ void sorts() {
   final ss = ['a', 'b', 'ab', 'd', 'd', 'eb', 'easdf', 'c']
   ss.sort()
   assert(ss == ["a", "ab", "b", "c", "d", "d", "easdf", "eb"])
+}
+
+void rev() {
+  assert([1, 2, 3] == reversed([3, 2, 1]))
+  assert([] == reversed([]))
+  assert([19] == reversed([19]))
 }
