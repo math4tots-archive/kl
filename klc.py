@@ -2730,6 +2730,10 @@ def parse_one_source(source, local_prefix, env):
                     While(token, cond, body),
                 ])
             else:
+                if at('NAME') and at('in', 1):
+                    vtype = 'var'
+                else:
+                    vtype = expect_type()
                 loopvar = expect_non_exported_name()
                 expect('in')
                 container_expr = parse_expression(defs)
@@ -2751,9 +2755,19 @@ def parse_one_source(source, local_prefix, env):
                                 True,
                                 None,
                                 loopvar,
-                                MethodCall(token, Name(token, tempvar), 'Next', [])),
+                                Cast(
+                                    token,
+                                    MethodCall(
+                                        token,
+                                        Name(token, tempvar),
+                                        'Next',
+                                        []),
+                                    vtype
+                                ),
+                            ),
                             body,
-                        ])),
+                        ])
+                    ),
                 ])
 
         if consume('with'):
