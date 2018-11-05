@@ -1429,6 +1429,13 @@ KLCNList* KLCNARGSZEinit() {
   return args;
 }
 
+KLC_int KLCNord(KLCNString* s) {
+  if (KLCNStringZFGETsize(s) != 1) {
+    KLC_errorf("ord() must be given a string of length 1");
+  }
+  return s->is_ascii ? (KLC_int) s->utf8[0] : (KLC_int) s->utf32[0];
+}
+
 void KLCNassert(KLC_var cond) {
   if (!KLC_truthy(cond)) {
     KLC_errorf("Assertion failed");

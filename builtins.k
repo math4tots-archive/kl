@@ -155,6 +155,8 @@ extern class WeakReference {
   int GETrefcnt()
 }
 
+int ord(String c)
+
 extern class String {
   int GETbytesize()
   String Add(String b)
