@@ -184,6 +184,14 @@ extern class String {
     return bool(this.size)
   }
 
+  String Mul(int rep) {
+    final sb = StringBuilder()
+    for (int i = 0; i < rep; i++) {
+      sb.add(this)
+    }
+    return sb.build()
+  }
+
   bool startsWith(String prefix) {
     return this.startsWithAt(prefix, 0)
   }
