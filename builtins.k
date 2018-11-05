@@ -182,6 +182,22 @@ extern class String {
     return bool(this.size)
   }
 
+  bool startsWith(String prefix) {
+    return this.startsWithAt(prefix, 0)
+  }
+
+  bool startsWithAt(String prefix, int pos) {
+    if (pos + prefix.size > this.size) {
+      return false
+    }
+    for (int i = 0; i < prefix.size; i++) {
+      if (this[pos + i] != prefix[i]) {
+        return false
+      }
+    }
+    return true
+  }
+
   String join(List args) {
     final sb = StringBuilder()
     for (int i = 0; i < args.size; i++) {
