@@ -3232,15 +3232,16 @@ def parse_one_source(source, local_prefix, env):
     def parse_params():
         params = []
         expect('(')
-        while not consume(')'):
-            paramtoken = peek()
-            paramtype = expect_type()
-            paramname = expect_non_exported_name()
-            params.append(Parameter(paramtoken, paramtype, paramname))
-            if not consume(','):
-                expect(')')
-                break
-        return params
+        with skipping_newlines(True):
+            while not consume(')'):
+                paramtoken = peek()
+                paramtype = expect_type()
+                paramname = expect_non_exported_name()
+                params.append(Parameter(paramtoken, paramtype, paramname))
+                if not consume(','):
+                    expect(')')
+                    break
+            return params
 
     return parse_program()
 

@@ -1,9 +1,11 @@
 class Source {
   String name
+  String path
   String data
 
-  new(String name, String data) {
+  new(String name, String path, String data) {
     this.name = name
+    this.path = path
     this.data = data
   }
 }
@@ -22,7 +24,7 @@ class Token {
   }
 
   String Repr() {
-    return 'Token(' + this.type + ', ' + str(this.data) + ')'
+    return 'Token(' + repr(this.type) + ', ' + repr(this.data) + ')'
   }
 
   int GETlineno() {
@@ -88,5 +90,57 @@ class Error {
       sb.add(' ' * (token.colno - 1) + '*\n')
     }
     return sb.build()
+  }
+}
+
+Map TranslationUnit(Token token, String name, List imports, List definitions) {
+  return {
+    '@type': 'TranslationUnit',
+    '@token': token,
+    'name': name,
+    'imports': imports,
+    'definitions': definitions,
+  }
+}
+
+Map Import(Token token, String name, String alias) {
+  return {
+    '@type': 'Import',
+    '@token': token,
+    'name': name,
+    'alias': alias,
+  }
+}
+
+Map FunctionDefinition(
+    Token token,
+    String returnType,
+    String name,
+    List parameters,
+    Map body) {
+  return {
+    '@type': 'FunctionDefinition',
+    '@token': token,
+    'returnType': returnType,
+    'name': name,
+    'parameters': parameters,
+    'body': body,
+  }
+}
+
+Map Parameter(Token token, String type, String name) {
+  return {
+    '@type': 'Parameter',
+    '@token': token,
+    'type': type,
+    'name': name,
+  }
+}
+
+Map Block(Token token, List statements) {
+  return {
+    '@type': 'Block',
+    '@token': token,
+    'statements': statements,
   }
 }

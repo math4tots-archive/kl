@@ -5,7 +5,7 @@ Set keywords = {
   'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
   'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
   'for', 'if', 'else', 'while', 'break', 'continue', 'return',
-  'with', 'from', 'import', 'as',
+  'with', 'from', 'import', 'as', 'try', 'catch', 'finally',
 }
 
 List symbols = reversed(sorted([

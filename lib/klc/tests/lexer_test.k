@@ -2,7 +2,7 @@ import klc.lexer
 import klc.ast
 
 List lex(String data) {
-  return lexer.lex(ast.Source('<test>', data))
+  return lexer.lex(ast.Source('#test', null(String), data))
 }
 
 List lex2(String data) {
