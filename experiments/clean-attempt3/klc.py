@@ -318,6 +318,7 @@ def ast(ns):
     @ns
     class PrimitiveTypeDefinition(NT):
         name: str
+        cname: str
         methods: list
 
     type_definition_types = (
@@ -563,11 +564,12 @@ def parser(ns):
             token = expect('class')
             expect('*')
             name = expect('NAME').value
+            cname = expect('STRING').value
             expect('{')
             # TODO
             expect('}')
             expect('DELIM')
-            return wtok(token, ast.PrimitiveTypeDefinition(name, []))
+            return wtok(token, ast.PrimitiveTypeDefinition(name, cname, []))
 
         def parse_global_definition():
             if at_function_definition():
@@ -608,7 +610,14 @@ def parser(ns):
             while consume('.'):
                 parts.append(expect('NAME').value)
             alias = expect('NAME').value if consume('as') else parts[-1]
-            imports.append(wtok(token, ast.Import('.'.join(parts), alias)))
+            name = '.'.join(parts)
+            for part in parts:
+                for c in part:
+                    if not (ord('a') <= ord(c) <= ord('z')):
+                        raise Error(
+                            [token],
+                            'Module names must only contain lowercase letters')
+            imports.append(wtok(token, ast.Import(name, alias)))
             expect('DELIM')
 
         for imp in imports:
@@ -721,14 +730,42 @@ def annotator(ns):
     load_headers_from_path(os.path.join(_scriptdir, 'prelude.k'))
 
 
-print(annotator.load_from_string("""
+@Namespace
+def translator(ns):
+
+    @ns
+    def translate(tu: ast.TranslationUnit, basename=None):
+        if basename is None:
+            basename = tu.name.replace('.', os.sep)
+        dirpath = os.path.join(_scriptdir, 'generated')
+        header_path = os.path.join(dirpath, f'klcn{basename}.h')
+        source_path = os.path.join(dirpath, f'klcn{basename}.c')
+        os.makedirs(dirpath, exist_ok=True)
+        hdr = translate_header(tu)
+        src = translate_source(tu)
+        with open(header_path, 'w') as f:
+            f.write(hdr)
+        with open(source_path, 'w') as f:
+            f.write(src)
+
+    def translate_header(tu):
+        return ''
+
+    def translate_source(tu):
+        return ''
+
+
+tu = annotator.load_from_string("""
 import os
 
-os.File foo(void x) {
+int foo(int x) {
 }
 
 void main() {
 }
-"""))
+""")
+
+translator.translate(tu, basename='main')
+
 print(ast)
 print(ast.TranslationUnit)
