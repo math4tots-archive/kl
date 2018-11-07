@@ -1,5 +1,9 @@
 import contextlib
+import os
 import typing
+
+
+_scriptdir = os.path.dirname(os.path.realpath(__file__))
 
 
 class Namespace:
@@ -32,6 +36,31 @@ class Source(typing.NamedTuple):
     name: str
     path: typing.Optional[str]
     data: str
+
+    @classmethod
+    def load(cls, name, tokens=None):
+        """Load KL source with given name
+        """
+        relpath = cls._name_to_relative_path(name)
+        for root in cls.get_source_roots():
+            path = os.path.join(root, relpath)
+            if os.path.isfile(path):
+                return cls.load_from_path(path, name=name, tokens=tokens)
+        raise Error(tokens or [], f'Could not find module {name} ({relpath})')
+
+    @classmethod
+    def load_from_path(cls, path, name=None, tokens=None):
+        with open(path) as f:
+            data = f.read()
+        return Source(name, path, data)
+
+    @classmethod
+    def _name_to_relative_path(cls, name):
+        return os.path.join(*name.split('.')) + '.k'
+
+    @classmethod
+    def get_source_roots(cls):
+        yield os.path.join(_scriptdir, 'lib')
 
 
 class Token(typing.NamedTuple):
@@ -244,31 +273,46 @@ def lexer(ns):
 def ast(ns):
 
     @ns
-    class TranslationUnit(typing.NamedTuple):
+    def load_from_path(path, name=None, tokens=None):
+        return parser.parse(Source.load_from_path(
+            path, name=name, tokens=tokens))
+
+    module_cache = dict()
+
+    @ns
+    def load(name, tokens=None):
+        if name not in module_cache:
+            module_cache[name] = parser.parse(Source.load(name, tokens=tokens))
+        return module_cache[name]
+
+    NT = typing.NamedTuple
+
+    @ns
+    class TranslationUnit(NT):
         metadata: dict
         name: str
         imports: list
         definitions: list
 
     @ns
-    class Import(typing.NamedTuple):
+    class Import(NT):
         name: str
         alias: str
 
     @ns
-    class FunctionDefinition(typing.NamedTuple):
+    class FunctionDefinition(NT):
         return_type: 'type'
         name: 'name'
         parameters: list
         body: typing.Optional[object]
 
     @ns
-    class Parameter(typing.NamedTuple):
+    class Parameter(NT):
         type: 'type'
         name: 'name'
 
     @ns
-    class Block(typing.NamedTuple):
+    class Block(NT):
         statements: list
 
 
@@ -542,7 +586,7 @@ def parser(ns):
             while not consume(')'):
                 ptoken = peek()
                 ptype = parse_type()
-                pname = expect('NAME').value
+                pname = expect_clean_name()
                 params.append(wtok(ptoken, ast.Parameter(ptype, pname)))
                 if not consume(','):
                     expect(')')
@@ -612,7 +656,7 @@ def parser(ns):
 
     @ns
     def parse_string(s: str):
-        return parse(Source('#', None, s))
+        return parse(Source(None, None, s))
 
 
 print(parser.parse_string("""
