@@ -243,7 +243,7 @@ def lexer(ns):
 
             # names and keywords
             if s[i].isalnum() or s[i] == '_':
-                while i < len(s) and s[i].isalnum() or s[i] == '_':
+                while i < len(s) and (s[i].isalnum() or s[i] == '_'):
                     i += 1
                 name = s[a:i]
                 type_ = name if name in KEYWORDS else 'NAME'
@@ -315,6 +315,17 @@ def ast(ns):
     class Block(NT):
         statements: list
 
+    @ns
+    class PrimitiveTypeDefinition(NT):
+        name: str
+        methods: list
+
+    type_definition_types = (
+        PrimitiveTypeDefinition,
+    )
+
+    ns(type_definition_types, name='type_definition_types')
+
 
 @Namespace
 def parser(ns):
@@ -352,7 +363,10 @@ def parser(ns):
             if at('NAME' ,'NAME') or at('class', 'NAME') or at('trait', 'NAME'):
                 # function or variable or class or trait definition
                 names.add(tokens[i + 1].value)
-                i += 1
+                i += 2
+            elif at('class', '*', 'NAME'):
+                names.add(tokens[i + 2].value)
+                i += 3
             elif types[i] == '(':
                 skip_grouping('(', ')')
             elif types[i] == '[':
@@ -545,9 +559,21 @@ def parser(ns):
             return wtok(token, ast.FunctionDefinition(
                 return_type, name, params, body))
 
+        def parse_primitive_type_definition():
+            token = expect('class')
+            expect('*')
+            name = expect('NAME').value
+            expect('{')
+            # TODO
+            expect('}')
+            expect('DELIM')
+            return wtok(token, ast.PrimitiveTypeDefinition(name, []))
+
         def parse_global_definition():
             if at_function_definition():
                 return parse_function_definition()
+            elif seq(['class', '*', 'NAME']):
+                return parse_primitive_type_definition()
             raise error([i], 'Expected global definition')
 
         def parse_block():
@@ -606,12 +632,99 @@ def parser(ns):
         return parse(Source(None, None, s))
 
 
-print(parser.parse_string("""
-import os
-import klc.lexer as lx
-import klc.parser
+@Namespace
+def annotator(ns):
 
-os.Path foo(int x, os.Path p) {
+    class Meta(typing.NamedTuple):
+        data: dict
+
+        def get(self, node):
+            return self.data[id(node)]
+
+        def gettok(self, node):
+            return self.get(node)['@token']
+
+    headers_cache = dict()
+    loaded_module_names = set()
+    annotation_cache = dict()
+
+    def load_headers(name):
+        if name not in loaded_module_names:
+            loaded_module_names.add(name)
+            load_headers_for_translation_unit(ast.load(name))
+
+    def load_headers_for_translation_unit(tu: ast.TranslationUnit):
+        for imp in tu.imports:
+            load_headers(imp.name)
+
+        for defn in tu.definitions:
+            if defn.name in headers_cache:
+                raise Error(
+                    [defn.token, headers_cache[defn.name].token],
+                    f'Duplicate definition {defn.name}')
+            headers_cache[defn.name] = defn
+
+    def load_headers_from_path(path):
+        load_headers_for_translation_unit(ast.load_from_path(path))
+
+    def get_defn(name, tokens=None):
+        if name not in headers_cache:
+            raise Error(tokens or [], f'"{name}" is not defined')
+        return headers_cache[name]
+
+    def assert_any_type(name, tokens=None):
+        tokens = tokens or []
+        defn = get_defn(name)
+        if type(defn) not in ast.type_definition_types:
+            raise Error(tokens + [defn.token], f'"{name}" is not a type')
+
+    def assert_var_type(name, tokens=None):
+        if name == 'void':
+            raise Error(tokens or [], f'void type not allowed here')
+        assert_any_type(name, tokens)
+
+    @ns
+    def load(name):
+        if name not in annotation_cache:
+            tu = ast.load(name)
+            annotate(tu)
+            annotation_cache[name] = tu
+        return annotation_cache[name]
+
+    @ns
+    def load_from_string(s):
+        tu = parser.parse_string(s)
+        annotate(tu)
+        return tu
+
+    @ns
+    def annotate(tu: ast.TranslationUnit):
+        load_headers_for_translation_unit(tu)
+        meta = Meta(tu.metadata)
+
+        for defn in tu.definitions:
+            tp = type(defn)
+            if tp == ast.FunctionDefinition:
+                annotate_function_definition(defn, meta)
+            else:
+                raise Error(
+                    [defn.token],
+                    f'Unrecognized global definition type {tp}')
+
+    @ns
+    def annotate_function_definition(fd: ast.FunctionDefinition, meta):
+        assert_any_type(fd.return_type)
+        for param in fd.parameters:
+            assert_var_type(param.type, tokens=[meta.gettok(param)])
+
+    # We initialize the annotator with prelude.k
+    load_headers_from_path(os.path.join(_scriptdir, 'prelude.k'))
+
+
+print(annotator.load_from_string("""
+import os
+
+os.File foo(void x) {
 }
 
 void main() {
