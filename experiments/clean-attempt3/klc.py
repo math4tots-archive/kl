@@ -327,6 +327,52 @@ def parser(ns):
 
         return wm(tu, ast.TranslationUnit(m, tu.name, tu.imports, definitions))
 
+    def peek_exported_names(tokens: typing.List[Token], i):
+        """
+        Try to figure out what names will be declared in this file
+        before actually parsing.
+        This is used to handle namespacing -- so that the given names
+        when referenced will be properly qualified when used.
+        """
+        types = [token.type for token in tokens]
+        vals = [token.value for token in tokens]
+        names = set()
+
+        def at(*seq):
+            return tuple(types[i:i+len(seq)]) == seq
+
+        def skip_grouping(open, close):
+            nonlocal i
+            assert types[i] == open
+            assert open != close
+            depth = 1
+            start = i
+            i += 1
+            while depth and i < len(tokens):
+                if types[i] == open:
+                    depth += 1
+                elif types[i] == close:
+                    depth -= 1
+                i += 1
+            if depth:
+                raise Error([tokens[start]], f'Mismatched grouping token')
+
+        while i < len(tokens):
+            if at('NAME' ,'NAME') or at('class', 'NAME') or at('trait', 'NAME'):
+                # function or variable or class or trait definition
+                names.add(tokens[i + 1].value)
+                i += 1
+            elif types[i] == '(':
+                skip_grouping('(', ')')
+            elif types[i] == '[':
+                skip_grouping('[', ']')
+            elif types[i] == '{':
+                skip_grouping('{', '}')
+            else:
+                i += 1
+
+        return names
+
     @ns
     def parse(source: Source):
         m = dict()
@@ -335,6 +381,11 @@ def parser(ns):
         nlstack = []
         imports = []
         definitions = []
+        module_map = dict()
+        scope_stack = [dict()]
+
+        def scope_put(key, type_):
+            scope_stack[-1]
 
         def error(indices, message):
             tokens = [ts[i] for i in indices]
@@ -378,8 +429,67 @@ def parser(ns):
 
         def expect(tp):
             if not at(tp):
-                raise error([i], f'Expected {tp}')
+                raise error([i], f'Expected {tp} but got {peek()}')
             return gettok()
+
+        def mark_identifiers(new_type, name_set):
+            """Changes the token type of any NAME whose value is in name_set
+            to new_type
+            """
+            for j in range(i, len(ts)):
+                if ts[j].type == 'NAME' and ts[j].value in name_set:
+                    t = ts[j]
+                    ts[j] = Token(t.source, t.i, new_type, t.value)
+
+        def mark_module_identifiers():
+            mark_identifiers(new_type='MODULE', name_set=module_map)
+
+        def mark_exported_identifiers():
+            mark_identifiers(new_type='EXPORT', name_set=exported_names)
+
+        def qualify_exported_name(name):
+            if source.name:
+                return f'{source.name}.{name}'
+            else:
+                return name
+
+        def rename_identifiers():
+            """Convert all MODULE and EXPORT tokens to their corresponding
+            NAME tokens. This way, when doing the parse, we can treat
+            them like normal NAME tokens.
+            """
+            nonlocal ts
+            new_tokens = ts[:i]
+            j = i
+            while j < len(ts):
+                if ts[j].type == 'MODULE':
+                    if (j + 2 >= len(ts) or
+                            ts[j + 1].type != '.' or
+                            ts[j + 2].type != 'NAME'):
+                        raise Error(
+                            [ts[j]],
+                            'Module aliases must be used only to qualify '
+                            'members of the module and cannot be used '
+                            'as normal identifiers')
+                    new_tokens.append(Token(
+                        ts[j].source,
+                        ts[j].i,
+                        'NAME',
+                        f'{module_map[ts[j].value]}.{ts[j + 2].value}'
+                    ))
+                    j += 3
+                elif ts[j].type == 'EXPORT':
+                    new_tokens.append(Token(
+                        ts[j].source,
+                        ts[j].i,
+                        'NAME',
+                        qualify_exported_name(ts[j].value),
+                    ))
+                    j += 1
+                else:
+                    new_tokens.append(ts[j])
+                    j += 1
+            ts = new_tokens
 
         def md(node):
             # metadeta dictionary for node
@@ -393,24 +503,31 @@ def parser(ns):
             md(node)['@token'] = tok
             return node
 
+        def expect_clean_name():
+            """A clean name is a NAME that does not have a '.' in the name
+            This is to distinguish between global qualified names
+            and normal names.
+            """
+            if not at('NAME'):
+                expect('NAME')
+            if '.' in peek().value:
+                raise error([i], f'Expected clean name but got {peek()}')
+            return expect('NAME').value
+
         def parse_type():
-            name = expect('NAME').value
-            if consume('.'):
-                return name + '.' + expect('NAME').value
-            else:
-                return name
+            return parse_identifier()
+
+        def parse_identifier():
+            return expect('NAME').value
 
         def at_variable_definition():
             return (
-                seq(['NAME', '.', 'NAME', 'NAME', 'DELIM']) or
-                seq(['NAME', '.', 'NAME', 'NAME', '=']) or
                 seq(['NAME', 'NAME', 'DELIM']) or
                 seq(['NAME', 'NAME', '='])
             )
 
         def at_function_definition():
             return (
-                seq(['NAME', '.', 'NAME', 'NAME', '(']) or
                 seq(['NAME', 'NAME', '('])
             )
 
@@ -449,6 +566,22 @@ def parser(ns):
             expect('DELIM')
             return wtok(token, ast.Block(statements))
 
+        def verify_peek_exported_names():
+            # After the real parse as finished,
+            # we should compare the result peeked exported names
+            # from peek_exported_names with the real parsed
+            # results in 'definitions'
+            qualified_names = {df.name for df in definitions}
+            qualified_names0 = {
+                qualify_exported_name(n) for n in exported_names
+            }
+            # If this assertion fails, it means there's an issue with
+            # the approximation logic in peek_exported_names(..)
+            assert qualified_names0 == qualified_names, [
+                qualified_names0 - qualified_names,
+                qualified_names - qualified_names0,
+            ]
+
         consume('DELIM')
         while at('import'):
             token = expect('import')
@@ -459,8 +592,19 @@ def parser(ns):
             imports.append(wtok(token, ast.Import('.'.join(parts), alias)))
             expect('DELIM')
 
+        for imp in imports:
+            module_map[imp.alias] = imp.name
+
+        # The following 4 lines are a hack to make namespaces work
+        mark_module_identifiers()
+        exported_names = peek_exported_names(ts, i)
+        mark_exported_identifiers()
+        rename_identifiers()
+
         while not at('EOF'):
             definitions.append(parse_global_definition())
+
+        verify_peek_exported_names()
 
         return ast.TranslationUnit(m, source.name, imports, definitions)
 
