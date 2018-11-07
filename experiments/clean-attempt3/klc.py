@@ -318,59 +318,6 @@ def ast(ns):
 
 @Namespace
 def parser(ns):
-    def resolve_names(tu: ast.TranslationUnit):
-        """
-        Resolves:
-            * import alias qualified names to fully qualified names, and
-            * qualifies exported names based on this module's name
-        """
-        metadata = dict()
-        import_map = {i.alias: i.name for i in tu.imports}
-        local_map = {
-            df.name: f'{tu.name}.{df.name}' for df in tu.definitions
-        } if tu.name else dict()
-        definitions = []
-
-        def wm(old_node, new_node):
-            # wm = with metadata (from old_node)
-            m[id(new_node)] = tu.metadata[id(old_node)]
-            return new_node
-
-        def error(nodes, message):
-            tokens = [tu.metadata[id(n)]['@token'] for n in nodes]
-            return Error(tokens, message)
-
-        def resolve_name(name):
-            if '.' in name and name.split('.')[0] in import_map:
-                module_alias, short_name = name.split('.')
-                return import_map[module_alias] + '.' + short_name
-            elif name in local_map:
-                return local_map[name]
-            else:
-                return name
-
-        def resolve(node):
-            if type(node) is list:
-                return [resolve(x) for x in node]
-            elif isinstance(node, tuple) and type(node) != tuple:
-                fields = []
-                infos = type(node).__annotations__.items()
-                for value, (_, type_) in zip(node, infos):
-                    if type_ in ('type', 'name'):
-                        fields.append(resolve_name(value))
-                    else:
-                        fields.append(resolve(value))
-                return wm(node, type(node)(*fields))
-            elif isinstance(node, (int, float, str, type(None), bool)):
-                return node
-            else:
-                raise error([], f'Unrecognized node type: {node}')
-
-        for df in tu.definitions:
-            definitions.append(resolve(df))
-
-        return wm(tu, ast.TranslationUnit(m, tu.name, tu.imports, definitions))
-
     def peek_exported_names(tokens: typing.List[Token], i):
         """
         Try to figure out what names will be declared in this file
