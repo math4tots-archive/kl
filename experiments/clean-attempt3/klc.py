@@ -511,7 +511,9 @@ def parser(ns):
             if not at('NAME'):
                 expect('NAME')
             if '.' in peek().value:
-                raise error([i], f'Expected clean name but got {peek()}')
+                raise error(
+                    [i],
+                    f'Module alias and exported names are not allowed here')
             return expect('NAME').value
 
         def parse_type():
