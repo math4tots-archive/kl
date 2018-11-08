@@ -289,18 +289,20 @@ def ast(ns):
 
     @ns
     class TranslationUnit(NT):
-        metadata: dict
+        token: Token
         name: str
         imports: list
         definitions: list
 
     @ns
     class Import(NT):
+        token: Token
         name: str
         alias: str
 
     @ns
     class FunctionDefinition(NT):
+        token: Token
         return_type: str
         name: str
         parameters: list
@@ -308,27 +310,32 @@ def ast(ns):
 
     @ns
     class Parameter(NT):
+        token: Token
         type: str
         name: str
 
     @ns
     class Block(NT):
+        token: Token
         statements: list
 
     @ns
     class PrimitiveTypeDefinition(NT):
+        token: Token
         name: str
         cname: str
         methods: list
 
     @ns
     class TraitDefinition(NT):
+        token: Token
         name: str
         traits: list
         methods: list
 
     @ns
     class ClassDefinition(NT):
+        token: Token
         extern: bool
         name: str
         traits: list
@@ -337,6 +344,7 @@ def ast(ns):
 
     @ns
     class GlobalVariableDefinition(NT):
+        token: Token
         type: str
         name: str
         expression: typing.Optional[object]
@@ -401,7 +409,6 @@ def parser(ns):
 
     @ns
     def parse(source: Source):
-        m = dict()
         i = 0
         ts = lexer.lex(source)
         nlstack = []
@@ -517,18 +524,6 @@ def parser(ns):
                     j += 1
             ts = new_tokens
 
-        def md(node):
-            # metadeta dictionary for node
-            key = id(node)
-            if key not in m:
-                m[key] = dict()
-            return m[key]
-
-        def wtok(tok, node):
-            # with token
-            md(node)['@token'] = tok
-            return node
-
         def expect_clean_name():
             """A clean name is a NAME that does not have a '.' in the name
             This is to distinguish between global qualified names
@@ -569,7 +564,7 @@ def parser(ns):
                 ptoken = peek()
                 ptype = parse_type()
                 pname = expect_clean_name()
-                params.append(wtok(ptoken, ast.Parameter(ptype, pname)))
+                params.append(ast.Parameter(ptoken, ptype, pname))
                 if not consume(','):
                     expect(')')
                     break
@@ -577,8 +572,8 @@ def parser(ns):
                 body = None
             else:
                 body = parse_block()
-            return wtok(token, ast.FunctionDefinition(
-                return_type, name, params, body))
+            return ast.FunctionDefinition(
+                token, return_type, name, params, body)
 
         def parse_type_body(*, allow_fields):
             expect('{')
@@ -627,16 +622,14 @@ def parser(ns):
             methods, fields = parse_type_body(
                 allow_fields=not extern and not trait and not primitive)
 
-            if primitive:
-                cls = ast.PrimitiveTypeDefinition(name, cname, methods)
-            elif trait:
-                cls = ast.TraitDefinition(name, traits, methods)
-            else:
-                cls = ast.ClassDefinition(
-                    extern, name, traits, fields, methods)
-
-            return wtok(token, cls)
-
+            return (
+                ast.PrimitiveTypeDefinition(token, name, cname, methods)
+                if primitive else
+                ast.TraitDefinition(token, name, traits, methods)
+                if trait else
+                ast.ClassDefinition(
+                    token, extern, name, traits, fields, methods)
+            )
 
         def parse_global_definition():
             if at_function_definition():
@@ -652,7 +645,7 @@ def parser(ns):
             while not consume('}'):
                 statements.append(parse_statement())
             expect('DELIM')
-            return wtok(token, ast.Block(statements))
+            return ast.Block(token, statements)
 
         def verify_peek_exported_names():
             # After the real parse as finished,
@@ -670,6 +663,7 @@ def parser(ns):
                 qualified_names - qualified_names0,
             ]
 
+        tu_token = peek()
         consume('DELIM')
         while at('import'):
             token = expect('import')
@@ -684,7 +678,7 @@ def parser(ns):
                         raise Error(
                             [token],
                             'Module names must only contain lowercase letters')
-            imports.append(wtok(token, ast.Import(name, alias)))
+            imports.append(ast.Import(token, name, alias))
             expect('DELIM')
 
         for imp in imports:
@@ -701,100 +695,12 @@ def parser(ns):
 
         verify_peek_exported_names()
 
-        return ast.TranslationUnit(m, source.name, imports, definitions)
+        return ast.TranslationUnit(
+            tu_token, source.name, imports, definitions)
 
     @ns
     def parse_string(s: str):
         return parse(Source(None, None, s))
-
-
-@Namespace
-def annotator(ns):
-
-    class Meta(typing.NamedTuple):
-        data: dict
-
-        def get(self, node):
-            return self.data[id(node)]
-
-        def gettok(self, node):
-            return self.get(node)['@token']
-
-    headers_cache = dict()
-    loaded_module_names = set()
-    annotation_cache = dict()
-
-    def load_headers(name):
-        if name not in loaded_module_names:
-            loaded_module_names.add(name)
-            load_headers_for_translation_unit(ast.load(name))
-
-    def load_headers_for_translation_unit(tu: ast.TranslationUnit):
-        for imp in tu.imports:
-            load_headers(imp.name)
-
-        for defn in tu.definitions:
-            if defn.name in headers_cache:
-                raise Error(
-                    [defn.token, headers_cache[defn.name].token],
-                    f'Duplicate definition {defn.name}')
-            headers_cache[defn.name] = defn
-
-    def load_headers_from_path(path):
-        load_headers_for_translation_unit(ast.load_from_path(path))
-
-    def get_defn(name, tokens=None):
-        if name not in headers_cache:
-            raise Error(tokens or [], f'"{name}" is not defined')
-        return headers_cache[name]
-
-    def assert_any_type(name, tokens=None):
-        tokens = tokens or []
-        defn = get_defn(name)
-        if type(defn) not in ast.type_definition_types:
-            raise Error(tokens + [defn.token], f'"{name}" is not a type')
-
-    def assert_var_type(name, tokens=None):
-        if name == 'void':
-            raise Error(tokens or [], f'void type not allowed here')
-        assert_any_type(name, tokens)
-
-    @ns
-    def load(name):
-        if name not in annotation_cache:
-            tu = ast.load(name)
-            annotate(tu)
-            annotation_cache[name] = tu
-        return annotation_cache[name]
-
-    @ns
-    def load_from_string(s):
-        tu = parser.parse_string(s)
-        annotate(tu)
-        return tu
-
-    @ns
-    def annotate(tu: ast.TranslationUnit):
-        load_headers_for_translation_unit(tu)
-        meta = Meta(tu.metadata)
-
-        for defn in tu.definitions:
-            tp = type(defn)
-            if tp == ast.FunctionDefinition:
-                annotate_function_definition(defn, meta)
-            else:
-                raise Error(
-                    [defn.token],
-                    f'Unrecognized global definition type {tp}')
-
-    @ns
-    def annotate_function_definition(fd: ast.FunctionDefinition, meta):
-        assert_any_type(fd.return_type)
-        for param in fd.parameters:
-            assert_var_type(param.type, tokens=[meta.gettok(param)])
-
-    # We initialize the annotator with prelude.k
-    load_headers_from_path(os.path.join(_scriptdir, 'prelude.k'))
 
 
 @Namespace
@@ -822,7 +728,7 @@ def translator(ns):
         return ''
 
 
-tu = annotator.load_from_string("""
+tu = parser.parse_string("""
 import os
 
 int foo(int x) {
