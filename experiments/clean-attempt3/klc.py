@@ -445,6 +445,20 @@ def ir(ns):
         name: str
 
     @ns
+    class PrimitiveTypeDefinition(NT):
+        token: Token
+        name: str
+        cname: str
+        methods: typing.Dict[str, str]
+
+    @ns
+    class ClassDefinition(NT):
+        token: Token
+        name: str
+        fields: typing.Set[str]
+        methods: typing.Dict[str, str]
+
+    @ns
     class FunctionDefinition(NT):
         token: Token
         return_type: str
@@ -979,6 +993,132 @@ def parser(ns):
 
 
 @Namespace
+def annotator(ns):
+    "converts ast to ir"
+
+    class Context:
+        def __init__(self):
+            self.token_stack = []
+            self.scope = Scope(self, None)
+
+        @contextlib.contextmanager
+        def token(self, token):
+            self.token_stack.append(token)
+            yield
+            self.token_stack.pop()
+
+        @contextlib.contextmanager
+        def new_scope(self):
+            old_scope = self.scope
+            self.scope = Scope(self, old_scope)
+            yield
+            self.scope = old_scope
+
+        def error(self, message):
+            return Error(self.token_stack, message)
+
+    class Scope:
+        def __init__(self, ctx, parent):
+            self.ctx = ctx
+            self.parent = parent
+            self.table = dict()
+
+        def __getitem__(self, key):
+            if key in self.table:
+                return self.table[key]
+            elif self.parent is not None:
+                return self.parent[key]
+            raise Error(self.ctx.token_stack, f'Unrecognized name {key}')
+
+        def __setitem__(self, key, value):
+            if key in self.table:
+                raise Error(
+                    self.ctx.token_stack + [self.table[key]].token,
+                    f'Name {key} already defined')
+            self.table[key] = value
+
+        def load_translation_unit_names(self, tu):
+            for defn in tu.definitions:
+                self[defn.name] = defn
+
+        def maybe_load_translation_unit(self, tu, loaded):
+            if tu.name in loaded:
+                return
+
+            loaded.add(tu.name)
+            self.load_translation_unit_names(tu)
+
+        def load_translation_unit(self, tu):
+            loaded = set()
+            for imp in tu.imports:
+                self.maybe_load_translation_unit(ast.load(imp), loaded)
+            self.load_translation_unit_names(tu)
+
+    @ns
+    def annotate(tu):
+        ctx = Context()
+        ctx.scope.load_translation_unit(tu)
+
+        includes = [i.name for i in tu.imports]
+        definitions = [
+            adefn
+            for defn in tu.definitions
+            for adefn in annotate_global_definition(ctx, defn)
+        ]
+
+        return ir.TranslationUnit(tu.token, includes, definitions)
+
+    def annotate_global_definition(ctx, defn):
+        if type(defn) is ast.FunctionDefinition:
+            yield from annotate_function_definition(ctx, defn)
+        elif type(defn) is ast.PrimitiveTypeDefinition:
+            yield from annotate_primitive_type_definition(ctx, defn)
+        elif type(defn) is ast.ClassDefinition:
+            yield from annotate_class_definition(ctx, defn)
+        else:
+            raise ctx.error(
+                f'Unrecognized global definition type {type(defn)}')
+
+    def annotate_class_definition(ctx, defn):
+        method_map = yield from compute_method_map(
+            ctx,
+            this_type=defn.name,
+            name=defn.name,
+            traits=defn.traits,
+            methods=defn.methods)
+
+        yield ir.ClassDefinition(
+            token=defn.token,
+            extern=defn.extern,
+            name=defn.name,
+            fields=None,
+            methods=method_map,
+        )
+
+    def annotate_primitive_type_definition(ctx, defn):
+        methods = yield from compute_method_map(
+            ctx,
+            this_type=defn.name,
+            name=defn.name,
+            traits=[],
+            methods=defn.methods)
+
+        yield ir.PrimitiveTypeDefinition(
+            defn.token,
+            defn.name,
+            defn.cname,
+            methods)
+
+    def compute_method_map(ctx, *, this_type, name, traits, methods):
+        methodmap = dict()
+
+        for method in methods:
+            methodmap[method.name] = f'{name}#{method.name}'
+
+        return methodmap
+
+
+@Namespace
 def translator(ns):
 
     @ns
@@ -1003,7 +1143,7 @@ def translator(ns):
         return ''
 
 ast.prelude = ast.load_from_path(os.path.join(_scriptdir, 'prelude.k'))
-
+ir.prelude = annotator.annotate(ast.prelude)
 
 tu = parser.parse_string("""
 import os
