@@ -6,6 +6,24 @@ import typing
 _scriptdir = os.path.dirname(os.path.realpath(__file__))
 
 
+class lazy_property:
+    def __init__(self, f):
+        self.__doc__ = getattr(f, '__doc__')
+        self.f = f
+
+        # We keep a cache rather than attach results to the object itself
+        # because the object may be immutable (e.g. NamedTuple)
+        self.cache = dict()
+
+    def __get__(self, obj, cls):
+        if obj is None:
+            return self
+        key = id(obj)
+        if key not in self.cache:
+            self.cache[key] = self.f(obj)
+        return self.cache[key]
+
+
 class Namespace:
     def __init__(self, f):
         object.__setattr__(self, 'attrs', dict())
@@ -271,6 +289,9 @@ def lexer(ns):
 
 @Namespace
 def ast(ns):
+    """Abstract Syntax Tree
+    The parser creates an ast from a Source
+    """
 
     @ns
     def load_from_path(path, name=None, tokens=None):
@@ -400,6 +421,139 @@ def ast(ns):
     @ns
     class FunctionCall(NT):
         token: Token
+        name: str
+        arguments: list
+
+
+@Namespace
+def ir(ns):
+    """Intermediate Representation
+    the annotator converts ast to ir.
+    """
+
+    NT = typing.NamedTuple
+
+    @ns
+    class TranslationUnit(NT):
+        token: Token
+        includes: list
+        definitions: list
+
+    @ns
+    class Include(NT):
+        token: Token
+        name: str
+
+    @ns
+    class FunctionDefinition(NT):
+        token: Token
+        return_type: str
+        name: str
+        parameters: list
+        body: typing.Optional[object]
+
+        @property
+        def extern(self):
+            return self.body is None
+
+    @ns
+    class Block(NT):
+        token: Token
+        statements: list
+
+        @lazy_property
+        def always_returns(self):
+            for statement in self.statements:
+                if statement.always_returns:
+                    return True
+            return False
+
+        @lazy_property
+        def return_type(self):
+            rts = {
+                s.return_type
+                for s in self.statements
+                if s.return_type is not None
+            }
+            if not rts:
+                return None
+            elif len(rts) == 1:
+                return list(rts)[0]
+            elif 'var' in rts and 'void' not in rts:
+                return 'var'
+            else:
+                # TODO: Better error handling
+                raise Error([self.token], f'Invalid mixed return types {rts}')
+
+    @ns
+    class Return(NT):
+        token: Token
+        expression: typing.Optional[object]
+
+        always_returns = True
+
+        @property
+        def return_type(self):
+            return (
+                'void' if self.expression is None else
+                self.expression.type
+            )
+
+    @ns
+    class ExpressionStatement(NT):
+        token: Token
+        expression: object
+
+        always_returns = False
+        return_type = None
+
+    @ns
+    class StringLiteral(NT):
+        token: Token
+        value: str
+
+        type = 'String'
+
+    @ns
+    class IntLiteral(NT):
+        token: Token
+        value: int
+
+        type = 'int'
+
+    @ns
+    class DoubleLiteral(NT):
+        token: Token
+        value: str
+
+        type = 'double'
+
+    @ns
+    class GetLocalVariable(NT):
+        token: Token
+        type: str
+        name: str
+
+    @ns
+    class SetLocalVariable(NT):
+        token: Token
+        name: str
+        expression: object
+
+        @property
+        def type(self):
+            return self.expression.type
+
+    @ns
+    class GetGlobalVariable(NT):
+        token: Token
+        type: str
+        name: str
+
+    @ns
+    class FunctionCall(NT):
+        token: Token
+        type: str
         name: str
         arguments: list
 
@@ -847,6 +1001,8 @@ def translator(ns):
 
     def translate_source(tu):
         return ''
+
+ast.prelude = ast.load_from_path(os.path.join(_scriptdir, 'prelude.k'))
 
 
 tu = parser.parse_string("""
