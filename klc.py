@@ -52,20 +52,32 @@ _special_method_names = {
     'Invert',
 }
 
-SYMBOLS = [
-    '\n',
-    '||', '&&', '|', '&', '<<', '>>', '~',
-    ';', '#', '?', ':', '!', '++', '--', '**',
-    '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
-    '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
-]
 
-KEYWORDS = {
-    'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
-    'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
-    'for', 'if', 'else', 'while', 'break', 'continue', 'return',
-    'with', 'from', 'import', 'as',
-}
+class Namespace:
+    def __init__(self, f):
+        object.__setattr__(self, 'attrs', dict())
+        object.__setattr__(self, 'name', f.__name__)
+        f(self)
+
+    def __getattribute__(self, key):
+        attrs = object.__getattribute__(self, 'attrs')
+        if key not in attrs:
+            raise AttributeError(
+                f'No attr {key} for {object.__getattribute__(self, "name")}')
+        return attrs[key]
+
+    def __setattr__(self, key, value):
+        object.__getattribute__(self, 'attrs')[key] = value
+
+    def __call__(self, x, name=None):
+        if name is None:
+            name = x.__name__
+        setattr(self, name, x)
+        return x
+
+    def __repr__(self):
+        return f'<namespace {object.__getattribute__(self, "name")}>'
+
 
 PRIMITIVE_TYPES = {
     'void',
@@ -191,231 +203,203 @@ class Source(NamedTuple):
     data: str
 
 
-class Token:
-    __slots__ = ['type', 'value', 'source', 'i']
+class Token(typing.NamedTuple):
+    source: Source
+    i: int
+    type: str
+    value: object
 
-    def __init__(self,
-                 type: str,
-                 value: object = None,
-                 source: Optional[Source] = None,
-                 i: Optional[int] = None) -> None:
-        self.type = type
-        self.value = value
-        self.source = source
-        self.i = i
-
-    def _key(self) -> Tuple[str, object]:
-        return self.type, self.value
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, Token) and self._key() == other._key()
-
-    def __hash__(self) -> int:
-        return hash(self._key())
-
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f'Token({repr(self.type)}, {repr(self.value)})'
 
     @property
-    def lineno(self) -> int:
-        assert self.source is not None
-        assert self.i is not None
-        return self.source.data.count('\n', 0, self.i) + 1
+    def lineno(self):
+        return self.source.data.count('\n', self.i) + 1
 
     @property
-    def colno(self) -> int:
-        assert self.source is not None
-        assert self.i is not None
-        return self.i - self.source.data.rfind('\n', 0, self.i)
-
-    @property
-    def line(self) -> str:
-        assert self.source is not None
-        assert self.i is not None
+    def colno(self):
+        cn = 0
+        i = self.i
         s = self.source.data
-        a = s.rfind('\n', 0, self.i) + 1
-        b = s.find('\n', self.i)
-        if b == -1:
-            b = len(s)
+        while i in range(len(s)) and s[i] != '\n':
+            i -= 1
+            cn += 1
+        return cn
+
+    @property
+    def line(self):
+        s = self.source.data
+        a = self.i
+        while a > 0 and s[a - 1] != '\n':
+            a -= 1
+        b = self.i
+        while b < len(s) and s[b] != '\n':
+            b += 1
         return s[a:b]
 
-    @property
-    def info(self) -> str:
-        line = self.line
-        colno = self.colno
-        lineno = self.lineno
-        spaces = ' ' * (colno - 1)
-        return f'{self.source.filename} on line {lineno}\n{line}\n{spaces}*\n'
+    def format(self):
+        return (
+            f'  On line {self.lineno}\n'
+            f'  {self.line}\n'
+            f'  {" " * (self.colno - 1)}*\n'
+        )
 
 
 class Error(Exception):
-    def __init__(self, tokens: Iterable[Token], message: str) -> None:
-        super().__init__(''.join(token.info for token in tokens) + message)
+    def __init__(self, tokens, message):
+        super().__init__(f'{message}\n{"".join(t.format() for t in tokens)}')
+        self.tokens = tokens
+        self.message = message
 
 
-class Pattern(abc.ABC):
-    @abc.abstractmethod
-    def match(self, source: Source, i: int) -> Optional[Tuple[Token, int]]:
-        pass
+@Namespace
+def lexer(ns):
+    KEYWORDS = {
+      'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
+      'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
+      'for', 'if', 'else', 'while', 'break', 'continue', 'return',
+      'with', 'from', 'import', 'as', 'try', 'catch', 'finally',
+    }
 
+    SYMBOLS = tuple(reversed(sorted([
+      '\n',
+      '||', '&&', '|', '&', '<<', '>>', '~',
+      ';', '#', '?', ':', '!', '++', '--', '**',
+      '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
+      '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
+    ])))
 
-class RegexPattern(Pattern):
-    def __init__(
-            self,
-            regex: Union[typing.Pattern[str], str],
-            *,
-            type: Optional[str] = None,
-            type_callback: Callable[[str], str] = lambda value: value,
-            value_callback: Callable[[str], object] = lambda x: x) -> None:
-        if isinstance(regex, str):
-            regex = re.compile(regex)
+    ESCAPE_MAP = {
+      'n': '\n',
+      't': '\t',
+      'r': '\r',
+      '\\': '\\',
+      '"': '"',
+      "'": "'",
+    }
 
-        if type is not None:
-            type_ = str(type)  # for mypy
-            type_callback = lambda _: type_
+    @ns
+    def lex_string(data: str):
+        return lex(Source('#', None, data))
 
-        self.regex = regex
-        self.type_callback = type_callback
-        self.value_callback = value_callback
+    @ns
+    def lex(source: Source):
+        return list(lex_gen(source))
 
-    def match(self, source: Source, i: int) -> Optional[Tuple[Token, int]]:
-        m = self.regex.match(source.data, i)
-        if m is None:
-            return None
+    def lex_gen(source: Source):
+        s = source.data
+        i = 0
+        is_delim = False
 
-        raw_value = m.group()
-        type_ = self.type_callback(raw_value)
-        value = self.value_callback(raw_value)
-        return Token(type_, value, source, i), m.end()
-
-
-def _make_lexer():
-    whitespace_and_comment_pattern = RegexPattern(r'(?:[ \t\r]|//.*(?=\n))+')
-
-    class Lexer:
-        def __init__(
-                self,
-                patterns: List[Pattern],
-                *,
-                ignore_pattern: Pattern,
-                filter: Callable[[Token], Optional[Token]] = lambda token: token
-        ) -> None:
-            self.patterns = patterns
-            self.ignore_pattern = ignore_pattern
-            self.filter = filter
-
-        def lex(self, source: Union[Source, str]) -> List[Token]:
-            if isinstance(source, str):
-                source = Source('<string>', source)
-
-            ignore_pattern = self.ignore_pattern
-            i = 0
-            s = source.data
-            tokens = []
-
-            while True:
-                while True:
-                    match = ignore_pattern.match(source, i)
-                    if match is None:
-                        break
-                    _, i = match
-
-                if i >= len(s):
-                    break
-
-                for pattern in self.patterns:
-                    match = pattern.match(source, i)
-                    if match is not None:
-                        unfiltered_token, i = match
-                        token = self.filter(unfiltered_token)
-                        if token is not None:
-                            tokens.append(token)
-                        break
+        def skip_spaces_and_comments():
+            nonlocal i
+            while s.startswith('//', i) or i < len(s) and s[i] in ' \t\r':
+                if s.startswith('//', i):
+                    while i < len(s) and s[i] != '\n':
+                        i += 1
                 else:
-                    token = Token('ERR', None, source, i)
-                    raise Error([token], 'Unrecognized token')
+                    i += 1
 
-            tokens.append(Token('EOF', None, source, i))
-            return tokens
+        def mt(i, type_, data):
+            # make token
+            return Token(source, i, type_, data)
 
-    class MatchingBracesSkipSpacesFilter:
-        """A lexer filter for ignoring newlines that appear inside parentheses
-        or square brackets.
-        """
+        def error(indices, message):
+            tokens = [Token(source, i, 'ERR', None) for i in indices]
+            return Error(tokens, message)
 
-        def __init__(self) -> None:
-            self.stack: List[Token] = []
+        while True:
+            skip_spaces_and_comments()
 
-        def should_skip_newlines(self) -> bool:
-            return bool(self.stack and self.stack[-1].type != '{')
+            a = i
+            last_was_delim = is_delim
+            is_delim = False
 
-        def __call__(self, token: Token) -> Optional[Token]:
-            if token.type in ('{', '[', '('):
-                self.stack.append(token)
+            if i >= len(s):
+                if not last_was_delim:
+                    yield mt(i, '\n', 'EOF')
+                yield mt(i, 'EOF', 'EOF')
+                break
 
-            if token.type in ('}', ']', ')'):
-                self.stack.pop()
+            # raw string literal
+            if s.startswith(('r"', "r'"), i):
+                i += 1  # 'r'
+                q = s[i:i+3] if s.startswith(s[i] * 3, i) else s[i]
+                i += len(q)
+                while i < len(s) and not s.startswith(q, i):
+                    i += 1
+                if i >= len(s):
+                    raise error([a], 'Unterminated raw string literal')
+                i += len(q)
+                yield mt(a, 'STRING', s[a+1+len(q):i-len(q)])
+                continue
 
-            if token.type == '\n' and self.should_skip_newlines():
-                return None
+            # normal string literal
+            if s.startswith(('"', "'"), i):
+                q = s[i:i+3] if s.startswith(s[i] * 3, i) else s[i]
+                i += len(q)
+                sb = []
+                while i < len(s) and not s.startswith(q, i):
+                    if s[i] == '\\':
+                        i += 1
+                        if i >= len(s):
+                            raise error([a], 'Expected string escape')
+                        if s[i] in ESCAPE_MAP:
+                            sb.append(ESCAPE_MAP[s[i]])
+                            i += 1
+                        else:
+                            raise error([i], 'Invalid string escape')
+                    else:
+                        sb.append(s[i])
+                        i += 1
+                if i >= len(s):
+                    raise error([a], 'Unterminated string literal')
+                i += len(q)
+                yield mt(a, 'STRING', ''.join(sb))
+                continue
 
-            return token
+            # numbers (int and float)
+            if s[i].isdigit():
+                while i < len(s) and s[i].isdigit():
+                    i += 1
+                if i < len(s) and s[i] == '.':
+                    i += 1
+                    while i < len(s) and s[i].isdigit():
+                        i += 1
+                    yield mt(a, 'FLOAT', float(s[a:i]))
+                else:
+                    yield mt(a, 'INT', int(s[a:i]))
+                continue
 
-    def make_symbols_pattern(symbols: Iterable[str]) -> Pattern:
-        return RegexPattern('|'.join(map(re.escape, reversed(sorted(symbols)))))
+            # escaped names
+            if s[i] == '`':
+                i += 1
+                while i < len(s) and s[i] != '`':
+                    i += 1
+                if i >= len(s):
+                    raise error([a], 'Unterminated escape identifier')
+                i += 1
+                yield mt(a, 'NAME', s[a+1:i-1])
+                continue
 
-    def make_keywords_pattern(keywords: Iterable[str]) -> Pattern:
-        return RegexPattern('|'.join(r'\b' + kw + r'\b' for kw in keywords))
+            # names and keywords
+            if s[i].isalnum() or s[i] == '_':
+                while i < len(s) and (s[i].isalnum() or s[i] == '_'):
+                    i += 1
+                name = s[a:i]
+                type_ = name if name in KEYWORDS else 'NAME'
+                yield mt(a, type_, name)
+                continue
 
-    name_pattern = RegexPattern(
-        '\w+', type='NAME', value_callback=lambda value: value)
-
-    escaped_name_pattern = RegexPattern(
-        '`[^`]+`', type='NAME', value_callback=lambda value: value[1:-1])
-
-    def string_pattern_value_callback(value: str) -> str:
-        return str(eval(value))  # type: ignore
-
-    string_pattern_regex = '|'.join([
-        r'(?:r)?"""(?:(?:\\.)|(?!""").)*"""',
-        r"(?:r)?'''(?:(?:\\.)|(?!''').)*'''",
-        r'(?:r)?"(?:(?:\\.)|(?!").)*"',
-        r"(?:r)?'(?:(?:\\.)|(?!').)*'",
-    ])
-
-    string_pattern = RegexPattern(
-        re.compile(string_pattern_regex, re.DOTALL),
-        type='STRING',
-        value_callback=string_pattern_value_callback)
-
-    float_pattern = RegexPattern(
-        r'\d+\.\d*|\.\d+', type='FLOAT', value_callback=eval)  # type: ignore
-    int_pattern = RegexPattern(
-        r'\d+', type='INT', value_callback=eval)  # type: ignore
-
-    def make_simple_lexer(*, keywords: Iterable[str], symbols: Iterable[str]):
-        keywords_pattern = make_keywords_pattern(keywords)
-        symbols_pattern = make_symbols_pattern(symbols)
-        return Lexer(
-            [
-                string_pattern,
-                keywords_pattern,
-                float_pattern,
-                int_pattern,
-                name_pattern,
-                escaped_name_pattern,
-                symbols_pattern,
-            ],
-            ignore_pattern=whitespace_and_comment_pattern)
-
-    return make_simple_lexer(keywords=KEYWORDS, symbols=SYMBOLS)
-
-
-_lexer = _make_lexer()
-
-
-def lex(source):
-    return _lexer.lex(source)
+            # symbols
+            for symbol in SYMBOLS:
+                if s.startswith(symbol, i):
+                    i += len(symbol)
+                    yield mt(a, symbol, symbol)
+                    break
+            else:
+                # unrecognized token
+                raise error([i], 'Unrecognized token')
 
 
 class FractalStringBuilder(object):
@@ -2172,7 +2156,7 @@ def update_tokens(tokens, i, module_map):
 
 
 def parse_one_source(source, local_prefix, env):
-    tokens = lex(source)
+    tokens = lexer.lex(source)
     i = 0
     indent_stack = []
     cache = env['@cache']
@@ -2258,14 +2242,13 @@ def parse_one_source(source, local_prefix, env):
         while at('import'):
             parse_import(defs)
         replace_tokens_with_update()
+        consume_delim()
         while not at('EOF'):
             parse_global_definition(defs)
             consume_delim()
         return Program(token, defs, env)
 
     def parse_global_definition(defs):
-        consume_delim()
-
         if at('#'):
             parse_macro(defs)
             return
@@ -3246,7 +3229,7 @@ def parse_one_source(source, local_prefix, env):
     return parse_program()
 
 
-tok = lex(Source('<dummy>', 'dummy'))[0]
+tok = lexer.lex(Source('<dummy>', 'dummy'))[0]
 
 parser = argparse.ArgumentParser()
 parser.add_argument('kfile')
