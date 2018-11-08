@@ -301,15 +301,15 @@ def ast(ns):
 
     @ns
     class FunctionDefinition(NT):
-        return_type: 'type'
-        name: 'name'
+        return_type: str
+        name: str
         parameters: list
         body: typing.Optional[object]
 
     @ns
     class Parameter(NT):
-        type: 'type'
-        name: 'name'
+        type: str
+        name: str
 
     @ns
     class Block(NT):
@@ -320,6 +320,26 @@ def ast(ns):
         name: str
         cname: str
         methods: list
+
+    @ns
+    class TraitDefinition(NT):
+        name: str
+        traits: list
+        methods: list
+
+    @ns
+    class ClassDefinition(NT):
+        extern: bool
+        name: str
+        traits: list
+        fields: typing.Optional[list]
+        methods: list
+
+    @ns
+    class GlobalVariableDefinition(NT):
+        type: str
+        name: str
+        expression: typing.Optional[object]
 
     type_definition_types = (
         PrimitiveTypeDefinition,
@@ -560,22 +580,69 @@ def parser(ns):
             return wtok(token, ast.FunctionDefinition(
                 return_type, name, params, body))
 
-        def parse_primitive_type_definition():
-            token = expect('class')
-            expect('*')
-            name = expect('NAME').value
-            cname = expect('STRING').value
+        def parse_type_body(*, allow_fields):
             expect('{')
-            # TODO
-            expect('}')
+            consume('DELIM')
+            methods = dict()
+            fields = [] if allow_fields else None
+            while not consume('}'):
+                if at_function_definition():
+                    methods.append(parse_function_definition())
+                elif allow_fields:
+                    field_token = peek()
+                    field_type = parse_type()
+                    field_name = expect_clean_name()
+                    expect('DELIM')
+                    fields.append(
+                        ast.Field(field_token, field_type, field_name))
+                else:
+                    raise error([i], 'Expected method definition')
             expect('DELIM')
-            return wtok(token, ast.PrimitiveTypeDefinition(name, cname, []))
+            return methods, fields
+
+        def parse_class():
+            token = peek()
+            extern = consume('extern')
+
+            trait = not extern and consume('trait')
+            if not trait:
+                expect('class')
+
+            primitive = not extern and not trait and consume('*')
+
+            name = expect('NAME').value
+
+            if primitive:
+                cname = expect('STRING').value
+            else:
+                traits = []
+                if consume('('):
+                    with nls(True):
+                        while not consume(')'):
+                            traits.append(parse_type())
+                            if not consume(','):
+                                expect(')')
+                                break
+
+            methods, fields = parse_type_body(
+                allow_fields=not extern and not trait and not primitive)
+
+            if primitive:
+                cls = ast.PrimitiveTypeDefinition(name, cname, methods)
+            elif trait:
+                cls = ast.TraitDefinition(name, traits, methods)
+            else:
+                cls = ast.ClassDefinition(
+                    extern, name, traits, fields, methods)
+
+            return wtok(token, cls)
+
 
         def parse_global_definition():
             if at_function_definition():
                 return parse_function_definition()
-            elif seq(['class', '*', 'NAME']):
-                return parse_primitive_type_definition()
+            elif at('class') or seq(['extern', 'class']) or at('trait'):
+                return parse_class()
             raise error([i], 'Expected global definition')
 
         def parse_block():
