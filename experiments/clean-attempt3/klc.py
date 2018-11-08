@@ -361,10 +361,15 @@ def ast(ns):
     @ns
     class ClassDefinition(NT):
         token: Token
-        extern: bool
+        type: str
+            # 'class',      # normal class
+            # 'extern',     # extern class (only classes can be extern)
+            # 'trait',
+            # 'primitive',  # primitive type (e.g. int, double)
         name: str
+        cname: typing.Optional[str]    # only for 'primitive'
         traits: list
-        fields: typing.Optional[list]
+        fields: typing.Optional[list]  # only for 'class'
         methods: list
 
     @ns
@@ -445,18 +450,17 @@ def ir(ns):
         name: str
 
     @ns
-    class PrimitiveTypeDefinition(NT):
-        token: Token
-        name: str
-        cname: str
-        methods: typing.Dict[str, str]
-
-    @ns
     class ClassDefinition(NT):
         token: Token
+        type: str
+            # 'class',      # normal class
+            # 'extern',     # extern class (only classes can be extern)
+            # 'trait',
+            # 'primitive',  # primitive type (e.g. int, double)
         name: str
-        fields: typing.Set[str]
-        methods: typing.Dict[str, str]
+        cname: typing.Optional[str]               # only for 'primitive'
+        fields: typing.Optional[typing.Set[str]]  # only for 'class'
+        methods: typing.Dict[str, 'FunctionDefinition']
 
     @ns
     class FunctionDefinition(NT):
@@ -794,7 +798,7 @@ def parser(ns):
         def parse_type_body(*, allow_fields):
             expect('{')
             consume('DELIM')
-            methods = dict()
+            methods = []
             fields = [] if allow_fields else None
             while not consume('}'):
                 if at_function_definition():
@@ -813,19 +817,26 @@ def parser(ns):
 
         def parse_class():
             token = peek()
-            extern = consume('extern')
 
-            trait = not extern and consume('trait')
-            if not trait:
+            if consume('extern'):
+                kind = 'extern'
                 expect('class')
-
-            primitive = not extern and not trait and consume('*')
+            elif consume('trait'):
+                kind = 'trait'
+            else:
+                expect('class')
+                if consume('*'):
+                    kind = 'primitive'
+                else:
+                    kind = 'class'
 
             name = parse_identifier()
 
-            if primitive:
+            if kind == 'primitive':
                 cname = expect('STRING').value
+                traits = []
             else:
+                cname = None
                 traits = []
                 if consume('('):
                     with nls(True):
@@ -835,17 +846,10 @@ def parser(ns):
                                 expect(')')
                                 break
 
-            methods, fields = parse_type_body(
-                allow_fields=not extern and not trait and not primitive)
+            methods, fields = parse_type_body(allow_fields=(kind == 'class'))
 
-            return (
-                ast.PrimitiveTypeDefinition(token, name, cname, methods)
-                if primitive else
-                ast.TraitDefinition(token, name, traits, methods)
-                if trait else
-                ast.ClassDefinition(
-                    token, extern, name, traits, fields, methods)
-            )
+            return ast.ClassDefinition(
+                token, kind, name, cname, traits, fields, methods)
 
         def parse_global_definition():
             if at_function_definition():
@@ -1071,51 +1075,25 @@ def annotator(ns):
     def annotate_global_definition(ctx, defn):
         if type(defn) is ast.FunctionDefinition:
             yield from annotate_function_definition(ctx, defn)
-        elif type(defn) is ast.PrimitiveTypeDefinition:
-            yield from annotate_primitive_type_definition(ctx, defn)
         elif type(defn) is ast.ClassDefinition:
             yield from annotate_class_definition(ctx, defn)
         else:
             raise ctx.error(
                 f'Unrecognized global definition type {type(defn)}')
 
-    def annotate_class_definition(ctx, defn):
-        method_map = yield from compute_method_map(
-            ctx,
-            this_type=defn.name,
-            name=defn.name,
-            traits=defn.traits,
-            methods=defn.methods)
+    def annotate_function_definition(ctx, defn):
+        if False:
+            yield
 
+    def annotate_class_definition(ctx, defn):
         yield ir.ClassDefinition(
             token=defn.token,
-            extern=defn.extern,
+            type=defn.type,
             name=defn.name,
+            cname=defn.cname,
             fields=None,
-            methods=method_map,
+            methods=defn.methods,
         )
-
-    def annotate_primitive_type_definition(ctx, defn):
-        methods = yield from compute_method_map(
-            ctx,
-            this_type=defn.name,
-            name=defn.name,
-            traits=[],
-            methods=defn.methods)
-
-        yield ir.PrimitiveTypeDefinition(
-            defn.token,
-            defn.name,
-            defn.cname,
-            methods)
-
-    def compute_method_map(ctx, *, this_type, name, traits, methods):
-        methodmap = dict()
-
-        for method in methods:
-            methodmap[method.name] = f'{name}#{method.name}'
-
-        return methodmap
 
 
 @Namespace
@@ -1144,6 +1122,9 @@ def translator(ns):
 
 ast.prelude = ast.load_from_path(os.path.join(_scriptdir, 'prelude.k'))
 ir.prelude = annotator.annotate(ast.prelude)
+
+for defn in ir.prelude.definitions:
+    print(f'name = {defn.name}, type = {type(defn).__name__}')
 
 tu = parser.parse_string("""
 import os

@@ -4,3 +4,5 @@ class* float 'double' {}
 
 extern class String {
 }
+
+void print(var x)
