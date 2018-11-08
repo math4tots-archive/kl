@@ -308,6 +308,10 @@ def ast(ns):
         parameters: list
         body: typing.Optional[object]
 
+        @property
+        def extern(self):
+            return self.body is None
+
     @ns
     class Parameter(NT):
         token: Token
@@ -345,15 +349,10 @@ def ast(ns):
     @ns
     class GlobalVariableDefinition(NT):
         token: Token
+        extern: bool
         type: str
         name: str
         expression: typing.Optional[object]
-
-    type_definition_types = (
-        PrimitiveTypeDefinition,
-    )
-
-    ns(type_definition_types, name='type_definition_types')
 
 
 @Namespace
@@ -557,7 +556,7 @@ def parser(ns):
         def parse_function_definition():
             token = peek()
             return_type = parse_type()
-            name = expect('NAME').value
+            name = parse_identifier()
             params = []
             expect('(')
             while not consume(')'):
@@ -605,7 +604,7 @@ def parser(ns):
 
             primitive = not extern and not trait and consume('*')
 
-            name = expect('NAME').value
+            name = parse_identifier()
 
             if primitive:
                 cname = expect('STRING').value
@@ -636,6 +635,15 @@ def parser(ns):
                 return parse_function_definition()
             elif at('class') or seq(['extern', 'class']) or at('trait'):
                 return parse_class()
+            else:
+                token = peek()
+                extern = consume('extern')
+                vartype = parse_type()
+                varname = parse_identifier()
+                expr = parse_expression() if consume('=') else None
+                expect('DELIM')
+                return ast.GlobalVariableDefinition(
+                    token, extern, vartype, varname, expr)
             raise error([i], 'Expected global definition')
 
         def parse_block():
@@ -699,8 +707,8 @@ def parser(ns):
             tu_token, source.name, imports, definitions)
 
     @ns
-    def parse_string(s: str):
-        return parse(Source(None, None, s))
+    def parse_string(s: str, name=None):
+        return parse(Source(name, None, s))
 
 
 @Namespace
@@ -731,12 +739,15 @@ def translator(ns):
 tu = parser.parse_string("""
 import os
 
+String s
+
 int foo(int x) {
 }
 
 void main() {
 }
-""")
+""", name='#')
+print(tu)
 
 translator.translate(tu, basename='main')
 
