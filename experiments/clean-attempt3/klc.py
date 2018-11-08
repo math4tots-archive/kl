@@ -354,6 +354,55 @@ def ast(ns):
         name: str
         expression: typing.Optional[object]
 
+    @ns
+    class ExpressionStatement(NT):
+        token: Token
+        expression: object
+
+    @ns
+    class Return(NT):
+        token: Token
+        expression: typing.Optional[object]
+
+    @ns
+    class VariableDeclaration(NT):
+        token: Token
+        type: str
+        name: str
+        expression: typing.Optional[object]
+
+    @ns
+    class StringLiteral(NT):
+        token: Token
+        value: str
+
+    @ns
+    class IntLiteral(NT):
+        token: Token
+        value: int
+
+    @ns
+    class DoubleLiteral(NT):
+        token: Token
+        value: int
+
+    @ns
+    class GetName(NT):
+        token: Token
+        name: str
+
+    @ns
+    class SetName(NT):
+        token: Token
+        name: str
+        expression: object
+
+    @ns
+    class FunctionCall(NT):
+        token: Token
+        name: str
+        arguments: list
+
 
 @Namespace
 def parser(ns):
@@ -523,7 +572,7 @@ def parser(ns):
                     j += 1
             ts = new_tokens
 
-        def expect_clean_name():
+        def parse_clean_name():
             """A clean name is a NAME that does not have a '.' in the name
             This is to distinguish between global qualified names
             and normal names.
@@ -562,7 +611,7 @@ def parser(ns):
             while not consume(')'):
                 ptoken = peek()
                 ptype = parse_type()
-                pname = expect_clean_name()
+                pname = parse_clean_name()
                 params.append(ast.Parameter(ptoken, ptype, pname))
                 if not consume(','):
                     expect(')')
@@ -585,7 +634,7 @@ def parser(ns):
                 elif allow_fields:
                     field_token = peek()
                     field_type = parse_type()
-                    field_name = expect_clean_name()
+                    field_name = parse_clean_name()
                     expect('DELIM')
                     fields.append(
                         ast.Field(field_token, field_type, field_name))
@@ -654,6 +703,70 @@ def parser(ns):
                 statements.append(parse_statement())
             expect('DELIM')
             return ast.Block(token, statements)
+
+        def parse_statement():
+            token = peek()
+            if consume('return'):
+                if consume('DELIM'):
+                    expr = None
+                else:
+                    expr = parse_expression()
+                    expect('DELIM')
+                return ast.Return(token, expr)
+            elif at('{'):
+                return parse_block()
+            elif seq(['NAME', 'NAME', '=']) or seq(['NAME', 'NAME', 'DELIM']):
+                return parse_variable_declaration()
+            else:
+                expr = parse_expression()
+                expect('DELIM')
+                return ast.ExpressionStatement(token, expr)
+
+        def parse_variable_declaration():
+            token = peek()
+            vartype = parse_type()
+            name = parse_clean_name()
+            expr = parse_expression() if consume('=') else None
+            expect('DELIM')
+            return ast.VariableDeclaration(token, vartype, name, expr)
+
+        def parse_expression():
+            return parse_primary()
+
+        def parse_arguments():
+            expect('(')
+            args = []
+            with nls(True):
+                while not consume(')'):
+                    args.append(parse_expression())
+                    if not consume(','):
+                        expect(')')
+                        break
+            return args
+
+        def parse_primary():
+            token = peek()
+            if consume('('):
+                with nls(True):
+                    expr = parse_expression()
+                    expect(')')
+                return expr
+            if at('NAME'):
+                name = parse_identifier()
+                if consume('='):
+                    expr = parse_expression()
+                    return ast.SetName(token, name, expr)
+                elif at('('):
+                    args = parse_arguments()
+                    return ast.FunctionCall(token, name, args)
+                return ast.GetName(token, name)
+            if at('INT'):
+                return ast.IntLiteral(token, expect('INT').value)
+            if at('FLOAT'):
+                return ast.DoubleLiteral(token, expect('FLOAT').value)
+            if at('STRING'):
+                return ast.StringLiteral(token, expect('STRING').value)
+            raise error([i], f'Expected expression but got {peek()}')
 
         def verify_peek_exported_names():
             # After the real parse as finished,
@@ -739,9 +852,10 @@ def translator(ns):
 tu = parser.parse_string("""
 import os
 
-String s
+String s = 'hello world!'
 
 int foo(int x) {
+  return x
 }
 
 void main() {
