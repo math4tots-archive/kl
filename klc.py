@@ -2042,1028 +2042,1018 @@ def ast(ns):
                 sp += 'return v;'
 
 
-def parse(source, local_prefix, env):
-    plat = sys.platform
+@Namespace
+def parser(ns):
+    @ns
+    def parse(source, local_prefix, env):
+        plat = sys.platform
 
-    # NOTE: This is really for documentation purposes, so that
-    # plat is not something unexpected
-    assert plat in (
-        'darwin',  # OS X
-        'win32',
-        'linux',
-    ), plat
-    env = {
-        '@stack': [],
-        '@intgen': [0],
-        '@ntempvar': [0],
-        '@cache': dict(),
-        '@vars': {
-            'PLATFORM': plat,
-        },
-    } if env is None else env
-    main_node = parse_one_source(source, local_prefix, env)
-    defs = list(main_node.definitions)
-    for lib_node in env['@cache'].values():
-        defs.extend(lib_node.definitions)
-    return ast.Program(main_node.token, defs, env)
-
-
-def _has_lower(s):
-    return s.upper() != s
-
-def _has_upper(s):
-    return s.lower() != s
-
-def _is_special_method_name(name):
-    return (name in _special_method_names or
-            any(name.startswith(p) for p in _special_method_prefixes))
-
-def _check_method_name(token, name):
-    # TODO: Consider removing this restriction
-    if _has_upper(name[0]) and not _is_special_method_name(name):
-        raise Error(
-            [token],
-            f'Only special methods may start with an upper case letter')
+        # NOTE: This is really for documentation purposes, so that
+        # plat is not something unexpected
+        assert plat in (
+            'darwin',  # OS X
+            'win32',
+            'linux',
+        ), plat
+        env = {
+            '@stack': [],
+            '@intgen': [0],
+            '@ntempvar': [0],
+            '@cache': dict(),
+            '@vars': {
+                'PLATFORM': plat,
+            },
+        } if env is None else env
+        main_node = parse_one_source(source, local_prefix, env)
+        defs = list(main_node.definitions)
+        for lib_node in env['@cache'].values():
+            defs.extend(lib_node.definitions)
+        return ast.Program(main_node.token, defs, env)
 
 
-def peek_local_symbols(tokens):
-    """Figure out what classes, traits, functions and variables
-    are declared in this file.
-    The parser needs to know this information ahead of time
-    in order to be able to properly qualify names.
-    """
-    i = 0
+    def _has_lower(s):
+        return s.upper() != s
 
-    def peek(j=0):
-        return tokens[min(i + j, len(tokens) - 1)]
+    def _has_upper(s):
+        return s.lower() != s
 
-    def at(type, j=0):
-        return peek(j).type == type
+    def _is_special_method_name(name):
+        return (name in _special_method_names or
+                any(name.startswith(p) for p in _special_method_prefixes))
 
-    def at_seq(types, j=0):
-        return all(at(t, i) for i, t in enumerate(types, j))
-
-    def gettok():
-        nonlocal i
-        token = peek()
-        i += 1
-        return token
-
-    def at_function():
-        return at_seq(['NAME', 'NAME', '('])
-
-    def at_class():
-        return at('class')
-
-    def at_trait():
-        return at('trait')
-
-    def at_vardef():
-        return (
-            at_seq(['NAME', 'NAME', '=']) or
-            at_seq(['NAME', 'NAME', '\n']))
-
-    def skip_to_matching():
-        op = peek().type
-        # if op is not one of these, there is a bug in this file,
-        # this function must be called at one of these places
-        cl = {
-            '(': ')',
-            '[': ']',
-            '{': '}',
-        }[op]
-        depth = 1
-        gettok()
-        while depth:
-            t = gettok().type
-            if t == op:
-                depth += 1
-            elif t == cl:
-                depth -= 1
-
-    def expect(type):
-        if not at(type):
-            raise Error([peek()], f'Expected {type} but got {peek()}')
-        return gettok()
-
-    symbols = set()
-
-    while not at('EOF'):
-        if at_function() or at_vardef():
-            expect('NAME')
-            symbols.add(expect('NAME').value)
-        elif at_class() or at_trait():
-            gettok()
-            symbols.add(expect('NAME').value)
-        elif at('(') or at('[') or at('{'):
-            skip_to_matching()
-        else:
-            gettok()
-
-    return symbols
-
-
-def update_tokens(tokens, i, module_map):
-    """
-    Creates a new list of tokens to take care of issues
-    with namespacing.
-
-    The first i tokens are copied as is. It's assumed that
-    the first i tokens are 'import' statements, so there's
-    no need to touch these.
-
-    whenever we sees a module alias, we will
-    expect to see a '.name', and resolve that full
-    name into a single NAME token.
-    """
-    new_tokens = tokens[:i]
-    while i < len(tokens):
-        token = tokens[i]
-        if (token.type == '.' and
-                i + 1 < len(tokens) and
-                tokens[i + 1].type == 'NAME'):
-            # If dot is followed by a NAME, we probably don't
-            # want to update that NAME
-            new_tokens.append(token)
-            new_tokens.append(tokens[i + 1])
-            i += 2
-            continue
-        if token.type == 'NAME' and token.value in module_map:
-            module_name = module_map[token.value]
-            if (i + 2 < len(tokens) and
-                    tokens[i + 1].type == '.' and
-                    tokens[i + 2].type == 'NAME'):
-                new_name = f'{module_name}.{tokens[i + 2].value}'
-                i += 3
-                new_tokens.append(Token(
-                    type='NAME',
-                    value=new_name,
-                    source=token.source,
-                    i=token.i))
-                continue
+    def _check_method_name(token, name):
+        # TODO: Consider removing this restriction
+        if _has_upper(name[0]) and not _is_special_method_name(name):
             raise Error(
                 [token],
-                'Module aliases must be followed by a dot and NAME')
-        # In most cases, we just want to take that token as is
-        i += 1
-        new_tokens.append(token)
-    return new_tokens
+                f'Only special methods may start with an upper case letter')
 
 
-def parse_one_source(source, local_prefix, env):
-    tokens = lexer.lex(source)
-    i = 0
-    indent_stack = []
-    cache = env['@cache']
-    stack = env['@stack']
-    intgen = env['@intgen']
-    module_map = dict()
-    local_symbols = (
-        set() if local_prefix is None else peek_local_symbols(tokens)
-    )
+    def peek_local_symbols(tokens):
+        """Figure out what classes, traits, functions and variables
+        are declared in this file.
+        The parser needs to know this information ahead of time
+        in order to be able to properly qualify names.
+        """
+        i = 0
 
-    def mktempvar():
-        i = env['@ntempvar'][0]
-        env['@ntempvar'][0] += 1
-        return f'#tempvar#{i}'
+        def peek(j=0):
+            return tokens[min(i + j, len(tokens) - 1)]
 
-    def peek(j=0):
-        nonlocal i
-        if should_skip_newlines():
-            while i < len(tokens) and tokens[i].type == '\n':
-                i += 1
-        return tokens[min(i + j, len(tokens) - 1)]
+        def at(type, j=0):
+            return peek(j).type == type
 
-    def at(type, j=0):
-        return peek(j).type == type
+        def at_seq(types, j=0):
+            return all(at(t, i) for i, t in enumerate(types, j))
 
-    def should_skip_newlines():
-        return indent_stack and indent_stack[-1]
+        def gettok():
+            nonlocal i
+            token = peek()
+            i += 1
+            return token
 
-    @contextlib.contextmanager
-    def skipping_newlines(skipping):
-        indent_stack.append(skipping)
-        yield
-        indent_stack.pop()
+        def at_function():
+            return at_seq(['NAME', 'NAME', '('])
 
-    def gettok():
-        nonlocal i
-        token = peek()
-        i += 1
-        return token
+        def at_class():
+            return at('class')
 
-    def consume(type):
-        if at(type):
+        def at_trait():
+            return at('trait')
+
+        def at_vardef():
+            return (
+                at_seq(['NAME', 'NAME', '=']) or
+                at_seq(['NAME', 'NAME', '\n']))
+
+        def skip_to_matching():
+            op = peek().type
+            # if op is not one of these, there is a bug in this file,
+            # this function must be called at one of these places
+            cl = {
+                '(': ')',
+                '[': ']',
+                '{': '}',
+            }[op]
+            depth = 1
+            gettok()
+            while depth:
+                t = gettok().type
+                if t == op:
+                    depth += 1
+                elif t == cl:
+                    depth -= 1
+
+        def expect(type):
+            if not at(type):
+                raise Error([peek()], f'Expected {type} but got {peek()}')
             return gettok()
 
-    def expect(type):
-        if not at(type):
-            raise Error([peek()], f'Expected {type} but got {peek()}')
-        return gettok()
+        symbols = set()
 
-    def expect_name(name):
-        if not at_name(name):
-            token = expect('NAME')
-            raise Error([token], f'Expected name {name} but got {token.value}')
-        return expect('NAME')
-
-    def at_name(name, j=0):
-        return at('NAME', j) and peek(j).value == name
-
-    def expect_delim():
-        token = peek()
-        if not consume(';'):
-            expect('\n')
-        while consume(';') or consume('\n'):
-            pass
-        return token
-
-    def consume_delim():
-        if at_delim():
-            return expect_delim()
-
-    def at_delim(j=0):
-        return at(';', j) or at('\n', j)
-
-    def replace_tokens_with_update():
-        # TODO: *Sigh* this is a hack.
-        nonlocal tokens
-        tokens = update_tokens(tokens, i, module_map)
-
-    def parse_program():
-        consume_delim()
-        token = peek()
-        defs = []
-        while at('import'):
-            parse_import(defs)
-        replace_tokens_with_update()
-        consume_delim()
         while not at('EOF'):
-            parse_global_definition(defs)
+            if at_function() or at_vardef():
+                expect('NAME')
+                symbols.add(expect('NAME').value)
+            elif at_class() or at_trait():
+                gettok()
+                symbols.add(expect('NAME').value)
+            elif at('(') or at('[') or at('{'):
+                skip_to_matching()
+            else:
+                gettok()
+
+        return symbols
+
+
+    def update_tokens(tokens, i, module_map):
+        """
+        Creates a new list of tokens to take care of issues
+        with namespacing.
+
+        The first i tokens are copied as is. It's assumed that
+        the first i tokens are 'import' statements, so there's
+        no need to touch these.
+
+        whenever we sees a module alias, we will
+        expect to see a '.name', and resolve that full
+        name into a single NAME token.
+        """
+        new_tokens = tokens[:i]
+        while i < len(tokens):
+            token = tokens[i]
+            if (token.type == '.' and
+                    i + 1 < len(tokens) and
+                    tokens[i + 1].type == 'NAME'):
+                # If dot is followed by a NAME, we probably don't
+                # want to update that NAME
+                new_tokens.append(token)
+                new_tokens.append(tokens[i + 1])
+                i += 2
+                continue
+            if token.type == 'NAME' and token.value in module_map:
+                module_name = module_map[token.value]
+                if (i + 2 < len(tokens) and
+                        tokens[i + 1].type == '.' and
+                        tokens[i + 2].type == 'NAME'):
+                    new_name = f'{module_name}.{tokens[i + 2].value}'
+                    i += 3
+                    new_tokens.append(Token(
+                        type='NAME',
+                        value=new_name,
+                        source=token.source,
+                        i=token.i))
+                    continue
+                raise Error(
+                    [token],
+                    'Module aliases must be followed by a dot and NAME')
+            # In most cases, we just want to take that token as is
+            i += 1
+            new_tokens.append(token)
+        return new_tokens
+
+
+    def parse_one_source(source, local_prefix, env):
+        tokens = lexer.lex(source)
+        i = 0
+        indent_stack = []
+        cache = env['@cache']
+        stack = env['@stack']
+        intgen = env['@intgen']
+        module_map = dict()
+        local_symbols = (
+            set() if local_prefix is None else peek_local_symbols(tokens)
+        )
+
+        def mktempvar():
+            i = env['@ntempvar'][0]
+            env['@ntempvar'][0] += 1
+            return f'#tempvar#{i}'
+
+        def peek(j=0):
+            nonlocal i
+            if should_skip_newlines():
+                while i < len(tokens) and tokens[i].type == '\n':
+                    i += 1
+            return tokens[min(i + j, len(tokens) - 1)]
+
+        def at(type, j=0):
+            return peek(j).type == type
+
+        def should_skip_newlines():
+            return indent_stack and indent_stack[-1]
+
+        @contextlib.contextmanager
+        def skipping_newlines(skipping):
+            indent_stack.append(skipping)
+            yield
+            indent_stack.pop()
+
+        def gettok():
+            nonlocal i
+            token = peek()
+            i += 1
+            return token
+
+        def consume(type):
+            if at(type):
+                return gettok()
+
+        def expect(type):
+            if not at(type):
+                raise Error([peek()], f'Expected {type} but got {peek()}')
+            return gettok()
+
+        def expect_name(name):
+            if not at_name(name):
+                token = expect('NAME')
+                raise Error([token], f'Expected name {name} but got {token.value}')
+            return expect('NAME')
+
+        def at_name(name, j=0):
+            return at('NAME', j) and peek(j).value == name
+
+        def expect_delim():
+            token = peek()
+            if not consume(';'):
+                expect('\n')
+            while consume(';') or consume('\n'):
+                pass
+            return token
+
+        def consume_delim():
+            if at_delim():
+                return expect_delim()
+
+        def at_delim(j=0):
+            return at(';', j) or at('\n', j)
+
+        def replace_tokens_with_update():
+            # TODO: *Sigh* this is a hack.
+            nonlocal tokens
+            tokens = update_tokens(tokens, i, module_map)
+
+        def parse_program():
             consume_delim()
-        return ast.Program(token, defs, env)
+            token = peek()
+            defs = []
+            while at('import'):
+                parse_import(defs)
+            replace_tokens_with_update()
+            consume_delim()
+            while not at('EOF'):
+                parse_global_definition(defs)
+                consume_delim()
+            return ast.Program(token, defs, env)
 
-    def parse_global_definition(defs):
-        if at('#'):
-            parse_macro(defs)
-            return
+        def parse_global_definition(defs):
+            if at('#'):
+                parse_macro(defs)
+                return
 
-        if at('trait'):
-            parse_trait_definition(defs)
-            return
+            if at('trait'):
+                parse_trait_definition(defs)
+                return
 
-        if at('class') or at('extern') and at('class', 1):
-            parse_class_definition(defs)
-            return
+            if at('class') or at('extern') and at('class', 1):
+                parse_class_definition(defs)
+                return
 
-        if at('NAME') and at('NAME', 1) and at('(', 2):
-            parse_function_definition(defs)
-            return
+            if at('NAME') and at('NAME', 1) and at('(', 2):
+                parse_function_definition(defs)
+                return
 
-        if (at('extern') or at('NAME')) and at('NAME', 1):
-            parse_global_variable_definition(defs)
-            return
+            if (at('extern') or at('NAME')) and at('NAME', 1):
+                parse_global_variable_definition(defs)
+                return
 
-        raise Error([peek()], f'Expected class, function or variable definition')
+            raise Error([peek()], f'Expected class, function or variable definition')
 
-    def parse_import(defs):
-        token = expect('import')
-        parts = [expect('NAME').value]
-        while consume('.'):
-            parts.append(expect('NAME').value)
-        alias = expect('NAME').value if consume('as') else parts[-1]
-        expect_delim()
-        name = '.'.join(parts)
-        module_map[alias] = name
-        upath = os.path.abspath(os.path.realpath(
-            os.path.join(_scriptdir, 'lib', name.replace('.', os.sep) + '.k')
-        ))
-
-        if upath in cache:
-            return
-
-        if upath in [p for p, _ in stack]:
-            toks = [t for _, t in stack]
-            raise Error(toks + [token], 'import cycle')
-
-        if not os.path.isfile(upath):
-            raise Error([token], f'File {upath} ({upath}) does not exist')
-
-        with open(upath) as f:
-            data = f.read()
-
-        try:
-            stack.append((upath, token))
-            cache[upath] = parse_one_source(Source(upath, data), name, env)
-        finally:
-            stack.pop()
-
-    def parse_macro(defs):
-        token = expect('#')
-        if at('('):
-            parse_macro_expression()()
-        else:
-            raise Error([peek()], f'Unrecognized macro type')
-
-    def _check_args(token, fn, expect, args):
-        if len(args) != expect:
-            raise Error(
-                [token],
-                f'Macro function {fn} expects {expect} args '
-                f'but got {len(args)}')
-
-    def parse_macro_expression():
-        # The result of parsing a macro expression is just a Python
-        # function that accepts no arguments. Simply running the
-        # function will cause the macro expression to be evaluated.
-        # Result of macro expressions must be one of the following:
-        #  * number (double)
-        #  * string
-        #  * list
-        token = peek()
-        if consume('('):
-            with skipping_newlines(True):
-                fn = expect('NAME').value
-                if fn == 'define':
-                    vname = expect('NAME').value
-                    expr = parse_macro_expression()
-                    expect(')')
-                    def run():
-                        result = env['@vars'][vname] = expr()
-                        return result
-                    return run
-                argexprs = []
-                while not consume(')'):
-                    argexprs.append(parse_macro_expression())
-                def run():
-                    if fn == 'cond':
-                        i = 0
-                        while i + 1 < len(argexprs):
-                            if argexprs[i]():
-                                return argexprs[i + 1]()
-                            i += 2
-                        return argexprs[i]() if i < len(argexprs) else 0.0
-                    args = [expr() for expr in argexprs]
-                    if fn == 'eq':
-                        _check_args(token, fn, 2, args)
-                        return args[0] == args[1]
-                    elif fn == 'str':
-                        return ''.join(map(str, args))
-                    elif fn == 'begin':
-                        last = 0.0
-                        for arg in args:
-                            last = arg()
-                        return last
-                    elif fn == 'append':
-                        _check_args(token, fn, 2, args)
-                        args[0].append(args[1])
-                        return 0.0
-                    elif fn == 'print':
-                        # Should be used for debugging purposes only!!
-                        _check_args(token, fn, 1, args)
-                        print(args[0])
-                    elif fn == 'error':
-                        _check_args(token, fn, 1, args)
-                        raise Error([token], str(args[0]))
-                    elif fn == 'add':
-                        if len(args) < 1:
-                            raise Error([token], 'add expects at least 1 arg')
-                        result = args[0]
-                        for arg in args[1:]:
-                            result += arg
-                        return result
-                    elif fn == 'subtract':
-                        _check_args(token, fn, 2, args)
-                        return args[0] - args[1]
-                    elif fn == 'multiply':
-                        _check_args(token, fn, 2, args)
-                        return args[0] * args[1]
-                    elif fn == 'divide':
-                        _check_args(token, fn, 2, args)
-                        return args[0] / args[1]
-                    elif fn == 'modulo':
-                        _check_args(token, fn, 2, args)
-                        return args[0] % args[1]
-                    elif fn == 'lt':
-                        _check_args(token, fn, 2, args)
-                        return args[0] < args[1]
-                    else:
-                        raise Error([token], f'Unrecognized macro function {token}')
-                return run
-        elif consume('['):
-            with skipping_newlines(True):
-                exprs = []
-                while not consume(']'):
-                    exprs.append(parse_macro_expression())
-                def run():
-                    return [expr() for expr in exprs]
-                return run
-        elif at('INT') or at('FLOAT'):
-            value = float(gettok().value)
-            return lambda: value
-        elif at('STRING'):
-            value = expect('STRING').value
-            return lambda: value
-        elif at('NAME'):
-            name = expect('NAME').value
-            def run():
-                if name not in env['@vars']:
-                    raise Error([token], f'Macro variable {name} not defined')
-                return env['@vars'][name]
-            return run
-        else:
-            raise Error(
-                [token],
-                f'Expected macro expression but got {repr(token.type)}')
-
-    def expect_maybe_exported_name():
-        name = expect('NAME').value
-        if name in local_symbols:
-            name = f'{local_prefix}.{name}'
-        return name
-
-    def expect_type():
-        return expect_maybe_exported_name()
-
-    def parse_global_variable_definition(defs):
-        token = peek()
-        extern = bool(consume('extern'))
-        vtype = expect_type()
-        vname = expect_exported_name()
-        defs.append(ast.GlobalVariableDefinition(token, extern, vtype, vname))
-        ifname = f'{vname}#init'
-        if extern:
-            initf = ast.FunctionDefinition(
-                token,
-                vtype,
-                ifname,
-                [],
-                None)
-        else:
-            if consume('='):
-                expr = parse_expression(defs)
-                initf = ast.FunctionDefinition(
-                    token,
-                    vtype,
-                    ifname,
-                    [],
-                    ast.Block(token, [ast.Return(token, expr)]))
-            else:
-                initf = ast.FunctionDefinition(
-                    token,
-                    vtype,
-                    ifname,
-                    [],
-                    ast.Block(token, [
-                        ast.VariableDefinition(token, True, vtype, 'ret', None),
-                        ast.Return(token, ast.Name(token, 'ret')),
-                    ]))
-        defs.append(initf)
-        expect_delim()
-
-    def parse_function_definition(defs):
-        token = peek()
-        return_type = expect_type()
-        nametoken = peek()
-        name = expect_exported_name()
-        params = parse_params()
-        if at('{'):
-            body = parse_block(defs)
-        else:
-            body = None
+        def parse_import(defs):
+            token = expect('import')
+            parts = [expect('NAME').value]
+            while consume('.'):
+                parts.append(expect('NAME').value)
+            alias = expect('NAME').value if consume('as') else parts[-1]
             expect_delim()
-        defs.append(ast.FunctionDefinition(token, return_type, name, params, body))
+            name = '.'.join(parts)
+            module_map[alias] = name
+            upath = os.path.abspath(os.path.realpath(
+                os.path.join(_scriptdir, 'lib', name.replace('.', os.sep) + '.k')
+            ))
 
-    def expect_non_exported_name():
-        token = peek()
-        name = expect('NAME').value
-        if local_prefix is not None and name in local_symbols:
-            raise Error([token], f'Global name {name} cannot be used here')
-        return name
+            if upath in cache:
+                return
 
-    def expect_exported_name():
-        name = expect('NAME').value
-        if local_prefix is None:
-            return name
-        assert name in local_symbols, (name, local_symbols)
-        return f'{local_prefix}.{name}'
+            if upath in [p for p, _ in stack]:
+                toks = [t for _, t in stack]
+                raise Error(toks + [token], 'import cycle')
 
-    def parse_class_definition(defs):
-        token = peek()
-        extern = bool(consume('extern'))
-        expect('class')
-        name = expect_exported_name()
-        traits = parse_trait_list()
-        method_to_token_table = dict()
-        member_to_token_table = dict()
+            if not os.path.isfile(upath):
+                raise Error([token], f'File {upath} ({upath}) does not exist')
 
-        def mark_member(name, token):
-            if name in member_to_token_table:
-                raise Error([token], f'Duplicate member definition {name}')
-            member_to_token_table[name] = token
+            with open(upath) as f:
+                data = f.read()
 
-        def mark_method(name, token):
-            mark_member(name, token)
-            method_to_token_table[name] = token
+            try:
+                stack.append((upath, token))
+                cache[upath] = parse_one_source(Source(upath, data), name, env)
+            finally:
+                stack.pop()
 
-        fields = None if extern else []
-        untyped_methods = []
-        newdef = None
-        expect('{')
-        consume_delim()
-        while not consume('}'):
-            if at('new'):
-                if newdef is not None:
-                    raise Error(
-                        [newdef.token, peek()],
-                        'Only one constructor definition is allowed for '
-                        'a class')
-                fname = f'{name}#new'
-                mtoken = expect('new')
-                declparams = parse_params()
-                if extern:
-                    # For extern types, the 'new' function should return
-                    # the constructed object. Further, the new function
-                    # itself must be extern
-                    if name == 'Closure':
-                        # It sucks to special case so much for this one
-                        # type, but I want to make sure that an actual
-                        # expression of type 'Closure' is impossible.
-                        # So for just this one, I want the return type
-                        # to be var
-                        rt = 'var'
-                    else:
-                        rt = name
-                    body = None
-                    expect_delim()
-                    params = declparams
-                else:
-                    # For normal types, the 'new' function initializes
-                    # an already allocated object.
-                    # TODO: Make 'new' return the actual object
-                    # like extern types.
-                    rt = 'void'
-                    body = parse_block(defs)
-                    params = [ast.Parameter(mtoken, name, 'this')] + declparams
-                newdef = ast.FunctionDefinition(mtoken, rt, fname, params, body)
-                defs.append(newdef)
-            elif at('NAME') and at('NAME', 1) and at_delim(2):
-                if extern:
-                    raise Error(
-                        [peek()],
-                        'Extern classes cannot declare fields '
-                        f'(in definition of class {name})')
-                ftoken = peek()
-                ftype = expect_type()
-                fname = expect('NAME').value
-                mark_member(fname, ftoken)
-                expect_delim()
-                fields.append(ast.Field(ftoken, ftype, fname))
-
-                # GET and SET methods are implemented specially
-                # during the class translation
-                getter_name = f'{name}:GET{fname}'
-                setter_name = f'{name}:SET{fname}'
-                defs.append(ast.FunctionDefinition(
-                    ftoken,
-                    ftype,
-                    getter_name,
-                    [ast.Parameter(ftoken, name, 'this')],
-                    None))
-                defs.append(ast.FunctionDefinition(
-                    ftoken,
-                    ftype,
-                    setter_name,
-                    [ast.Parameter(ftoken, name, 'this'),
-                     ast.Parameter(ftoken, ftype, 'value')],
-                    None))
-                mark_method(f'GET{fname}', ftoken)
-                mark_method(f'SET{fname}', ftoken)
-            elif at('extern'):
-                uftoken = expect('extern')
-                ufname = expect('NAME').value
-                expect_delim()
-                untyped_methods.append(ufname)
-                mark_member(ufname, uftoken)
+        def parse_macro(defs):
+            token = expect('#')
+            if at('('):
+                parse_macro_expression()()
             else:
+                raise Error([peek()], f'Unrecognized macro type')
+
+        def _check_args(token, fn, expect, args):
+            if len(args) != expect:
+                raise Error(
+                    [token],
+                    f'Macro function {fn} expects {expect} args '
+                    f'but got {len(args)}')
+
+        def parse_macro_expression():
+            # The result of parsing a macro expression is just a Python
+            # function that accepts no arguments. Simply running the
+            # function will cause the macro expression to be evaluated.
+            # Result of macro expressions must be one of the following:
+            #  * number (double)
+            #  * string
+            #  * list
+            token = peek()
+            if consume('('):
+                with skipping_newlines(True):
+                    fn = expect('NAME').value
+                    if fn == 'define':
+                        vname = expect('NAME').value
+                        expr = parse_macro_expression()
+                        expect(')')
+                        def run():
+                            result = env['@vars'][vname] = expr()
+                            return result
+                        return run
+                    argexprs = []
+                    while not consume(')'):
+                        argexprs.append(parse_macro_expression())
+                    def run():
+                        if fn == 'cond':
+                            i = 0
+                            while i + 1 < len(argexprs):
+                                if argexprs[i]():
+                                    return argexprs[i + 1]()
+                                i += 2
+                            return argexprs[i]() if i < len(argexprs) else 0.0
+                        args = [expr() for expr in argexprs]
+                        if fn == 'eq':
+                            _check_args(token, fn, 2, args)
+                            return args[0] == args[1]
+                        elif fn == 'str':
+                            return ''.join(map(str, args))
+                        elif fn == 'begin':
+                            last = 0.0
+                            for arg in args:
+                                last = arg()
+                            return last
+                        elif fn == 'append':
+                            _check_args(token, fn, 2, args)
+                            args[0].append(args[1])
+                            return 0.0
+                        elif fn == 'print':
+                            # Should be used for debugging purposes only!!
+                            _check_args(token, fn, 1, args)
+                            print(args[0])
+                        elif fn == 'error':
+                            _check_args(token, fn, 1, args)
+                            raise Error([token], str(args[0]))
+                        elif fn == 'add':
+                            if len(args) < 1:
+                                raise Error([token], 'add expects at least 1 arg')
+                            result = args[0]
+                            for arg in args[1:]:
+                                result += arg
+                            return result
+                        elif fn == 'subtract':
+                            _check_args(token, fn, 2, args)
+                            return args[0] - args[1]
+                        elif fn == 'multiply':
+                            _check_args(token, fn, 2, args)
+                            return args[0] * args[1]
+                        elif fn == 'divide':
+                            _check_args(token, fn, 2, args)
+                            return args[0] / args[1]
+                        elif fn == 'modulo':
+                            _check_args(token, fn, 2, args)
+                            return args[0] % args[1]
+                        elif fn == 'lt':
+                            _check_args(token, fn, 2, args)
+                            return args[0] < args[1]
+                        else:
+                            raise Error([token], f'Unrecognized macro function {token}')
+                    return run
+            elif consume('['):
+                with skipping_newlines(True):
+                    exprs = []
+                    while not consume(']'):
+                        exprs.append(parse_macro_expression())
+                    def run():
+                        return [expr() for expr in exprs]
+                    return run
+            elif at('INT') or at('FLOAT'):
+                value = float(gettok().value)
+                return lambda: value
+            elif at('STRING'):
+                value = expect('STRING').value
+                return lambda: value
+            elif at('NAME'):
+                name = expect('NAME').value
+                def run():
+                    if name not in env['@vars']:
+                        raise Error([token], f'Macro variable {name} not defined')
+                    return env['@vars'][name]
+                return run
+            else:
+                raise Error(
+                    [token],
+                    f'Expected macro expression but got {repr(token.type)}')
+
+        def expect_maybe_exported_name():
+            name = expect('NAME').value
+            if name in local_symbols:
+                name = f'{local_prefix}.{name}'
+            return name
+
+        def expect_type():
+            return expect_maybe_exported_name()
+
+        def parse_global_variable_definition(defs):
+            token = peek()
+            extern = bool(consume('extern'))
+            vtype = expect_type()
+            vname = expect_exported_name()
+            defs.append(ast.GlobalVariableDefinition(token, extern, vtype, vname))
+            ifname = f'{vname}#init'
+            if extern:
+                initf = ast.FunctionDefinition(
+                    token,
+                    vtype,
+                    ifname,
+                    [],
+                    None)
+            else:
+                if consume('='):
+                    expr = parse_expression(defs)
+                    initf = ast.FunctionDefinition(
+                        token,
+                        vtype,
+                        ifname,
+                        [],
+                        ast.Block(token, [ast.Return(token, expr)]))
+                else:
+                    initf = ast.FunctionDefinition(
+                        token,
+                        vtype,
+                        ifname,
+                        [],
+                        ast.Block(token, [
+                            ast.VariableDefinition(token, True, vtype, 'ret', None),
+                            ast.Return(token, ast.Name(token, 'ret')),
+                        ]))
+            defs.append(initf)
+            expect_delim()
+
+        def parse_function_definition(defs):
+            token = peek()
+            return_type = expect_type()
+            nametoken = peek()
+            name = expect_exported_name()
+            params = parse_params()
+            if at('{'):
+                body = parse_block(defs)
+            else:
+                body = None
+                expect_delim()
+            defs.append(ast.FunctionDefinition(token, return_type, name, params, body))
+
+        def expect_non_exported_name():
+            token = peek()
+            name = expect('NAME').value
+            if local_prefix is not None and name in local_symbols:
+                raise Error([token], f'Global name {name} cannot be used here')
+            return name
+
+        def expect_exported_name():
+            name = expect('NAME').value
+            if local_prefix is None:
+                return name
+            assert name in local_symbols, (name, local_symbols)
+            return f'{local_prefix}.{name}'
+
+        def parse_class_definition(defs):
+            token = peek()
+            extern = bool(consume('extern'))
+            expect('class')
+            name = expect_exported_name()
+            traits = parse_trait_list()
+            method_to_token_table = dict()
+            member_to_token_table = dict()
+
+            def mark_member(name, token):
+                if name in member_to_token_table:
+                    raise Error([token], f'Duplicate member definition {name}')
+                member_to_token_table[name] = token
+
+            def mark_method(name, token):
+                mark_member(name, token)
+                method_to_token_table[name] = token
+
+            fields = None if extern else []
+            untyped_methods = []
+            newdef = None
+            expect('{')
+            consume_delim()
+            while not consume('}'):
+                if at('new'):
+                    if newdef is not None:
+                        raise Error(
+                            [newdef.token, peek()],
+                            'Only one constructor definition is allowed for '
+                            'a class')
+                    fname = f'{name}#new'
+                    mtoken = expect('new')
+                    declparams = parse_params()
+                    if extern:
+                        # For extern types, the 'new' function should return
+                        # the constructed object. Further, the new function
+                        # itself must be extern
+                        if name == 'Closure':
+                            # It sucks to special case so much for this one
+                            # type, but I want to make sure that an actual
+                            # expression of type 'Closure' is impossible.
+                            # So for just this one, I want the return type
+                            # to be var
+                            rt = 'var'
+                        else:
+                            rt = name
+                        body = None
+                        expect_delim()
+                        params = declparams
+                    else:
+                        # For normal types, the 'new' function initializes
+                        # an already allocated object.
+                        # TODO: Make 'new' return the actual object
+                        # like extern types.
+                        rt = 'void'
+                        body = parse_block(defs)
+                        params = [ast.Parameter(mtoken, name, 'this')] + declparams
+                    newdef = ast.FunctionDefinition(mtoken, rt, fname, params, body)
+                    defs.append(newdef)
+                elif at('NAME') and at('NAME', 1) and at_delim(2):
+                    if extern:
+                        raise Error(
+                            [peek()],
+                            'Extern classes cannot declare fields '
+                            f'(in definition of class {name})')
+                    ftoken = peek()
+                    ftype = expect_type()
+                    fname = expect('NAME').value
+                    mark_member(fname, ftoken)
+                    expect_delim()
+                    fields.append(ast.Field(ftoken, ftype, fname))
+
+                    # GET and SET methods are implemented specially
+                    # during the class translation
+                    getter_name = f'{name}:GET{fname}'
+                    setter_name = f'{name}:SET{fname}'
+                    defs.append(ast.FunctionDefinition(
+                        ftoken,
+                        ftype,
+                        getter_name,
+                        [ast.Parameter(ftoken, name, 'this')],
+                        None))
+                    defs.append(ast.FunctionDefinition(
+                        ftoken,
+                        ftype,
+                        setter_name,
+                        [ast.Parameter(ftoken, name, 'this'),
+                         ast.Parameter(ftoken, ftype, 'value')],
+                        None))
+                    mark_method(f'GET{fname}', ftoken)
+                    mark_method(f'SET{fname}', ftoken)
+                elif at('extern'):
+                    uftoken = expect('extern')
+                    ufname = expect('NAME').value
+                    expect_delim()
+                    untyped_methods.append(ufname)
+                    mark_member(ufname, uftoken)
+                else:
+                    mtoken = peek()
+                    rtype = expect_type()
+                    mname = expect('NAME').value
+                    _check_method_name(mtoken, mname)
+                    params = [ast.Parameter(mtoken, name, 'this')] + parse_params()
+                    body = None if consume_delim() else parse_block(defs)
+
+                    # A method is mapped to a function with a special name,
+                    # and an implicit first parameter.
+                    fname = f'{name}:{mname}'
+
+                    mark_method(mname, token)
+
+                    defs.append(ast.FunctionDefinition(mtoken, rtype, fname, params, body))
+                consume_delim()
+
+            consume_delim()
+
+            if not extern and newdef is None:
+                defs.append(ast.FunctionDefinition(
+                    token,
+                    'void',
+                    f'{name}#new',
+                    [ast.Parameter(token, name, 'this')],
+                    ast.Block(token, [])))
+
+            method_names = sorted(method_to_token_table)
+            defs.append(ast.ClassDefinition(
+                token, name, traits, fields, method_names, untyped_methods))
+
+        def parse_trait_definition(defs):
+            token = expect('trait')
+            name = expect_exported_name()
+            method_to_token_table = dict()
+            traits = parse_trait_list()
+            expect('{')
+            consume_delim()
+            while not consume('}'):
                 mtoken = peek()
                 rtype = expect_type()
                 mname = expect('NAME').value
+                params = parse_params()
+                body = parse_block(defs)
                 _check_method_name(mtoken, mname)
-                params = [ast.Parameter(mtoken, name, 'this')] + parse_params()
-                body = None if consume_delim() else parse_block(defs)
 
                 # A method is mapped to a function with a special name,
                 # and an implicit first parameter.
                 fname = f'{name}:{mname}'
+                params = [ast.Parameter(mtoken, 'var', 'this')] + params
 
-                mark_method(mname, token)
+                if mname in method_to_token_table:
+                    raise Error([method_to_token_table[mname], mtoken],
+                                f'Duplicate method {name}.{mname}')
+
+                method_to_token_table[mname] = mtoken
 
                 defs.append(ast.FunctionDefinition(mtoken, rtype, fname, params, body))
-            consume_delim()
-
-        consume_delim()
-
-        if not extern and newdef is None:
-            defs.append(ast.FunctionDefinition(
-                token,
-                'void',
-                f'{name}#new',
-                [ast.Parameter(token, name, 'this')],
-                ast.Block(token, [])))
-
-        method_names = sorted(method_to_token_table)
-        defs.append(ast.ClassDefinition(
-            token, name, traits, fields, method_names, untyped_methods))
-
-    def parse_trait_definition(defs):
-        token = expect('trait')
-        name = expect_exported_name()
-        method_to_token_table = dict()
-        traits = parse_trait_list()
-        expect('{')
-        consume_delim()
-        while not consume('}'):
-            mtoken = peek()
-            rtype = expect_type()
-            mname = expect('NAME').value
-            params = parse_params()
-            body = parse_block(defs)
-            _check_method_name(mtoken, mname)
-
-            # A method is mapped to a function with a special name,
-            # and an implicit first parameter.
-            fname = f'{name}:{mname}'
-            params = [ast.Parameter(mtoken, 'var', 'this')] + params
-
-            if mname in method_to_token_table:
-                raise Error([method_to_token_table[mname], mtoken],
-                            f'Duplicate method {name}.{mname}')
-
-            method_to_token_table[mname] = mtoken
-
-            defs.append(ast.FunctionDefinition(mtoken, rtype, fname, params, body))
-            consume_delim()
-        consume_delim()
-
-        method_names = sorted(method_to_token_table)
-        defs.append(ast.TraitDefinition(token, name, traits, method_names))
-
-    def parse_trait_list():
-        if consume('('):
-            traits = []
-            while not consume(')'):
-                traits.append(expect_type())
-                if not consume(','):
-                    expect(')')
-                    break
-        else:
-            traits = ['Object']
-        return traits
-
-    def parse_block(defs):
-        token = expect('{')
-        with skipping_newlines(False):
-            consume_delim()
-            statements = []
-            while not consume('}'):
-                statements.append(parse_statement(defs))
                 consume_delim()
-            return ast.Block(token, statements)
+            consume_delim()
 
-    def parse_statement(defs):
-        token = peek()
+            method_names = sorted(method_to_token_table)
+            defs.append(ast.TraitDefinition(token, name, traits, method_names))
 
-        if at('{'):
-            return parse_block(defs)
-
-        if at_variable_definition():
-            return parse_variable_definition(defs)
-
-        if consume('while'):
-            expect('(')
-            with skipping_newlines(True):
-                condition = parse_expression(defs)
-                expect(')')
-            body = parse_block(defs)
-            return ast.While(token, condition, body)
-
-        if consume('for'):
+        def parse_trait_list():
             if consume('('):
-                init = []
-                if consume(';'):
-                    pass
-                elif at_variable_definition():
-                    init.append(parse_variable_definition(defs))
-                else:
-                    init.append(ast.ExpressionStatement(token, parse_expression(defs)))
-                    expect(';')
-                cond = ast.BoolLiteral(token, True) if at(';') else parse_expression(defs)
-                expect(';')
-                incr = ast.ExpressionStatement(token, parse_expression(defs))
-                expect(')')
-                raw_body = parse_block(defs)
-                body = ast.Block(token, raw_body.statements + [incr])
-                return ast.Block(token, init + [
-                    ast.While(token, cond, body),
-                ])
+                traits = []
+                while not consume(')'):
+                    traits.append(expect_type())
+                    if not consume(','):
+                        expect(')')
+                        break
             else:
-                if at('NAME') and at('in', 1):
-                    vtype = 'var'
-                else:
-                    vtype = expect_type()
-                loopvar = expect_non_exported_name()
-                expect('in')
-                container_expr = parse_expression(defs)
+                traits = ['Object']
+            return traits
+
+        def parse_block(defs):
+            token = expect('{')
+            with skipping_newlines(False):
+                consume_delim()
+                statements = []
+                while not consume('}'):
+                    statements.append(parse_statement(defs))
+                    consume_delim()
+                return ast.Block(token, statements)
+
+        def parse_statement(defs):
+            token = peek()
+
+            if at('{'):
+                return parse_block(defs)
+
+            if at_variable_definition():
+                return parse_variable_definition(defs)
+
+            if consume('while'):
+                expect('(')
+                with skipping_newlines(True):
+                    condition = parse_expression(defs)
+                    expect(')')
                 body = parse_block(defs)
-                tempvar = mktempvar()
+                return ast.While(token, condition, body)
+
+            if consume('for'):
+                if consume('('):
+                    init = []
+                    if consume(';'):
+                        pass
+                    elif at_variable_definition():
+                        init.append(parse_variable_definition(defs))
+                    else:
+                        init.append(ast.ExpressionStatement(token, parse_expression(defs)))
+                        expect(';')
+                    cond = ast.BoolLiteral(token, True) if at(';') else parse_expression(defs)
+                    expect(';')
+                    incr = ast.ExpressionStatement(token, parse_expression(defs))
+                    expect(')')
+                    raw_body = parse_block(defs)
+                    body = ast.Block(token, raw_body.statements + [incr])
+                    return ast.Block(token, init + [
+                        ast.While(token, cond, body),
+                    ])
+                else:
+                    if at('NAME') and at('in', 1):
+                        vtype = 'var'
+                    else:
+                        vtype = expect_type()
+                    loopvar = expect_non_exported_name()
+                    expect('in')
+                    container_expr = parse_expression(defs)
+                    body = parse_block(defs)
+                    tempvar = mktempvar()
+                    return ast.Block(token, [
+                        ast.VariableDefinition(
+                            token,
+                            True,
+                            None,
+                            tempvar,
+                            ast.MethodCall(token, container_expr, 'Iterator', [])),
+                        ast.While(
+                            token,
+                            ast.MethodCall(token, ast.Name(token, tempvar), 'HasNext', []),
+                            ast.Block(token, [
+                                ast.VariableDefinition(
+                                    token,
+                                    True,
+                                    None,
+                                    loopvar,
+                                    ast.Cast(
+                                        token,
+                                        ast.MethodCall(
+                                            token,
+                                            ast.Name(token, tempvar),
+                                            'Next',
+                                            []),
+                                        vtype
+                                    ),
+                                ),
+                                body,
+                            ])
+                        ),
+                    ])
+
+            if consume('with'):
+                expr = parse_expression(defs)
+                exprtempvar = mktempvar()
+                if consume('as'):
+                    name = expect('NAME').value
+                else:
+                    name = mktempvar()
+                body = parse_block(defs)
                 return ast.Block(token, [
                     ast.VariableDefinition(
                         token,
                         True,
                         None,
-                        tempvar,
-                        ast.MethodCall(token, container_expr, 'Iterator', [])),
-                    ast.While(
+                        exprtempvar,
+                        expr),
+                    ast.VariableDefinition(
                         token,
-                        ast.MethodCall(token, ast.Name(token, tempvar), 'HasNext', []),
-                        ast.Block(token, [
-                            ast.VariableDefinition(
-                                token,
-                                True,
-                                None,
-                                loopvar,
-                                ast.Cast(
-                                    token,
-                                    ast.MethodCall(
-                                        token,
-                                        ast.Name(token, tempvar),
-                                        'Next',
-                                        []),
-                                    vtype
-                                ),
-                            ),
-                            body,
-                        ])
-                    ),
+                        True,
+                        None,
+                        name,
+                        ast.MethodCall(token, ast.Name(token, exprtempvar), 'Enter', [])),
+                    ast.VariableDefinition(
+                        token,
+                        True,
+                        None,
+                        mktempvar(),
+                        ast.FunctionCall(token, '%With', [ast.Name(token, exprtempvar)])),
+                    body,
                 ])
 
-        if consume('with'):
-            expr = parse_expression(defs)
-            exprtempvar = mktempvar()
-            if consume('as'):
-                name = expect('NAME').value
-            else:
-                name = mktempvar()
-            body = parse_block(defs)
-            return ast.Block(token, [
-                ast.VariableDefinition(
-                    token,
-                    True,
-                    None,
-                    exprtempvar,
-                    expr),
-                ast.VariableDefinition(
-                    token,
-                    True,
-                    None,
-                    name,
-                    ast.MethodCall(token, ast.Name(token, exprtempvar), 'Enter', [])),
-                ast.VariableDefinition(
-                    token,
-                    True,
-                    None,
-                    mktempvar(),
-                    ast.FunctionCall(token, '%With', [ast.Name(token, exprtempvar)])),
-                body,
-            ])
-
-        if consume('if'):
-            expect('(')
-            with skipping_newlines(True):
-                condition = parse_expression(defs)
-                expect(')')
-            body = parse_block(defs)
-            if consume('else'):
-                other = parse_statement(defs)
-            else:
-                other = None
-            return ast.If(token, condition, body, other)
-
-        if consume('return'):
-            expression = None if at_delim() else parse_expression(defs)
-            expect_delim()
-            return ast.Return(token, expression)
-
-        expression = parse_expression(defs)
-        expect_delim()
-        return ast.ExpressionStatement(token, expression)
-
-    def parse_expression(defs):
-        return parse_conditional(defs)
-
-    def parse_conditional(defs):
-        expr = parse_logical_or(defs)
-        token = peek()
-        if consume('?'):
-            left = parse_expression(defs)
-            expect(':')
-            right = parse_conditional(defs)
-            return ast.Conditional(token, expr, left, right)
-        return expr
-
-    def parse_logical_or(defs):
-        expr = parse_logical_and(defs)
-        while True:
-            token = peek()
-            if consume('or'):
-                right = parse_logical_and(defs)
-                expr = ast.LogicalOr(token, expr, right)
-            else:
-                break
-        return expr
-
-    def parse_logical_and(defs):
-        expr = parse_relational(defs)
-        while True:
-            token = peek()
-            if consume('and'):
-                right = parse_relational(defs)
-                expr = ast.LogicalAnd(token, expr, right)
-            else:
-                break
-        return expr
-
-    def parse_relational(defs):
-        expr = parse_bitwise_or(defs)
-        while True:
-            token = peek()
-            if consume('=='):
-                expr = ast.Equals(token, expr, parse_bitwise_or(defs))
-            elif consume('!='):
-                expr = ast.NotEquals(token, expr, parse_bitwise_or(defs))
-            elif consume('<'):
-                expr = ast.LessThan(token, expr, parse_bitwise_or(defs))
-            elif consume('<='):
-                expr = ast.LessThanOrEqual(token, expr, parse_bitwise_or(defs))
-            elif consume('>'):
-                expr = ast.GreaterThan(token, expr, parse_bitwise_or(defs))
-            elif consume('>='):
-                expr = ast.GreaterThanOrEqual(token, expr, parse_bitwise_or(defs))
-            elif consume('is'):
-                if consume('not'):
-                    expr = ast.IsNot(token, expr, parse_bitwise_or(defs))
-                else:
-                    expr = ast.Is(token, expr, parse_bitwise_or(defs))
-            elif consume('in'):
-                expr = ast.In(token, expr, parse_bitwise_or(defs))
-            elif consume('not'):
-                expect('in')
-                expr = ast.LogicalNot(token, ast.In(token, expr, parse_bitwise_or(defs)))
-            else:
-                break
-        return expr
-
-    def parse_bitwise_or(defs):
-        expr = parse_bitwise_xor(defs)
-        while True:
-            token = peek()
-            if consume('|'):
-                expr = ast.MethodCall(token, expr, 'Or', [parse_bitwise_xor(defs)])
-            else:
-                break
-        return expr
-
-    def parse_bitwise_xor(defs):
-        expr = parse_bitwise_and(defs)
-        while True:
-            token = peek()
-            if consume('^'):
-                expr = ast.MethodCall(token, expr, 'Xor', [parse_bitwise_and(defs)])
-            else:
-                break
-        return expr
-
-    def parse_bitwise_and(defs):
-        expr = parse_bitwise_shift(defs)
-        while True:
-            token = peek()
-            if consume('&'):
-                expr = ast.MethodCall(token, expr, 'And', [parse_bitwise_shift(defs)])
-            else:
-                break
-        return expr
-
-    def parse_bitwise_shift(defs):
-        expr = parse_additive(defs)
-        while True:
-            token = peek()
-            if consume('>>'):
-                expr = ast.MethodCall(token, expr, 'Rshift', [parse_additive(defs)])
-            elif consume('<<'):
-                expr = ast.MethodCall(token, expr, 'Lshift', [parse_additive(defs)])
-            else:
-                break
-        return expr
-
-    def parse_additive(defs):
-        expr = parse_multiplicative(defs)
-        while True:
-            token = peek()
-            if consume('+'):
-                expr = ast.MethodCall(token, expr, 'Add', [parse_multiplicative(defs)])
-            elif consume('-'):
-                expr = ast.MethodCall(token, expr, 'Sub', [parse_multiplicative(defs)])
-            else:
-                break
-        return expr
-
-    def parse_multiplicative(defs):
-        expr = parse_unary(defs)
-        while True:
-            token = peek()
-            if consume('*'):
-                expr = ast.MethodCall(token, expr, 'Mul', [parse_unary(defs)])
-            elif consume('/'):
-                expr = ast.MethodCall(token, expr, 'Div', [parse_unary(defs)])
-            elif consume('%'):
-                expr = ast.MethodCall(token, expr, 'Mod', [parse_unary(defs)])
-            else:
-                break
-        return expr
-
-    def parse_unary(defs):
-        token = peek()
-        if consume('-'):
-            expr = parse_unary(defs)
-            if isinstance(expr, (ast.IntLiteral, ast.DoubleLiteral)):
-                type_ = type(expr)
-                return type_(expr.token, -expr.value)
-            else:
-                return ast.MethodCall(token, expr, 'Neg', [])
-        if consume('~'):
-            expr = parse_unary(defs)
-            return ast.MethodCall(token, expr, 'Invert', [])
-        if consume('!'):
-            expr = parse_unary(defs)
-            return ast.LogicalNot(token, expr)
-        return parse_pow(defs)
-
-    def parse_pow(defs):
-        expr = parse_postfix(defs)
-        token = peek()
-        if consume('**'):
-            expr = ast.MethodCall(token, expr, 'Pow', [parse_pow(defs)])
-        return expr
-
-    def parse_postfix(defs):
-        expr = parse_primary(defs)
-        while True:
-            token = peek()
-            if consume('.'):
-                if consume('('):
-                    cast_type = expect_type()
+            if consume('if'):
+                expect('(')
+                with skipping_newlines(True):
+                    condition = parse_expression(defs)
                     expect(')')
-                    expr = ast.Cast(token, expr, cast_type)
-                    continue
+                body = parse_block(defs)
+                if consume('else'):
+                    other = parse_statement(defs)
                 else:
-                    name = expect('NAME').value
-                    if at('('):
-                        args = parse_args(defs)
-                        expr = ast.MethodCall(token, expr, name, args)
-                        continue
-                    elif consume('='):
-                        val = parse_expression(defs)
-                        expr = ast.MethodCall(token, expr, f'SET{name}', [val])
+                    other = None
+                return ast.If(token, condition, body, other)
+
+            if consume('return'):
+                expression = None if at_delim() else parse_expression(defs)
+                expect_delim()
+                return ast.Return(token, expression)
+
+            expression = parse_expression(defs)
+            expect_delim()
+            return ast.ExpressionStatement(token, expression)
+
+        def parse_expression(defs):
+            return parse_conditional(defs)
+
+        def parse_conditional(defs):
+            expr = parse_logical_or(defs)
+            token = peek()
+            if consume('?'):
+                left = parse_expression(defs)
+                expect(':')
+                right = parse_conditional(defs)
+                return ast.Conditional(token, expr, left, right)
+            return expr
+
+        def parse_logical_or(defs):
+            expr = parse_logical_and(defs)
+            while True:
+                token = peek()
+                if consume('or'):
+                    right = parse_logical_and(defs)
+                    expr = ast.LogicalOr(token, expr, right)
+                else:
+                    break
+            return expr
+
+        def parse_logical_and(defs):
+            expr = parse_relational(defs)
+            while True:
+                token = peek()
+                if consume('and'):
+                    right = parse_relational(defs)
+                    expr = ast.LogicalAnd(token, expr, right)
+                else:
+                    break
+            return expr
+
+        def parse_relational(defs):
+            expr = parse_bitwise_or(defs)
+            while True:
+                token = peek()
+                if consume('=='):
+                    expr = ast.Equals(token, expr, parse_bitwise_or(defs))
+                elif consume('!='):
+                    expr = ast.NotEquals(token, expr, parse_bitwise_or(defs))
+                elif consume('<'):
+                    expr = ast.LessThan(token, expr, parse_bitwise_or(defs))
+                elif consume('<='):
+                    expr = ast.LessThanOrEqual(token, expr, parse_bitwise_or(defs))
+                elif consume('>'):
+                    expr = ast.GreaterThan(token, expr, parse_bitwise_or(defs))
+                elif consume('>='):
+                    expr = ast.GreaterThanOrEqual(token, expr, parse_bitwise_or(defs))
+                elif consume('is'):
+                    if consume('not'):
+                        expr = ast.IsNot(token, expr, parse_bitwise_or(defs))
+                    else:
+                        expr = ast.Is(token, expr, parse_bitwise_or(defs))
+                elif consume('in'):
+                    expr = ast.In(token, expr, parse_bitwise_or(defs))
+                elif consume('not'):
+                    expect('in')
+                    expr = ast.LogicalNot(token, ast.In(token, expr, parse_bitwise_or(defs)))
+                else:
+                    break
+            return expr
+
+        def parse_bitwise_or(defs):
+            expr = parse_bitwise_xor(defs)
+            while True:
+                token = peek()
+                if consume('|'):
+                    expr = ast.MethodCall(token, expr, 'Or', [parse_bitwise_xor(defs)])
+                else:
+                    break
+            return expr
+
+        def parse_bitwise_xor(defs):
+            expr = parse_bitwise_and(defs)
+            while True:
+                token = peek()
+                if consume('^'):
+                    expr = ast.MethodCall(token, expr, 'Xor', [parse_bitwise_and(defs)])
+                else:
+                    break
+            return expr
+
+        def parse_bitwise_and(defs):
+            expr = parse_bitwise_shift(defs)
+            while True:
+                token = peek()
+                if consume('&'):
+                    expr = ast.MethodCall(token, expr, 'And', [parse_bitwise_shift(defs)])
+                else:
+                    break
+            return expr
+
+        def parse_bitwise_shift(defs):
+            expr = parse_additive(defs)
+            while True:
+                token = peek()
+                if consume('>>'):
+                    expr = ast.MethodCall(token, expr, 'Rshift', [parse_additive(defs)])
+                elif consume('<<'):
+                    expr = ast.MethodCall(token, expr, 'Lshift', [parse_additive(defs)])
+                else:
+                    break
+            return expr
+
+        def parse_additive(defs):
+            expr = parse_multiplicative(defs)
+            while True:
+                token = peek()
+                if consume('+'):
+                    expr = ast.MethodCall(token, expr, 'Add', [parse_multiplicative(defs)])
+                elif consume('-'):
+                    expr = ast.MethodCall(token, expr, 'Sub', [parse_multiplicative(defs)])
+                else:
+                    break
+            return expr
+
+        def parse_multiplicative(defs):
+            expr = parse_unary(defs)
+            while True:
+                token = peek()
+                if consume('*'):
+                    expr = ast.MethodCall(token, expr, 'Mul', [parse_unary(defs)])
+                elif consume('/'):
+                    expr = ast.MethodCall(token, expr, 'Div', [parse_unary(defs)])
+                elif consume('%'):
+                    expr = ast.MethodCall(token, expr, 'Mod', [parse_unary(defs)])
+                else:
+                    break
+            return expr
+
+        def parse_unary(defs):
+            token = peek()
+            if consume('-'):
+                expr = parse_unary(defs)
+                if isinstance(expr, (ast.IntLiteral, ast.DoubleLiteral)):
+                    type_ = type(expr)
+                    return type_(expr.token, -expr.value)
+                else:
+                    return ast.MethodCall(token, expr, 'Neg', [])
+            if consume('~'):
+                expr = parse_unary(defs)
+                return ast.MethodCall(token, expr, 'Invert', [])
+            if consume('!'):
+                expr = parse_unary(defs)
+                return ast.LogicalNot(token, expr)
+            return parse_pow(defs)
+
+        def parse_pow(defs):
+            expr = parse_postfix(defs)
+            token = peek()
+            if consume('**'):
+                expr = ast.MethodCall(token, expr, 'Pow', [parse_pow(defs)])
+            return expr
+
+        def parse_postfix(defs):
+            expr = parse_primary(defs)
+            while True:
+                token = peek()
+                if consume('.'):
+                    if consume('('):
+                        cast_type = expect_type()
+                        expect(')')
+                        expr = ast.Cast(token, expr, cast_type)
                         continue
                     else:
-                        expr = ast.MethodCall(token, expr, f'GET{name}', [])
-                        continue
-            elif consume('['):
-                # x[i,...]       GetItem
-                # x[i,...] = v   SetItem
-                # x[a:b]         Slice
-                # x[:b]          SliceRight
-                # x[a:b]         SliceLeft
-                # x[a:b] = v     SetSlice
-                # x[:b] = v      SetSliceRight
-                # x[a:] = v      SetSliceLeft
-                args = []
-                left = right = None
-                is_slice = False
-                if consume(':'):
-                    is_slice = True
-                    if consume(']'):
-                        pass
-                    else:
-                        right = parse_expression(defs)
-                        args.append(right)
-                        expect(']')
-                elif consume(']'):
-                    pass
-                else:
-                    left = parse_expression(defs)
-                    args.append(left)
+                        name = expect('NAME').value
+                        if at('('):
+                            args = parse_args(defs)
+                            expr = ast.MethodCall(token, expr, name, args)
+                            continue
+                        elif consume('='):
+                            val = parse_expression(defs)
+                            expr = ast.MethodCall(token, expr, f'SET{name}', [val])
+                            continue
+                        else:
+                            expr = ast.MethodCall(token, expr, f'GET{name}', [])
+                            continue
+                elif consume('['):
+                    # x[i,...]       GetItem
+                    # x[i,...] = v   SetItem
+                    # x[a:b]         Slice
+                    # x[:b]          SliceRight
+                    # x[a:b]         SliceLeft
+                    # x[a:b] = v     SetSlice
+                    # x[:b] = v      SetSliceRight
+                    # x[a:] = v      SetSliceLeft
+                    args = []
+                    left = right = None
+                    is_slice = False
                     if consume(':'):
                         is_slice = True
                         if consume(']'):
@@ -3075,224 +3065,237 @@ def parse_one_source(source, local_prefix, env):
                     elif consume(']'):
                         pass
                     else:
-                        expect(',')
-                        while not consume(']'):
-                            args.append(parse_expression(defs))
-                            if not consume(','):
+                        left = parse_expression(defs)
+                        args.append(left)
+                        if consume(':'):
+                            is_slice = True
+                            if consume(']'):
+                                pass
+                            else:
+                                right = parse_expression(defs)
+                                args.append(right)
                                 expect(']')
-                                break
-                assign = False
-                if consume('='):
-                    assign = True
-                    args.append(parse_expression(defs))
-                if is_slice:
-                    method_name = (
-                        'SliceAll' if left is None and right is None else
-                        'SliceLeft' if right is None else
-                        'SliceRight' if left is None else
-                        'Slice'
-                    )
-                    if assign:
-                        method_name = 'Set' + method_name
-                elif assign:
-                    method_name = 'SetItem'
-                else:
-                    method_name = 'GetItem'
-                expr = ast.MethodCall(token, expr, method_name, args)
-                continue
-            break
-        return expr
-
-    def parse_primary(defs):
-        token = peek()
-
-        if consume('def'):
-            next_int = intgen[0]
-            intgen[0] += 1
-            lambda_name = f'lambda#{next_int}'
-            return_type = expect_type()
-            capture_params = []
-            if consume('['):
-                while not consume(']'):
-                    if at('NAME') and at('NAME', 1):
-                        type_ = expect_type()
+                        elif consume(']'):
+                            pass
+                        else:
+                            expect(',')
+                            while not consume(']'):
+                                args.append(parse_expression(defs))
+                                if not consume(','):
+                                    expect(']')
+                                    break
+                    assign = False
+                    if consume('='):
+                        assign = True
+                        args.append(parse_expression(defs))
+                    if is_slice:
+                        method_name = (
+                            'SliceAll' if left is None and right is None else
+                            'SliceLeft' if right is None else
+                            'SliceRight' if left is None else
+                            'Slice'
+                        )
+                        if assign:
+                            method_name = 'Set' + method_name
+                    elif assign:
+                        method_name = 'SetItem'
                     else:
-                        type_ = 'var'
-                    capture_params.append(ast.Parameter(
-                        peek(), type_, expect_non_exported_name()))
-                    if not consume(','):
-                        expect(']')
-                        break
-            params = parse_params()
-            body = parse_block(defs)
-            defs.append(ast.FunctionDefinition(
-                token,
-                return_type,
-                lambda_name,
-                capture_params + params,
-                body))
-            return ast.FunctionCall(token, 'Closure', [
-                ast.ListDisplay(token, [
-                    ast.Name(p.token, p.name) for p in capture_params
-                ]),
-                ast.Name(token, lambda_name),
-            ])
-
-        if consume('('):
-            with skipping_newlines(True):
-                expr = parse_expression(defs)
-                expect(')')
+                        method_name = 'GetItem'
+                    expr = ast.MethodCall(token, expr, method_name, args)
+                    continue
+                break
             return expr
 
-        if consume('['):
-            exprs = []
-            with skipping_newlines(True):
-                while not consume(']'):
-                    exprs.append(parse_expression(defs))
-                    if not consume(','):
-                        expect(']')
-                        break
-            return ast.ListDisplay(token, exprs)
+        def parse_primary(defs):
+            token = peek()
 
-        if consume('{'):
-            with skipping_newlines(True):
-                if consume('}'):
-                    return ast.FunctionCall(token, 'Set', [])
-                if consume(':'):
-                    expect('}')
-                    return ast.FunctionCall(token, 'Map', [])
-                key = parse_expression(defs)
-                if consume(':'):
-                    value = parse_expression(defs)
-                    pairs = [ast.ListDisplay(token, [key, value])]
+            if consume('def'):
+                next_int = intgen[0]
+                intgen[0] += 1
+                lambda_name = f'lambda#{next_int}'
+                return_type = expect_type()
+                capture_params = []
+                if consume('['):
+                    while not consume(']'):
+                        if at('NAME') and at('NAME', 1):
+                            type_ = expect_type()
+                        else:
+                            type_ = 'var'
+                        capture_params.append(ast.Parameter(
+                            peek(), type_, expect_non_exported_name()))
+                        if not consume(','):
+                            expect(']')
+                            break
+                params = parse_params()
+                body = parse_block(defs)
+                defs.append(ast.FunctionDefinition(
+                    token,
+                    return_type,
+                    lambda_name,
+                    capture_params + params,
+                    body))
+                return ast.FunctionCall(token, 'Closure', [
+                    ast.ListDisplay(token, [
+                        ast.Name(p.token, p.name) for p in capture_params
+                    ]),
+                    ast.Name(token, lambda_name),
+                ])
+
+            if consume('('):
+                with skipping_newlines(True):
+                    expr = parse_expression(defs)
+                    expect(')')
+                return expr
+
+            if consume('['):
+                exprs = []
+                with skipping_newlines(True):
+                    while not consume(']'):
+                        exprs.append(parse_expression(defs))
+                        if not consume(','):
+                            expect(']')
+                            break
+                return ast.ListDisplay(token, exprs)
+
+            if consume('{'):
+                with skipping_newlines(True):
+                    if consume('}'):
+                        return ast.FunctionCall(token, 'Set', [])
+                    if consume(':'):
+                        expect('}')
+                        return ast.FunctionCall(token, 'Map', [])
+                    key = parse_expression(defs)
+                    if consume(':'):
+                        value = parse_expression(defs)
+                        pairs = [ast.ListDisplay(token, [key, value])]
+                        if consume(','):
+                            while not consume('}'):
+                                key = parse_expression(defs)
+                                expect(':')
+                                value = parse_expression(defs)
+                                pairs.append(ast.ListDisplay(token, [key, value]))
+                                if not consume(','):
+                                    expect('}')
+                                    break
+                        else:
+                            expect('}')
+                        return ast.FunctionCall(token, 'MapFromPairs', [
+                            ast.ListDisplay(token, pairs)
+                        ])
+                    args = [key]
                     if consume(','):
                         while not consume('}'):
-                            key = parse_expression(defs)
-                            expect(':')
-                            value = parse_expression(defs)
-                            pairs.append(ast.ListDisplay(token, [key, value]))
+                            args.append(parse_expression(defs))
                             if not consume(','):
                                 expect('}')
                                 break
                     else:
                         expect('}')
-                    return ast.FunctionCall(token, 'MapFromPairs', [
-                        ast.ListDisplay(token, pairs)
-                    ])
-                args = [key]
-                if consume(','):
-                    while not consume('}'):
-                        args.append(parse_expression(defs))
-                        if not consume(','):
-                            expect('}')
-                            break
-                else:
-                    expect('}')
-                return ast.FunctionCall(token, 'SetFromList', [ast.ListDisplay(token, args)])
+                    return ast.FunctionCall(token, 'SetFromList', [ast.ListDisplay(token, args)])
 
-        if consume('null'):
-            type_ = 'var'
-            if consume('('):
-                type_ = expect_type()
-                expect(')')
-            return ast.NullLiteral(token, type_)
-
-        if consume('true'):
-            return ast.BoolLiteral(token, True)
-
-        if consume('false'):
-            return ast.BoolLiteral(token, False)
-
-        if at('INT'):
-            value = expect('INT').value
-            return ast.IntLiteral(token, value)
-
-        if at('FLOAT'):
-            value = expect('FLOAT').value
-            return ast.DoubleLiteral(token, value)
-
-        if at('NAME'):
-            name = expect_maybe_exported_name()
-            if consume('++'):
-                return ast.SetName(token, name, ast.MethodCall(
-                    token, ast.Name(token, name), 'Add', [ast.IntLiteral(token, 1)]))
-            if consume('--'):
-                return ast.SetName(token, name, ast.MethodCall(
-                    token, ast.Name(token, name), 'Sub', [ast.IntLiteral(token, 1)]))
-            elif consume('='):
-                expr = parse_expression(defs)
-                return ast.SetName(token, name, expr)
-            elif at('('):
-                args = parse_args(defs)
-                return ast.FunctionCall(token, name, args)
-            else:
-                return ast.Name(token, name)
-
-        if at('STRING'):
-            return ast.StringLiteral(token, expect('STRING').value)
-
-        raise Error([token], 'Expected expression')
-
-    def at_variable_definition():
-        return (at('final') or at('auto') or at('NAME')) and at('NAME', 1)
-
-    def parse_variable_definition(defs):
-        token = peek()
-        if consume('final'):
-            final = True
-            vartype = None
-        elif consume('auto'):
-            final = False
-            vartype = None
-        else:
-            final = False
-            vartype = expect_type()
-        name = expect_non_exported_name()
-        value = parse_expression(defs) if consume('=') else None
-        expect_delim()
-        if final and value is None:
-            raise Error(
-                [self.token],
-                'final variables definitions must specify an expression')
-        return ast.VariableDefinition(token, final, vartype, name, value)
-
-    def parse_args(defs, opener='(', closer=')'):
-        args = []
-        with skipping_newlines(True):
-            expect(opener)
-            while not consume(closer):
-                args.append(parse_expression(defs))
-                if not consume(','):
-                    expect(closer)
-                    break
-            return args
-
-    def parse_params():
-        params = []
-        expect('(')
-        with skipping_newlines(True):
-            while not consume(')'):
-                paramtoken = peek()
-                paramtype = expect_type()
-                paramname = expect_non_exported_name()
-                params.append(ast.Parameter(paramtoken, paramtype, paramname))
-                if not consume(','):
+            if consume('null'):
+                type_ = 'var'
+                if consume('('):
+                    type_ = expect_type()
                     expect(')')
-                    break
-            return params
+                return ast.NullLiteral(token, type_)
 
-    return parse_program()
+            if consume('true'):
+                return ast.BoolLiteral(token, True)
+
+            if consume('false'):
+                return ast.BoolLiteral(token, False)
+
+            if at('INT'):
+                value = expect('INT').value
+                return ast.IntLiteral(token, value)
+
+            if at('FLOAT'):
+                value = expect('FLOAT').value
+                return ast.DoubleLiteral(token, value)
+
+            if at('NAME'):
+                name = expect_maybe_exported_name()
+                if consume('++'):
+                    return ast.SetName(token, name, ast.MethodCall(
+                        token, ast.Name(token, name), 'Add', [ast.IntLiteral(token, 1)]))
+                if consume('--'):
+                    return ast.SetName(token, name, ast.MethodCall(
+                        token, ast.Name(token, name), 'Sub', [ast.IntLiteral(token, 1)]))
+                elif consume('='):
+                    expr = parse_expression(defs)
+                    return ast.SetName(token, name, expr)
+                elif at('('):
+                    args = parse_args(defs)
+                    return ast.FunctionCall(token, name, args)
+                else:
+                    return ast.Name(token, name)
+
+            if at('STRING'):
+                return ast.StringLiteral(token, expect('STRING').value)
+
+            raise Error([token], 'Expected expression')
+
+        def at_variable_definition():
+            return (at('final') or at('auto') or at('NAME')) and at('NAME', 1)
+
+        def parse_variable_definition(defs):
+            token = peek()
+            if consume('final'):
+                final = True
+                vartype = None
+            elif consume('auto'):
+                final = False
+                vartype = None
+            else:
+                final = False
+                vartype = expect_type()
+            name = expect_non_exported_name()
+            value = parse_expression(defs) if consume('=') else None
+            expect_delim()
+            if final and value is None:
+                raise Error(
+                    [self.token],
+                    'final variables definitions must specify an expression')
+            return ast.VariableDefinition(token, final, vartype, name, value)
+
+        def parse_args(defs, opener='(', closer=')'):
+            args = []
+            with skipping_newlines(True):
+                expect(opener)
+                while not consume(closer):
+                    args.append(parse_expression(defs))
+                    if not consume(','):
+                        expect(closer)
+                        break
+                return args
+
+        def parse_params():
+            params = []
+            expect('(')
+            with skipping_newlines(True):
+                while not consume(')'):
+                    paramtoken = peek()
+                    paramtype = expect_type()
+                    paramname = expect_non_exported_name()
+                    params.append(ast.Parameter(paramtoken, paramtype, paramname))
+                    if not consume(','):
+                        expect(')')
+                        break
+                return params
+
+        return parse_program()
 
 
 tok = lexer.lex(Source('<dummy>', 'dummy'))[0]
 
-parser = argparse.ArgumentParser()
-parser.add_argument('kfile')
-parser.add_argument('--out-file', '-o', default=None)
-parser.add_argument('--opt', '-O', type=int, default=1)
-parser.add_argument('--debug', '-g', action='store_true', default=False)
-parser.add_argument('--no-debug', dest='debug', action='store_false')
-parser.add_argument('--test', '-t', action='store_true', default=False)
+argparser = argparse.ArgumentParser()
+argparser.add_argument('kfile')
+argparser.add_argument('--out-file', '-o', default=None)
+argparser.add_argument('--opt', '-O', type=int, default=1)
+argparser.add_argument('--debug', '-g', action='store_true', default=False)
+argparser.add_argument('--no-debug', dest='debug', action='store_false')
+argparser.add_argument('--test', '-t', action='store_true', default=False)
 
 
 def find_tests(local_prefix):
@@ -3310,8 +3313,8 @@ def find_tests(local_prefix):
 
 def main():
     try:
-        args = parser.parse_args()
-        builtins_node = parse(Source('<builtin>', BUILTINS), None, None)
+        args = argparser.parse_args()
+        builtins_node = parser.parse(Source('<builtin>', BUILTINS), None, None)
 
         if args.test:
             tests = sorted(find_tests(args.kfile))
@@ -3334,7 +3337,7 @@ def main():
                 data = f.read()
             source = Source(args.kfile, data)
 
-        node = parse(source, '#', builtins_node.env)
+        node = parser.parse(source, '#', builtins_node.env)
         program = ast.Program(
             node.token,
             node.definitions + builtins_node.definitions,
