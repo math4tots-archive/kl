@@ -277,7 +277,7 @@ class Token(typing.NamedTuple):
 
     def format(self):
         return (
-            f'  On line {self.lineno}\n'
+            f'  In {self.source.filename} on line {self.lineno}\n'
             f'  {self.line}\n'
             f'  {" " * (self.colno - 1)}*\n'
         )
@@ -2060,8 +2060,58 @@ def Cee(ns):
 
 @Namespace
 def parser(ns):
+
+    class MacroScope:
+        def __init__(self, parent, table=None, stack=None):
+            if parent is None:
+                if stack is None:
+                    stack = []
+            else:
+                if stack is None:
+                    stack = parent.stack
+                else:
+                    raise TypeError((parent, stack))
+            self.parent = parent
+            self.table = dict() if table is None else table
+            self.stack = stack
+
+        @contextlib.contextmanager
+        def using(self, token):
+            self.stack.append(token)
+            yield
+            self.stack.pop()
+
+        def __getitem__(self, key):
+            if key in self.table:
+                return self.table[key]
+            elif self.parent is not None:
+                return self.parent[key]
+            else:
+                raise Error(self.stack, f'No such macro variable {key}')
+
+        def __setitem__(self, key, value):
+            if key in self.table:
+                self.table[key] = value
+            elif self.parent is not None:
+                self.parent[key] = value
+            else:
+                raise Error(self.stack, f'No such macro variable {key}')
+
+        def define(self, key, value):
+            if key in self.table:
+                raise Error(
+                    self.stack, f'Macro variable already defined {key}')
+            self.table[key] = value
+
+    class MacroLambda(typing.NamedTuple):
+        token: Token
+        scope: MacroScope
+        params: typing.List[str]
+        body: list
+
     class Context(typing.NamedTuple):
         defs: list
+        macro_scope: MacroScope
 
     @ns
     def parse(source, local_prefix, env):
@@ -2074,21 +2124,22 @@ def parser(ns):
             'win32',
             'linux',
         ), plat
-        env = {
-            '@stack': [],
-            '@intgen': [0],
-            '@ntempvar': [0],
-            '@cache': dict(),
-            '@vars': {
-                'PLATFORM': plat,
-            },
-        } if env is None else env
+        if env is None:
+            env = {
+                '@stack': [],
+                '@intgen': [0],
+                '@ntempvar': [0],
+                '@cache': dict(),
+                '@vars': {
+                    'PLATFORM': plat,
+                },
+            }
+            env['@macro_scope'] = MacroScope(MacroScope(None, env['@vars']))
         main_node = parse_one_source(source, local_prefix, env)
         defs = list(main_node.definitions)
         for lib_node in env['@cache'].values():
             defs.extend(lib_node.definitions)
         return ast.Program(main_node.token, defs, env)
-
 
     def _has_lower(s):
         return s.upper() != s
@@ -2106,7 +2157,6 @@ def parser(ns):
             raise Error(
                 [token],
                 f'Only special methods may start with an upper case letter')
-
 
     def peek_local_symbols(tokens):
         """Figure out what classes, traits, functions and variables
@@ -2184,7 +2234,6 @@ def parser(ns):
 
         return symbols
 
-
     def update_tokens(tokens, i, module_map):
         """
         Creates a new list of tokens to take care of issues
@@ -2230,7 +2279,6 @@ def parser(ns):
             i += 1
             new_tokens.append(token)
         return new_tokens
-
 
     def parse_one_source(source, local_prefix, env):
         tokens = lexer.lex(source)
@@ -2316,7 +2364,9 @@ def parser(ns):
             consume_delim()
             token = peek()
             defs = []
-            ctx = Context(defs)
+            ctx = Context(
+                defs=defs,
+                macro_scope=env['@macro_scope'])
             while at('import'):
                 parse_import(ctx)
             replace_tokens_with_update()
@@ -2384,7 +2434,7 @@ def parser(ns):
         def parse_macro(ctx):
             token = expect('#')
             if at('('):
-                parse_macro_expression()()
+                parse_macro_expression()(ctx.macro_scope)
             else:
                 raise Error([peek()], f'Unrecognized macro type')
 
@@ -2407,26 +2457,53 @@ def parser(ns):
             if consume('('):
                 with skipping_newlines(True):
                     fn = expect('NAME').value
-                    if fn == 'define':
+                    if fn in ('global', 'define', 'set'):
                         vname = expect('NAME').value
                         expr = parse_macro_expression()
                         expect(')')
-                        def run():
-                            result = env['@vars'][vname] = expr()
-                            return result
+                        if fn == 'global':
+                            def run(mscope, token=token):
+                                with mscope.using(token):
+                                    result = env['@vars'][vname] = expr(mscope)
+                                    return result
+                        elif fn == 'define':
+                            def run(mscope, token=token):
+                                with mscope.using(token):
+                                    result = expr(mscope)
+                                    mscope.define(vname, result)
+                                    return result
+                        elif fn == 'set':
+                            def run(mscope, token=token):
+                                with mscope.using(token):
+                                    result = mscope[vname] = expr(mscope)
+                                    return result
+                        else:
+                            raise Error([token], 'FUBAR')
+                        return run
+                    elif fn == 'lambda':
+                        expect('(')
+                        params = []
+                        while not consume(')'):
+                            params.append(expect('NAME').value)
+                        bodyexprs = []
+                        while not consume(')'):
+                            bodyexprs.append(parse_macro_expression())
+                        def run(mscope):
+                            return MacroLambda(
+                                token, mscope, params, bodyexprs)
                         return run
                     argexprs = []
                     while not consume(')'):
                         argexprs.append(parse_macro_expression())
-                    def run():
+                    def run(mscope, token=token):
                         if fn == 'cond':
                             i = 0
                             while i + 1 < len(argexprs):
-                                if argexprs[i]():
-                                    return argexprs[i + 1]()
+                                if argexprs[i](mscope):
+                                    return argexprs[i + 1](mscope)
                                 i += 2
-                            return argexprs[i]() if i < len(argexprs) else 0.0
-                        args = [expr() for expr in argexprs]
+                            return argexprs[i](mscope) if i < len(argexprs) else 0.0
+                        args = [expr(mscope) for expr in argexprs]
                         if fn == 'eq':
                             _check_args(token, fn, 2, args)
                             return args[0] == args[1]
@@ -2447,7 +2524,8 @@ def parser(ns):
                             print(args[0])
                         elif fn == 'error':
                             _check_args(token, fn, 1, args)
-                            raise Error([token], str(args[0]))
+                            with mscope.using(token):
+                                raise Error(mscope.stack, str(args[0]))
                         elif fn == 'add':
                             if len(args) < 1:
                                 raise Error([token], 'add expects at least 1 arg')
@@ -2471,28 +2549,42 @@ def parser(ns):
                             _check_args(token, fn, 2, args)
                             return args[0] < args[1]
                         else:
-                            raise Error([token], f'Unrecognized macro function {token}')
+                            with mscope.using(token):
+                                print(f'enter {len(mscope.stack)}')
+                                lambda_ = mscope[fn]
+                                new_scope = MacroScope(lambda_.scope)
+                                if len(lambda_.params) != len(args):
+                                    with mscope.using(lambda_.token):
+                                        raise Error(
+                                            mscope.stack,
+                                            f'Expected {len(lambda_.params)} '
+                                            f'args but got {len(args)}')
+                                for param, arg in zip(lambda_.params, args):
+                                    new_scope.define(param, arg)
+                                for expr in lambda_.body:
+                                    last = expr(new_scope)
+                                print('exit')
+                                return last
                     return run
             elif consume('['):
                 with skipping_newlines(True):
                     exprs = []
                     while not consume(']'):
                         exprs.append(parse_macro_expression())
-                    def run():
-                        return [expr() for expr in exprs]
+                    def run(mscope):
+                        return [expr(mscope) for expr in exprs]
                     return run
             elif at('INT') or at('FLOAT'):
                 value = float(gettok().value)
-                return lambda: value
+                return lambda mscope: value
             elif at('STRING'):
                 value = expect('STRING').value
-                return lambda: value
+                return lambda mscope: value
             elif at('NAME'):
                 name = expect('NAME').value
-                def run():
-                    if name not in env['@vars']:
-                        raise Error([token], f'Macro variable {name} not defined')
-                    return env['@vars'][name]
+                def run(mscope, token=token):
+                    with mscope.using(token):
+                        return mscope[name]
                 return run
             else:
                 raise Error(

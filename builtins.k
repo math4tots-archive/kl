@@ -1,10 +1,17 @@
-#(define C_HEADERS [])
-#(define C_SOURCES [
+#(global C_HEADERS [])
+#(global C_SOURCES [
   'generated_main.c'    // This is where the main program is
 ])
 
 // Frameworks that are required for deploying to darwin targets.
-#(define APPLE_FRAMEWORKS [])
+#(global APPLE_FRAMEWORKS [])
+
+#(global assert (lambda (condition message)
+  (cond
+      condition 1
+      (error 'assertion failed')
+    )
+))
 
 // Special functions required by the language
 bool _Is(var a, var b)
