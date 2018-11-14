@@ -519,9 +519,7 @@ Optional = OptionalType(object)
 
 
 @Namespace
-def ir(ns):
-    "intermediate representation"
-
+def ast(ns):
     @ns
     class Node(object):
         def __init__(self, token, *args):
@@ -545,6 +543,15 @@ def ir(ns):
                 type(self).__name__,
                 ', '.join(repr(getattr(self, n)) for n, _ in type(self).fields),
             )
+
+
+@Namespace
+def ir(ns):
+    "intermediate representation"
+
+    @ns
+    class Node(ast.Node):
+        pass
 
     @ns
     class BaseVariableDefinition(Node):
