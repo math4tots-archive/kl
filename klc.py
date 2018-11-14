@@ -519,7 +519,8 @@ Optional = OptionalType(object)
 
 
 @Namespace
-def ast(ns):
+def ir(ns):
+    "intermediate representation"
 
     @ns
     class Node(object):
@@ -964,11 +965,11 @@ def Cee(ns):
 
         def add(self, node):
             self.local_definitions.append(node)
-            if isinstance(node, ast.GlobalDefinition):
+            if isinstance(node, ir.GlobalDefinition):
                 self._set(node.name, node)
-            elif isinstance(node, ast.BaseVariableDefinition):
+            elif isinstance(node, ir.BaseVariableDefinition):
                 self.validate_vardef(node)
-                if isinstance(node, ast.VariableDefinition):
+                if isinstance(node, ir.VariableDefinition):
                     self._check_for_shadow(node)
                 self._set(node.name, node)
             else:
@@ -977,11 +978,11 @@ def Cee(ns):
         def validate_vardef(self, vardef):
             if vardef.type not in PRIMITIVE_TYPES and vardef.type != 'var':
                 typenode = self.get(vardef.type, [vardef.token])
-                if isinstance(typenode, ast.TraitDefinition):
+                if isinstance(typenode, ir.TraitDefinition):
                     raise Error(
                         [vardef.token],
                         f'Using trait types variable type not supported')
-                if not isinstance(typenode, ast.TypeDefinition):
+                if not isinstance(typenode, ir.TypeDefinition):
                     raise Error([vardef.token], f'{vardef.type} is not a type')
 
         def _check_for_shadow(self, node):
@@ -992,7 +993,7 @@ def Cee(ns):
             scope = self.parent
             name = node.name
             while scope:
-                if name in scope.table and isinstance(scope.table[name], ast.VariableDefinition):
+                if name in scope.table and isinstance(scope.table[name], ir.VariableDefinition):
                     raise Error([node.token, scope.table[name].token],
                                 f'Shadowed local variable')
                 scope = scope.parent
@@ -1159,25 +1160,25 @@ def Cee(ns):
     translate = Multimethod('translate')
     ns(translate, name='translate')
 
-    @translate.on(ast.Name)
+    @translate.on(ir.Name)
     def translate(self, ctx):
         defn = ctx.scope.get(self.name, [self.token])
-        if isinstance(defn, ast.GlobalVariableDefinition):
+        if isinstance(defn, ir.GlobalVariableDefinition):
             etype = defn.type
             tempvar = ctx.mktemp(etype)
             ctx.src += f'{tempvar} = KLC_get_global{encode(defn.name)}();'
             return (etype, tempvar)
-        elif isinstance(defn, ast.BaseVariableDefinition):
+        elif isinstance(defn, ir.BaseVariableDefinition):
             etype = defn.type
             tempvar = ctx.mktemp(etype)
             ctx.src += f'{tempvar} = {ctx.cname(self.name)};'
             ctx.src += _cretain(ctx, etype, tempvar)
             return (etype, tempvar)
-        elif isinstance(defn, ast.ClassDefinition):
+        elif isinstance(defn, ir.ClassDefinition):
             tempvar = ctx.mktemp('type')
             ctx.src += f'{tempvar} = &KLC_type{encode0(defn.name)};'
             return 'type', tempvar
-        elif isinstance(defn, ast.FunctionDefinition):
+        elif isinstance(defn, ir.FunctionDefinition):
             tempvar = ctx.mktemp('function')
             ctx.src += f'{tempvar} = &KLC_functioninfo{encode(defn.name)};'
             return 'function', tempvar
@@ -1185,14 +1186,14 @@ def Cee(ns):
             raise Error([self.token, defn.token],
                         f'{name} is not a variable')
 
-    @translate.on(ast.SetName)
+    @translate.on(ir.SetName)
     def translate(self, ctx):
         defn = ctx.scope.get(self.name, [self.token])
-        if isinstance(defn, ast.GlobalVariableDefinition):
+        if isinstance(defn, ir.GlobalVariableDefinition):
             raise Error(
                 [self.token, defn.token],
                 f'Global variables are final ({defn.name})')
-        elif isinstance(defn, ast.BaseVariableDefinition):
+        elif isinstance(defn, ir.BaseVariableDefinition):
             etype = defn.type
             tempvar = ctx.mktemp(etype)
             etype, evar = translate(self.expression, ctx)
@@ -1211,7 +1212,7 @@ def Cee(ns):
             raise Error([self.token, defn.token],
                         f'{name} is not a variable')
 
-    @translate.on(ast.Cast)
+    @translate.on(ir.Cast)
     def translate(self, ctx):
         etype, etempvar = translate(self.expression, ctx)
         if etype != 'var':
@@ -1225,7 +1226,7 @@ def Cee(ns):
         ctx.src += _cretain(ctx, self.type, tempvar)
         return (self.type, tempvar)
 
-    @translate.on(ast.NullLiteral)
+    @translate.on(ir.NullLiteral)
     def translate(self, ctx):
         tempvar = ctx.mktemp(self.type)
         if self.type == 'var':
@@ -1234,13 +1235,13 @@ def Cee(ns):
             ctx.src += f'{tempvar} = NULL;'
         return self.type, tempvar
 
-    @translate.on(ast.BoolLiteral)
+    @translate.on(ir.BoolLiteral)
     def translate(self, ctx):
         tempvar = ctx.mktemp('bool')
         ctx.src += f'{tempvar} = {1 if self.value else 0};'
         return ('bool', tempvar)
 
-    @translate.on(ast.StringLiteral)
+    @translate.on(ir.StringLiteral)
     def translate(self, ctx):
         tempvar = ctx.mktemp('String')
         # TODO: properly escape the string literal
@@ -1254,21 +1255,21 @@ def Cee(ns):
         ctx.src += f'{tempvar} = KLC_mkstr("{s}");'
         return ('String', tempvar)
 
-    @translate.on(ast.IntLiteral)
+    @translate.on(ir.IntLiteral)
     def translate(self, ctx):
         tempvar = ctx.mktemp('int')
         # TODO: Warn if size of 'value' is too big
         ctx.src += f'{tempvar} = {self.value}L;'
         return ('int', tempvar)
 
-    @translate.on(ast.DoubleLiteral)
+    @translate.on(ir.DoubleLiteral)
     def translate(self, ctx):
         tempvar = ctx.mktemp('double')
         # TODO: Warn if size of 'value' is too big
         ctx.src += f'{tempvar} = {self.value};'
         return ('double', tempvar)
 
-    @translate.on(ast.ListDisplay)
+    @translate.on(ir.ListDisplay)
     def translate(self, ctx):
         argvars = []
         for expr in self.expressions:
@@ -1280,7 +1281,7 @@ def Cee(ns):
             ctx.src += f'{encode("List:push")}({xvar}, {arg});'
         return 'List', xvar
 
-    @translate.on(ast.BinaryComparison)
+    @translate.on(ir.BinaryComparison)
     def translate(self, ctx):
         fast_op_types = type(self).fast_op_types
         fast_op = type(self).fast_op
@@ -1361,17 +1362,17 @@ def Cee(ns):
         ]
         return _translate_fcall(ctx, self.token, fn, argtriples)
 
-    @translate.on(ast.FunctionCall)
+    @translate.on(ir.FunctionCall)
     def translate(self, ctx):
         defn = ctx.scope.get(self.function, [self.token])
-        if isinstance(defn, ast.FunctionDefinition):
+        if isinstance(defn, ir.FunctionDefinition):
             argtriples = []
             for arg in self.args:
                 argtype, argtempvar = translate(arg, ctx)
                 argtriples.append((arg.token, argtype, argtempvar))
             return _translate_fcall(ctx, self.token, defn, argtriples)
 
-        if (isinstance(defn, ast.BaseVariableDefinition) and
+        if (isinstance(defn, ir.BaseVariableDefinition) and
                 defn.type in ('var', 'function')):
             argtempvars = []
             for arg in self.args:
@@ -1394,7 +1395,7 @@ def Cee(ns):
                 ctx.src += f'{tempvar} = KLC_var_call({cfname}, {nargs}, {temparr});'
             return 'var', tempvar
 
-        if isinstance(defn, ast.BaseVariableDefinition):
+        if isinstance(defn, ir.BaseVariableDefinition):
             # At this point, we know defn.type cannot be var or function
             # For these types, we just want to call the 'Call' method.
             argtriples = [
@@ -1405,7 +1406,7 @@ def Cee(ns):
                 argtriples.append((arg.token, argtype, argtempvar))
             return _translate_mcall(ctx, self.token, 'Call', argtriples)
 
-        if isinstance(defn, ast.ClassDefinition):
+        if isinstance(defn, ir.ClassDefinition):
             argtriples = []
             for arg in self.args:
                 argtype, argtempvar = translate(arg, ctx)
@@ -1413,7 +1414,7 @@ def Cee(ns):
             malloc_name = f'KLC_malloc{encode0(defn.name)}'
             fname = f'{defn.name}#new'
             fdefn = ctx.scope.get(fname, [self.token])
-            if not isinstance(fdefn, ast.FunctionDefinition):
+            if not isinstance(fdefn, ir.FunctionDefinition):
                 raise Error([self.token], f'FUBAR: shadowed function name')
 
             if defn.extern:
@@ -1436,7 +1437,7 @@ def Cee(ns):
         raise Error([self.token, defn.token],
                     f'{self.function} is not a function')
 
-    @translate.on(ast.MethodCall)
+    @translate.on(ir.MethodCall)
     def translate(self, ctx):
         ownertype, ownertempvar = translate(self.owner, ctx)
         argtriples = [(self.token, ownertype, ownertempvar)]
@@ -1445,7 +1446,7 @@ def Cee(ns):
             argtriples.append((arg.token, argtype, argvar))
         return _translate_mcall(ctx, self.token, self.name, argtriples)
 
-    @translate.on(ast.BaseInOperation)
+    @translate.on(ir.BaseInOperation)
     def translate(self, ctx):
         ltype, lvar = translate(self.left, ctx)
         rtype, rvar = translate(self.right, ctx)
@@ -1458,14 +1459,14 @@ def Cee(ns):
         return _translate_mcall(
             ctx, self.token, type(self).method_name, argtriples)
 
-    @translate.on(ast.LogicalNot)
+    @translate.on(ir.LogicalNot)
     def translate(self, ctx):
         etype, evar = translate(self.expression, ctx)
         xvar = ctx.mktemp('bool')
         ctx.src += f'{xvar} = !{_ctruthy(ctx, etype, evar)};'
         return 'bool', xvar
 
-    @translate.on(ast.LogicalOr)
+    @translate.on(ir.LogicalOr)
     def translate(self, ctx):
         ltype, lvar = translate(self.left, ctx)
         xvar = ctx.mktemp('bool')
@@ -1480,7 +1481,7 @@ def Cee(ns):
             raise Error([self.token], 'void type in or operator')
         return ('bool', xvar)
 
-    @translate.on(ast.LogicalAnd)
+    @translate.on(ir.LogicalAnd)
     def translate(self, ctx):
         ltype, lvar = translate(self.left, ctx)
         xvar = ctx.mktemp('bool')
@@ -1495,7 +1496,7 @@ def Cee(ns):
             raise Erorr([self.token], 'void type in and operator')
         return ('bool', xvar)
 
-    @translate.on(ast.Conditional)
+    @translate.on(ir.Conditional)
     def translate(self, ctx):
         ctype, cvar = translate(self.condition, ctx)
         ctx.src += f'if ({_ctruthy(ctx, ctype, cvar)})'
@@ -1525,7 +1526,7 @@ def Cee(ns):
         ctx.src += _cretain(ctx, xtype, xvar)
         return (xtype, xvar)
 
-    @translate.on(ast.VariableDefinition)
+    @translate.on(ir.VariableDefinition)
     def translate(self, ctx):
         if self.expression:
             ectx = ctx.ectx()
@@ -1543,13 +1544,13 @@ def Cee(ns):
 
         ctx.scope.add(self)
 
-    @translate.on(ast.ExpressionStatement)
+    @translate.on(ir.ExpressionStatement)
     def translate(self, ctx):
         ectx = ctx.ectx()
         translate(self.expression, ectx)
         ectx.release_tempvars()
 
-    @translate.on(ast.Return)
+    @translate.on(ir.Return)
     def translate(self, ctx):
         ectx = ctx.ectx()
         if self.expression:
@@ -1572,7 +1573,7 @@ def Cee(ns):
 
         return True
 
-    @translate.on(ast.Block)
+    @translate.on(ir.Block)
     def translate(self, pctx):
         pctx.src += '{'
         prologue = pctx.src.spawn(1)
@@ -1592,7 +1593,7 @@ def Cee(ns):
         # To be C89 compatible, we need all variable definitions
         # to appear at the beginning of the block.
         for vdef in ctx.scope.local_definitions:
-            assert isinstance(vdef, ast.VariableDefinition), vdef
+            assert isinstance(vdef, ir.VariableDefinition), vdef
             prologue += f'{_cproto(vdef, ctx)} = {ctx.czero(vdef.type)};'
 
         # If there's an early return, there's no need to have an
@@ -1606,7 +1607,7 @@ def Cee(ns):
                 if vdef.type not in PRIMITIVE_TYPES:
                     epilogue += _defcrelease(vdef, ctx)
 
-    @translate.on(ast.If)
+    @translate.on(ir.If)
     def translate(self, ctx):
         ctx.src += '{'
         ctx.src += 'KLC_bool b;'
@@ -1621,7 +1622,7 @@ def Cee(ns):
             translate(self.other, ctx)
         ctx.src += '}'
 
-    @translate.on(ast.While)
+    @translate.on(ir.While)
     def translate(self, ctx):
         ctx.src += 'while (1) {'
         ctx.src += 'KLC_bool b;'
@@ -1633,7 +1634,7 @@ def Cee(ns):
         translate(self.body, ctx)
         ctx.src += '}'
 
-    @translate.on(ast.Program)
+    @translate.on(ir.Program)
     def translate(self):
         ctx = GlobalTranslationContext(self)
         for inc in self.env['@vars']['C_HEADERS']:
@@ -1650,7 +1651,7 @@ def Cee(ns):
             translate(d, ctx)
         return str(ctx.out)
 
-    @translate.on(ast.GlobalVariableDefinition)
+    @translate.on(ir.GlobalVariableDefinition)
     def translate(self, ctx):
         n = encode(self.name)
         ifn = encode(self.name + '#init')
@@ -1675,18 +1676,18 @@ def Cee(ns):
         src1 += f'return KLC_global{n};'
         ctx.src += '}'
 
-    @translate.on(ast.FunctionDefinition)
+    @translate.on(ir.FunctionDefinition)
     def translate(self, gctx: GlobalTranslationContext):
         ctx = gctx.fctx(self)
 
         rt = self.return_type
         if rt not in PRIMITIVE_TYPES and rt != 'var':
             rtnode = ctx.scope.get(self.return_type, [self.token])
-            if isinstance(rtnode, ast.TraitDefinition):
+            if isinstance(rtnode, ir.TraitDefinition):
                 raise Error(
                     [vardef.token],
                     f'Declaring trait as return type not supported')
-            if not isinstance(rtnode, ast.TypeDefinition):
+            if not isinstance(rtnode, ir.TypeDefinition):
                 raise Error([vardef.token], f'{vardef.type} is not a type')
 
         _translate_untyped(self, ctx)
@@ -1696,14 +1697,14 @@ def Cee(ns):
             ctx.src += _cproto(self, ctx)
             translate(self.body, ctx)
 
-    @translate.on(ast.TraitDefinition)
+    @translate.on(ir.TraitDefinition)
     def translate(self, ctx: GlobalTranslationContext):
         # Verify that there's no circular trait inheritance,
         # and in the process, also verify all entries listed in 'traits'
         # are actually defined and are traits.
         _trait_method_map(self, ctx)
 
-    @translate.on(ast.ClassDefinition)
+    @translate.on(ir.ClassDefinition)
     def translate(self, ctx: GlobalTranslationContext):
         _check_all_are_traits(self.token, self.traits, ctx)
         name = self.name
@@ -1765,21 +1766,21 @@ def Cee(ns):
 
     _cproto = Multimethod('_cproto')
 
-    @_cproto.on(ast.BaseVariableDefinition)
+    @_cproto.on(ir.BaseVariableDefinition)
     def _cproto(self, ctx):
         return f'{ctx.cdecltype(self.type)} {ctx.cname(self.name)}'
 
-    @_cproto.on(ast.FunctionDefinition)
+    @_cproto.on(ir.FunctionDefinition)
     def _cproto(self, ctx):
         crt = ctx.cdecltype(self.return_type)
         cname = ctx.cname(self.name)
         cparams = ', '.join(_cproto(p, ctx) for p in self.params)
         return f'{crt} {cname}({cparams})'
 
-    def _cname(self: ast.BaseVariableDefinition, ctx):
+    def _cname(self: ir.BaseVariableDefinition, ctx):
         return ctx.cname(self.name)
 
-    def _translate_field_implementations(self: ast.ClassDefinition, ctx):
+    def _translate_field_implementations(self: ir.ClassDefinition, ctx):
         this_proto = f"{ctx.cdecltype(self.name)} {ctx.cname('this')}"
         for field in self.fields:
             field_ref = f'{encode("this")}->{ctx.cname(field.name)}'
@@ -1811,10 +1812,10 @@ def Cee(ns):
             sp += f'{field_ref} = v;'
             sp += 'return v;'
 
-    def _defcretain(self: ast.BaseVariableDefinition, ctx):
+    def _defcretain(self: ir.BaseVariableDefinition, ctx):
         return _cretain(ctx, self.type, _cname(self, ctx))
 
-    def _defcrelease(self: ast.BaseVariableDefinition, ctx):
+    def _defcrelease(self: ir.BaseVariableDefinition, ctx):
         return _crelease(ctx, self.type, _cname(self, ctx))
 
     def _trait_method_map(self, ctx, stack=None):
@@ -1836,7 +1837,7 @@ def Cee(ns):
         scope = ctx.scope
         while scope:
             for vdef in reversed(scope.local_definitions):
-                if isinstance(vdef, ast.VariableDefinition):
+                if isinstance(vdef, ir.VariableDefinition):
                     src += _defcrelease(vdef, ctx)
             scope = scope.parent
 
@@ -1933,7 +1934,7 @@ def Cee(ns):
     def _check_all_are_traits(token, traits, ctx):
         for trait_name in traits:
             trait_defn = ctx.scope.get(trait_name, [token])
-            if not isinstance(trait_defn, ast.TraitDefinition):
+            if not isinstance(trait_defn, ir.TraitDefinition):
                 raise Error([token, trait_defn.token],
                             f'{trait_name} is not a trait')
 
@@ -2002,7 +2003,7 @@ def Cee(ns):
                 fname = f'{ownertype}:{name}'
             else:
                 cdef = ctx.scope.get(ownertype, [token])
-                assert isinstance(cdef, ast.ClassDefinition), cdef
+                assert isinstance(cdef, ir.ClassDefinition), cdef
                 if name not in _xmethod_map(cdef, ctx):
                     raise _no_such_method_error(token, name, ownertype)
                 fname = _xmethod_map(cdef, ctx)[name]
@@ -2010,7 +2011,7 @@ def Cee(ns):
             # TODO: Consider looking up from global context
             # to avoid coincidental names that shadow method names
             defn = ctx.scope.get(fname, [token])
-            if not isinstance(defn, ast.FunctionDefinition):
+            if not isinstance(defn, ir.FunctionDefinition):
                 raise Error([token], f'FUBAR: shadowed method {fname}')
 
             return _translate_fcall(ctx, token, defn, argtriples)
@@ -2043,7 +2044,7 @@ def Cee(ns):
         else:
             src += f'return {ctx.varify(self.return_type, call)};'
 
-    def _translate_value(self: ast.Expression, ctx):
+    def _translate_value(self: ir.Expression, ctx):
         etype, evar = translate(self, ctx)
         if etype == 'void':
             raise Error([self.token], 'void type not allowed here')
@@ -2140,7 +2141,7 @@ def parser(ns):
         defs = list(main_node.definitions)
         for lib_node in env['@cache'].values():
             defs.extend(lib_node.definitions)
-        return ast.Program(main_node.token, defs, env)
+        return ir.Program(main_node.token, defs, env)
 
     def _has_lower(s):
         return s.upper() != s
@@ -2375,7 +2376,7 @@ def parser(ns):
             while not at('EOF'):
                 parse_global_definition(ctx)
                 consume_delim()
-            return ast.Program(token, defs, env)
+            return ir.Program(token, defs, env)
 
         def parse_global_definition(ctx):
             if at('#'):
@@ -2613,10 +2614,10 @@ def parser(ns):
             extern = bool(consume('extern'))
             vtype = expect_type()
             vname = expect_exported_name()
-            ctx.defs.append(ast.GlobalVariableDefinition(token, extern, vtype, vname))
+            ctx.defs.append(ir.GlobalVariableDefinition(token, extern, vtype, vname))
             ifname = f'{vname}#init'
             if extern:
-                initf = ast.FunctionDefinition(
+                initf = ir.FunctionDefinition(
                     token,
                     vtype,
                     ifname,
@@ -2625,21 +2626,21 @@ def parser(ns):
             else:
                 if consume('='):
                     expr = parse_expression(ctx)
-                    initf = ast.FunctionDefinition(
+                    initf = ir.FunctionDefinition(
                         token,
                         vtype,
                         ifname,
                         [],
-                        ast.Block(token, [ast.Return(token, expr)]))
+                        ir.Block(token, [ir.Return(token, expr)]))
                 else:
-                    initf = ast.FunctionDefinition(
+                    initf = ir.FunctionDefinition(
                         token,
                         vtype,
                         ifname,
                         [],
-                        ast.Block(token, [
-                            ast.VariableDefinition(token, True, vtype, 'ret', None),
-                            ast.Return(token, ast.Name(token, 'ret')),
+                        ir.Block(token, [
+                            ir.VariableDefinition(token, True, vtype, 'ret', None),
+                            ir.Return(token, ir.Name(token, 'ret')),
                         ]))
             ctx.defs.append(initf)
             expect_delim()
@@ -2655,7 +2656,7 @@ def parser(ns):
             else:
                 body = None
                 expect_delim()
-            ctx.defs.append(ast.FunctionDefinition(token, return_type, name, params, body))
+            ctx.defs.append(ir.FunctionDefinition(token, return_type, name, params, body))
 
         def expect_non_exported_name():
             token = peek()
@@ -2727,8 +2728,8 @@ def parser(ns):
                         # like extern types.
                         rt = 'void'
                         body = parse_block(ctx)
-                        params = [ast.Parameter(mtoken, name, 'this')] + declparams
-                    newdef = ast.FunctionDefinition(mtoken, rt, fname, params, body)
+                        params = [ir.Parameter(mtoken, name, 'this')] + declparams
+                    newdef = ir.FunctionDefinition(mtoken, rt, fname, params, body)
                     ctx.defs.append(newdef)
                 elif at('NAME') and at('NAME', 1) and at_delim(2):
                     if extern:
@@ -2741,24 +2742,24 @@ def parser(ns):
                     fname = expect('NAME').value
                     mark_member(fname, ftoken)
                     expect_delim()
-                    fields.append(ast.Field(ftoken, ftype, fname))
+                    fields.append(ir.Field(ftoken, ftype, fname))
 
                     # GET and SET methods are implemented specially
                     # during the class translation
                     getter_name = f'{name}:GET{fname}'
                     setter_name = f'{name}:SET{fname}'
-                    ctx.defs.append(ast.FunctionDefinition(
+                    ctx.defs.append(ir.FunctionDefinition(
                         ftoken,
                         ftype,
                         getter_name,
-                        [ast.Parameter(ftoken, name, 'this')],
+                        [ir.Parameter(ftoken, name, 'this')],
                         None))
-                    ctx.defs.append(ast.FunctionDefinition(
+                    ctx.defs.append(ir.FunctionDefinition(
                         ftoken,
                         ftype,
                         setter_name,
-                        [ast.Parameter(ftoken, name, 'this'),
-                         ast.Parameter(ftoken, ftype, 'value')],
+                        [ir.Parameter(ftoken, name, 'this'),
+                         ir.Parameter(ftoken, ftype, 'value')],
                         None))
                     mark_method(f'GET{fname}', ftoken)
                     mark_method(f'SET{fname}', ftoken)
@@ -2773,7 +2774,7 @@ def parser(ns):
                     rtype = expect_type()
                     mname = expect('NAME').value
                     _check_method_name(mtoken, mname)
-                    params = [ast.Parameter(mtoken, name, 'this')] + parse_params()
+                    params = [ir.Parameter(mtoken, name, 'this')] + parse_params()
                     body = None if consume_delim() else parse_block(ctx)
 
                     # A method is mapped to a function with a special name,
@@ -2782,21 +2783,21 @@ def parser(ns):
 
                     mark_method(mname, token)
 
-                    ctx.defs.append(ast.FunctionDefinition(mtoken, rtype, fname, params, body))
+                    ctx.defs.append(ir.FunctionDefinition(mtoken, rtype, fname, params, body))
                 consume_delim()
 
             consume_delim()
 
             if not extern and newdef is None:
-                ctx.defs.append(ast.FunctionDefinition(
+                ctx.defs.append(ir.FunctionDefinition(
                     token,
                     'void',
                     f'{name}#new',
-                    [ast.Parameter(token, name, 'this')],
-                    ast.Block(token, [])))
+                    [ir.Parameter(token, name, 'this')],
+                    ir.Block(token, [])))
 
             method_names = sorted(method_to_token_table)
-            ctx.defs.append(ast.ClassDefinition(
+            ctx.defs.append(ir.ClassDefinition(
                 token, name, traits, fields, method_names, untyped_methods))
 
         def parse_trait_definition(ctx):
@@ -2817,7 +2818,7 @@ def parser(ns):
                 # A method is mapped to a function with a special name,
                 # and an implicit first parameter.
                 fname = f'{name}:{mname}'
-                params = [ast.Parameter(mtoken, 'var', 'this')] + params
+                params = [ir.Parameter(mtoken, 'var', 'this')] + params
 
                 if mname in method_to_token_table:
                     raise Error([method_to_token_table[mname], mtoken],
@@ -2825,12 +2826,12 @@ def parser(ns):
 
                 method_to_token_table[mname] = mtoken
 
-                ctx.defs.append(ast.FunctionDefinition(mtoken, rtype, fname, params, body))
+                ctx.defs.append(ir.FunctionDefinition(mtoken, rtype, fname, params, body))
                 consume_delim()
             consume_delim()
 
             method_names = sorted(method_to_token_table)
-            ctx.defs.append(ast.TraitDefinition(token, name, traits, method_names))
+            ctx.defs.append(ir.TraitDefinition(token, name, traits, method_names))
 
         def parse_trait_list():
             if consume('('):
@@ -2852,7 +2853,7 @@ def parser(ns):
                 while not consume('}'):
                     statements.append(parse_statement(ctx))
                     consume_delim()
-                return ast.Block(token, statements)
+                return ir.Block(token, statements)
 
         def parse_statement(ctx):
             token = peek()
@@ -2869,7 +2870,7 @@ def parser(ns):
                     condition = parse_expression(ctx)
                     expect(')')
                 body = parse_block(ctx)
-                return ast.While(token, condition, body)
+                return ir.While(token, condition, body)
 
             if consume('for'):
                 if consume('('):
@@ -2879,16 +2880,16 @@ def parser(ns):
                     elif at_variable_definition():
                         init.append(parse_variable_definition(ctx))
                     else:
-                        init.append(ast.ExpressionStatement(token, parse_expression(ctx)))
+                        init.append(ir.ExpressionStatement(token, parse_expression(ctx)))
                         expect(';')
-                    cond = ast.BoolLiteral(token, True) if at(';') else parse_expression(ctx)
+                    cond = ir.BoolLiteral(token, True) if at(';') else parse_expression(ctx)
                     expect(';')
-                    incr = ast.ExpressionStatement(token, parse_expression(ctx))
+                    incr = ir.ExpressionStatement(token, parse_expression(ctx))
                     expect(')')
                     raw_body = parse_block(ctx)
-                    body = ast.Block(token, raw_body.statements + [incr])
-                    return ast.Block(token, init + [
-                        ast.While(token, cond, body),
+                    body = ir.Block(token, raw_body.statements + [incr])
+                    return ir.Block(token, init + [
+                        ir.While(token, cond, body),
                     ])
                 else:
                     if at('NAME') and at('in', 1):
@@ -2900,27 +2901,27 @@ def parser(ns):
                     container_expr = parse_expression(ctx)
                     body = parse_block(ctx)
                     tempvar = mktempvar()
-                    return ast.Block(token, [
-                        ast.VariableDefinition(
+                    return ir.Block(token, [
+                        ir.VariableDefinition(
                             token,
                             True,
                             None,
                             tempvar,
-                            ast.MethodCall(token, container_expr, 'Iterator', [])),
-                        ast.While(
+                            ir.MethodCall(token, container_expr, 'Iterator', [])),
+                        ir.While(
                             token,
-                            ast.MethodCall(token, ast.Name(token, tempvar), 'HasNext', []),
-                            ast.Block(token, [
-                                ast.VariableDefinition(
+                            ir.MethodCall(token, ir.Name(token, tempvar), 'HasNext', []),
+                            ir.Block(token, [
+                                ir.VariableDefinition(
                                     token,
                                     True,
                                     None,
                                     loopvar,
-                                    ast.Cast(
+                                    ir.Cast(
                                         token,
-                                        ast.MethodCall(
+                                        ir.MethodCall(
                                             token,
-                                            ast.Name(token, tempvar),
+                                            ir.Name(token, tempvar),
                                             'Next',
                                             []),
                                         vtype
@@ -2939,25 +2940,25 @@ def parser(ns):
                 else:
                     name = mktempvar()
                 body = parse_block(ctx)
-                return ast.Block(token, [
-                    ast.VariableDefinition(
+                return ir.Block(token, [
+                    ir.VariableDefinition(
                         token,
                         True,
                         None,
                         exprtempvar,
                         expr),
-                    ast.VariableDefinition(
+                    ir.VariableDefinition(
                         token,
                         True,
                         None,
                         name,
-                        ast.MethodCall(token, ast.Name(token, exprtempvar), 'Enter', [])),
-                    ast.VariableDefinition(
+                        ir.MethodCall(token, ir.Name(token, exprtempvar), 'Enter', [])),
+                    ir.VariableDefinition(
                         token,
                         True,
                         None,
                         mktempvar(),
-                        ast.FunctionCall(token, '%With', [ast.Name(token, exprtempvar)])),
+                        ir.FunctionCall(token, '%With', [ir.Name(token, exprtempvar)])),
                     body,
                 ])
 
@@ -2971,16 +2972,16 @@ def parser(ns):
                     other = parse_statement(ctx)
                 else:
                     other = None
-                return ast.If(token, condition, body, other)
+                return ir.If(token, condition, body, other)
 
             if consume('return'):
                 expression = None if at_delim() else parse_expression(ctx)
                 expect_delim()
-                return ast.Return(token, expression)
+                return ir.Return(token, expression)
 
             expression = parse_expression(ctx)
             expect_delim()
-            return ast.ExpressionStatement(token, expression)
+            return ir.ExpressionStatement(token, expression)
 
         def parse_expression(ctx):
             return parse_conditional(ctx)
@@ -2992,7 +2993,7 @@ def parser(ns):
                 left = parse_expression(ctx)
                 expect(':')
                 right = parse_conditional(ctx)
-                return ast.Conditional(token, expr, left, right)
+                return ir.Conditional(token, expr, left, right)
             return expr
 
         def parse_logical_or(ctx):
@@ -3001,7 +3002,7 @@ def parser(ns):
                 token = peek()
                 if consume('or'):
                     right = parse_logical_and(ctx)
-                    expr = ast.LogicalOr(token, expr, right)
+                    expr = ir.LogicalOr(token, expr, right)
                 else:
                     break
             return expr
@@ -3012,7 +3013,7 @@ def parser(ns):
                 token = peek()
                 if consume('and'):
                     right = parse_relational(ctx)
-                    expr = ast.LogicalAnd(token, expr, right)
+                    expr = ir.LogicalAnd(token, expr, right)
                 else:
                     break
             return expr
@@ -3022,27 +3023,27 @@ def parser(ns):
             while True:
                 token = peek()
                 if consume('=='):
-                    expr = ast.Equals(token, expr, parse_bitwise_or(ctx))
+                    expr = ir.Equals(token, expr, parse_bitwise_or(ctx))
                 elif consume('!='):
-                    expr = ast.NotEquals(token, expr, parse_bitwise_or(ctx))
+                    expr = ir.NotEquals(token, expr, parse_bitwise_or(ctx))
                 elif consume('<'):
-                    expr = ast.LessThan(token, expr, parse_bitwise_or(ctx))
+                    expr = ir.LessThan(token, expr, parse_bitwise_or(ctx))
                 elif consume('<='):
-                    expr = ast.LessThanOrEqual(token, expr, parse_bitwise_or(ctx))
+                    expr = ir.LessThanOrEqual(token, expr, parse_bitwise_or(ctx))
                 elif consume('>'):
-                    expr = ast.GreaterThan(token, expr, parse_bitwise_or(ctx))
+                    expr = ir.GreaterThan(token, expr, parse_bitwise_or(ctx))
                 elif consume('>='):
-                    expr = ast.GreaterThanOrEqual(token, expr, parse_bitwise_or(ctx))
+                    expr = ir.GreaterThanOrEqual(token, expr, parse_bitwise_or(ctx))
                 elif consume('is'):
                     if consume('not'):
-                        expr = ast.IsNot(token, expr, parse_bitwise_or(ctx))
+                        expr = ir.IsNot(token, expr, parse_bitwise_or(ctx))
                     else:
-                        expr = ast.Is(token, expr, parse_bitwise_or(ctx))
+                        expr = ir.Is(token, expr, parse_bitwise_or(ctx))
                 elif consume('in'):
-                    expr = ast.In(token, expr, parse_bitwise_or(ctx))
+                    expr = ir.In(token, expr, parse_bitwise_or(ctx))
                 elif consume('not'):
                     expect('in')
-                    expr = ast.LogicalNot(token, ast.In(token, expr, parse_bitwise_or(ctx)))
+                    expr = ir.LogicalNot(token, ir.In(token, expr, parse_bitwise_or(ctx)))
                 else:
                     break
             return expr
@@ -3052,7 +3053,7 @@ def parser(ns):
             while True:
                 token = peek()
                 if consume('|'):
-                    expr = ast.MethodCall(token, expr, 'Or', [parse_bitwise_xor(ctx)])
+                    expr = ir.MethodCall(token, expr, 'Or', [parse_bitwise_xor(ctx)])
                 else:
                     break
             return expr
@@ -3062,7 +3063,7 @@ def parser(ns):
             while True:
                 token = peek()
                 if consume('^'):
-                    expr = ast.MethodCall(token, expr, 'Xor', [parse_bitwise_and(ctx)])
+                    expr = ir.MethodCall(token, expr, 'Xor', [parse_bitwise_and(ctx)])
                 else:
                     break
             return expr
@@ -3072,7 +3073,7 @@ def parser(ns):
             while True:
                 token = peek()
                 if consume('&'):
-                    expr = ast.MethodCall(token, expr, 'And', [parse_bitwise_shift(ctx)])
+                    expr = ir.MethodCall(token, expr, 'And', [parse_bitwise_shift(ctx)])
                 else:
                     break
             return expr
@@ -3082,9 +3083,9 @@ def parser(ns):
             while True:
                 token = peek()
                 if consume('>>'):
-                    expr = ast.MethodCall(token, expr, 'Rshift', [parse_additive(ctx)])
+                    expr = ir.MethodCall(token, expr, 'Rshift', [parse_additive(ctx)])
                 elif consume('<<'):
-                    expr = ast.MethodCall(token, expr, 'Lshift', [parse_additive(ctx)])
+                    expr = ir.MethodCall(token, expr, 'Lshift', [parse_additive(ctx)])
                 else:
                     break
             return expr
@@ -3094,9 +3095,9 @@ def parser(ns):
             while True:
                 token = peek()
                 if consume('+'):
-                    expr = ast.MethodCall(token, expr, 'Add', [parse_multiplicative(ctx)])
+                    expr = ir.MethodCall(token, expr, 'Add', [parse_multiplicative(ctx)])
                 elif consume('-'):
-                    expr = ast.MethodCall(token, expr, 'Sub', [parse_multiplicative(ctx)])
+                    expr = ir.MethodCall(token, expr, 'Sub', [parse_multiplicative(ctx)])
                 else:
                     break
             return expr
@@ -3106,11 +3107,11 @@ def parser(ns):
             while True:
                 token = peek()
                 if consume('*'):
-                    expr = ast.MethodCall(token, expr, 'Mul', [parse_unary(ctx)])
+                    expr = ir.MethodCall(token, expr, 'Mul', [parse_unary(ctx)])
                 elif consume('/'):
-                    expr = ast.MethodCall(token, expr, 'Div', [parse_unary(ctx)])
+                    expr = ir.MethodCall(token, expr, 'Div', [parse_unary(ctx)])
                 elif consume('%'):
-                    expr = ast.MethodCall(token, expr, 'Mod', [parse_unary(ctx)])
+                    expr = ir.MethodCall(token, expr, 'Mod', [parse_unary(ctx)])
                 else:
                     break
             return expr
@@ -3119,24 +3120,24 @@ def parser(ns):
             token = peek()
             if consume('-'):
                 expr = parse_unary(ctx)
-                if isinstance(expr, (ast.IntLiteral, ast.DoubleLiteral)):
+                if isinstance(expr, (ir.IntLiteral, ir.DoubleLiteral)):
                     type_ = type(expr)
                     return type_(expr.token, -expr.value)
                 else:
-                    return ast.MethodCall(token, expr, 'Neg', [])
+                    return ir.MethodCall(token, expr, 'Neg', [])
             if consume('~'):
                 expr = parse_unary(ctx)
-                return ast.MethodCall(token, expr, 'Invert', [])
+                return ir.MethodCall(token, expr, 'Invert', [])
             if consume('!'):
                 expr = parse_unary(ctx)
-                return ast.LogicalNot(token, expr)
+                return ir.LogicalNot(token, expr)
             return parse_pow(ctx)
 
         def parse_pow(ctx):
             expr = parse_postfix(ctx)
             token = peek()
             if consume('**'):
-                expr = ast.MethodCall(token, expr, 'Pow', [parse_pow(ctx)])
+                expr = ir.MethodCall(token, expr, 'Pow', [parse_pow(ctx)])
             return expr
 
         def parse_postfix(ctx):
@@ -3147,20 +3148,20 @@ def parser(ns):
                     if consume('('):
                         cast_type = expect_type()
                         expect(')')
-                        expr = ast.Cast(token, expr, cast_type)
+                        expr = ir.Cast(token, expr, cast_type)
                         continue
                     else:
                         name = expect('NAME').value
                         if at('('):
                             args = parse_args(ctx)
-                            expr = ast.MethodCall(token, expr, name, args)
+                            expr = ir.MethodCall(token, expr, name, args)
                             continue
                         elif consume('='):
                             val = parse_expression(ctx)
-                            expr = ast.MethodCall(token, expr, f'SET{name}', [val])
+                            expr = ir.MethodCall(token, expr, f'SET{name}', [val])
                             continue
                         else:
-                            expr = ast.MethodCall(token, expr, f'GET{name}', [])
+                            expr = ir.MethodCall(token, expr, f'GET{name}', [])
                             continue
                 elif consume('['):
                     # x[i,...]       GetItem
@@ -3221,7 +3222,7 @@ def parser(ns):
                         method_name = 'SetItem'
                     else:
                         method_name = 'GetItem'
-                    expr = ast.MethodCall(token, expr, method_name, args)
+                    expr = ir.MethodCall(token, expr, method_name, args)
                     continue
                 break
             return expr
@@ -3241,24 +3242,24 @@ def parser(ns):
                             type_ = expect_type()
                         else:
                             type_ = 'var'
-                        capture_params.append(ast.Parameter(
+                        capture_params.append(ir.Parameter(
                             peek(), type_, expect_non_exported_name()))
                         if not consume(','):
                             expect(']')
                             break
                 params = parse_params()
                 body = parse_block(ctx)
-                ctx.defs.append(ast.FunctionDefinition(
+                ctx.defs.append(ir.FunctionDefinition(
                     token,
                     return_type,
                     lambda_name,
                     capture_params + params,
                     body))
-                return ast.FunctionCall(token, 'Closure', [
-                    ast.ListDisplay(token, [
-                        ast.Name(p.token, p.name) for p in capture_params
+                return ir.FunctionCall(token, 'Closure', [
+                    ir.ListDisplay(token, [
+                        ir.Name(p.token, p.name) for p in capture_params
                     ]),
-                    ast.Name(token, lambda_name),
+                    ir.Name(token, lambda_name),
                 ])
 
             if consume('('):
@@ -3275,32 +3276,32 @@ def parser(ns):
                         if not consume(','):
                             expect(']')
                             break
-                return ast.ListDisplay(token, exprs)
+                return ir.ListDisplay(token, exprs)
 
             if consume('{'):
                 with skipping_newlines(True):
                     if consume('}'):
-                        return ast.FunctionCall(token, 'Set', [])
+                        return ir.FunctionCall(token, 'Set', [])
                     if consume(':'):
                         expect('}')
-                        return ast.FunctionCall(token, 'Map', [])
+                        return ir.FunctionCall(token, 'Map', [])
                     key = parse_expression(ctx)
                     if consume(':'):
                         value = parse_expression(ctx)
-                        pairs = [ast.ListDisplay(token, [key, value])]
+                        pairs = [ir.ListDisplay(token, [key, value])]
                         if consume(','):
                             while not consume('}'):
                                 key = parse_expression(ctx)
                                 expect(':')
                                 value = parse_expression(ctx)
-                                pairs.append(ast.ListDisplay(token, [key, value]))
+                                pairs.append(ir.ListDisplay(token, [key, value]))
                                 if not consume(','):
                                     expect('}')
                                     break
                         else:
                             expect('}')
-                        return ast.FunctionCall(token, 'MapFromPairs', [
-                            ast.ListDisplay(token, pairs)
+                        return ir.FunctionCall(token, 'MapFromPairs', [
+                            ir.ListDisplay(token, pairs)
                         ])
                     args = [key]
                     if consume(','):
@@ -3311,48 +3312,48 @@ def parser(ns):
                                 break
                     else:
                         expect('}')
-                    return ast.FunctionCall(token, 'SetFromList', [ast.ListDisplay(token, args)])
+                    return ir.FunctionCall(token, 'SetFromList', [ir.ListDisplay(token, args)])
 
             if consume('null'):
                 type_ = 'var'
                 if consume('('):
                     type_ = expect_type()
                     expect(')')
-                return ast.NullLiteral(token, type_)
+                return ir.NullLiteral(token, type_)
 
             if consume('true'):
-                return ast.BoolLiteral(token, True)
+                return ir.BoolLiteral(token, True)
 
             if consume('false'):
-                return ast.BoolLiteral(token, False)
+                return ir.BoolLiteral(token, False)
 
             if at('INT'):
                 value = expect('INT').value
-                return ast.IntLiteral(token, value)
+                return ir.IntLiteral(token, value)
 
             if at('FLOAT'):
                 value = expect('FLOAT').value
-                return ast.DoubleLiteral(token, value)
+                return ir.DoubleLiteral(token, value)
 
             if at('NAME'):
                 name = expect_maybe_exported_name()
                 if consume('++'):
-                    return ast.SetName(token, name, ast.MethodCall(
-                        token, ast.Name(token, name), 'Add', [ast.IntLiteral(token, 1)]))
+                    return ir.SetName(token, name, ir.MethodCall(
+                        token, ir.Name(token, name), 'Add', [ir.IntLiteral(token, 1)]))
                 if consume('--'):
-                    return ast.SetName(token, name, ast.MethodCall(
-                        token, ast.Name(token, name), 'Sub', [ast.IntLiteral(token, 1)]))
+                    return ir.SetName(token, name, ir.MethodCall(
+                        token, ir.Name(token, name), 'Sub', [ir.IntLiteral(token, 1)]))
                 elif consume('='):
                     expr = parse_expression(ctx)
-                    return ast.SetName(token, name, expr)
+                    return ir.SetName(token, name, expr)
                 elif at('('):
                     args = parse_args(ctx)
-                    return ast.FunctionCall(token, name, args)
+                    return ir.FunctionCall(token, name, args)
                 else:
-                    return ast.Name(token, name)
+                    return ir.Name(token, name)
 
             if at('STRING'):
-                return ast.StringLiteral(token, expect('STRING').value)
+                return ir.StringLiteral(token, expect('STRING').value)
 
             raise Error([token], 'Expected expression')
 
@@ -3377,7 +3378,7 @@ def parser(ns):
                 raise Error(
                     [self.token],
                     'final variables definitions must specify an expression')
-            return ast.VariableDefinition(token, final, vartype, name, value)
+            return ir.VariableDefinition(token, final, vartype, name, value)
 
         def parse_args(ctx, opener='(', closer=')'):
             args = []
@@ -3398,7 +3399,7 @@ def parser(ns):
                     paramtoken = peek()
                     paramtype = expect_type()
                     paramname = expect_non_exported_name()
-                    params.append(ast.Parameter(paramtoken, paramtype, paramname))
+                    params.append(ir.Parameter(paramtoken, paramtype, paramname))
                     if not consume(','):
                         expect(')')
                         break
@@ -3458,7 +3459,7 @@ def main():
             source = Source(args.kfile, data)
 
         node = parser.parse(source, '#', builtins_node.env)
-        program = ast.Program(
+        program = ir.Program(
             node.token,
             node.definitions + builtins_node.definitions,
             node.env)
