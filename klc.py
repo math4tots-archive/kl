@@ -97,7 +97,7 @@ class Multimethod:
         def wrapper(f):
             self.table[types] = f
             return self
-        return warpper
+        return wrapper
 
     def find(self, types):
         "Find and return the implementation for the given arg types"
@@ -106,6 +106,7 @@ class Multimethod:
             for basetypes in itertools.product(*mrolist):
                 if basetypes in self.table:
                     self.table[types] = self.table[basetypes]
+                    break
             else:
                 raise KeyError(types)
         return self.table[types]
@@ -113,7 +114,7 @@ class Multimethod:
     def __call__(self, *args):
         types = tuple(type(arg) for arg in args[:self.n])
         f = self.find(types)
-        return f(first_arg, *args)
+        return f(*args)
 
 
 PRIMITIVE_TYPES = {
@@ -520,6 +521,433 @@ Optional = OptionalType(object)
 def ast(ns):
 
     @ns
+    class Node(object):
+        def __init__(self, token, *args):
+            self.token = token
+            for (fname, ftype), arg in zip(type(self).fields, args):
+                # sys.stderr.write('ftype = %r\n' % (ftype, ))
+                if not isinstance(arg, ftype):
+                    raise TypeError('Expected type of %r to be %r, but got %r' % (
+                        fname, ftype, arg))
+                try:
+                    setattr(self, fname, arg)
+                except AttributeError:
+                    sys.stderr.write(f'fname = {fname}\n')
+                    raise
+            if len(type(self).fields) != len(args):
+                raise TypeError('%s expects %s arguments, but got %s' % (
+                    type(self).__name__, len(type(self).fields), len(args)))
+
+        def __repr__(self):
+            return '%s(%s)' % (
+                type(self).__name__,
+                ', '.join(repr(getattr(self, n)) for n, _ in type(self).fields),
+            )
+
+    @ns
+    class BaseVariableDefinition(Node):
+        fields = (
+            ('type', str),
+            ('name', str),
+        )
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if self.type == 'void':
+                raise Error([self.token], f'Variable of type void is not allowed')
+            if self.type == 'Closure':
+                raise Error(
+                    [self.token],
+                    f'Variable of type Closure is not allowed (use var instead)')
+
+    @ns
+    class Parameter(BaseVariableDefinition):
+        pass
+
+    @ns
+    class Field(BaseVariableDefinition):
+        pass
+
+    @ns
+    class GlobalDefinition(Node):
+        pass
+
+    @ns
+    class Statement(Node):
+        # def translate(self, ctx):
+        #     """Translates self with the given translation context.
+        #     Returns True if the current statement is terminal (e.g. return).
+        #     No statements directly after a translate that returns True should
+        #     be emitted, since those following statements will be unreachable.
+        #     """
+        #     raise NotImplementedError()
+        pass
+
+    @ns
+    class Expression(Node):
+        # def translate(self, ctx):
+        #     """Translates self with the given translation context.
+        #     Returns (type, tempvar) pair, where type is the type of
+        #     evaluating this expression, and tempvar is the name of the
+        #     temporary C variable where the result of this expression
+        #     is stored.
+        #     If type is 'void', tempvar should be None.
+        #     """
+        #     raise NotImplementedError()
+        pass
+
+    @ns
+    class Name(Expression):
+        fields = (
+            ('name', str),
+        )
+
+    @ns
+    class SetName(Expression):
+        fields = (
+            ('name', str),
+            ('expression', Expression),
+        )
+
+    @ns
+    class Cast(Expression):
+        fields = (
+            ('expression', Expression),
+            ('type', str),
+        )
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if isinstance(self.expression, NullLiteral):
+                raise Error(
+                    [self.token],
+                    'Type assertions on null values will almost always fail '
+                    '(try a typed null instead, '
+                    'e.g. null(String) without the period)')
+
+    @ns
+    class NullLiteral(Expression):
+        fields = (
+            ('type', str),
+        )
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if not nullable(self.type):
+                raise Error([self.token], f'{self.type} is not nullable')
+
+    @ns
+    class BoolLiteral(Expression):
+        fields = (
+            ('value', bool),
+        )
+
+    @ns
+    class StringLiteral(Expression):
+        fields = (
+            ('value', str),
+        )
+
+    @ns
+    class IntLiteral(Expression):
+        fields = (
+            ('value', int),
+        )
+
+    @ns
+    class DoubleLiteral(Expression):
+        fields = (
+            ('value', float),
+        )
+
+    @ns
+    class ListDisplay(Expression):
+        fields = (
+            ('expressions', List[Expression]),
+        )
+
+    @ns
+    class BinaryComparison(Expression):
+        """Base class for binary operations that return bool result.
+        """
+        fields = (
+            ('left', Expression),
+            ('right', Expression),
+        )
+
+        method_types = set()
+        fallback_method = None
+
+        # The operator to use to compare the two values if
+        # the either of the expressions are null
+        op_for_null = None
+
+        # Customizations for when using a fallback method.
+        reverse_method_args = False
+        invert_method_result = False
+
+    @ns
+    class Is(BinaryComparison):
+        fast_op_types = InverseSet({'var'})
+        fast_op = '=='
+        fallback_fn = '_Is'
+
+    @ns
+    class IsNot(BinaryComparison):
+        fast_op_types = InverseSet({'var'})
+        fast_op = '!='
+        fallback_fn = '_IsNot'
+
+    @ns
+    class Equals(BinaryComparison):
+        fast_op_types = frozenset(PRIMITIVE_TYPES)
+        fast_op = '=='
+        op_for_null = '=='
+        fallback_method = 'Eq'
+        fallback_fn = '_Eq'
+
+    @ns
+    class NotEquals(BinaryComparison):
+        fast_op_types = frozenset(PRIMITIVE_TYPES)
+        fast_op = '!='
+        op_for_null = '!='
+        fallback_method = 'Eq'
+        invert_method_result = True
+        fallback_fn = '_Ne'
+
+    @ns
+    class LessThan(BinaryComparison):
+        fast_op_types = ['int', 'double']
+        fast_op = '<'
+        fallback_method = 'Lt'
+        fallback_fn = '_Lt'
+
+    @ns
+    class LessThanOrEqual(BinaryComparison):
+        fast_op_types = ['int', 'double']
+        fast_op = '<='
+        fallback_method = 'Lt'
+        invert_method_result = True
+        reverse_method_args = True
+        fallback_fn = '_Le'
+
+    @ns
+    class GreaterThan(BinaryComparison):
+        fast_op_types = ['int', 'double']
+        fast_op = '>'
+        fallback_method = 'Lt'
+        reverse_method_args = True
+        fallback_fn = '_Gt'
+
+    @ns
+    class GreaterThanOrEqual(BinaryComparison):
+        fast_op_types = ['int', 'double']
+        fast_op = '>='
+        fallback_method = 'Lt'
+        invert_method_result = True
+        fallback_fn = '_Ge'
+
+    @ns
+    class FunctionCall(Expression):
+        fields = (
+            ('function', str),
+            ('args', List[Expression]),
+        )
+
+    @ns
+    class MethodCall(Expression):
+        fields = (
+            ('owner', Expression),
+            ('name', str),
+            ('args', List[Expression]),
+        )
+
+    @ns
+    class BaseInOperation(Expression):
+        fields = (
+            ('left', Expression),
+            ('right', Expression),
+        )
+
+        method_name = None
+
+    @ns
+    class In(BaseInOperation):
+        method_name = 'Contains'
+
+    @ns
+    class LogicalNot(Expression):
+        fields = (
+            ('expression', Expression),
+        )
+
+    @ns
+    class LogicalOr(Expression):
+        fields = (
+            ('left', Expression),
+            ('right', Expression),
+        )
+
+    @ns
+    class LogicalAnd(Expression):
+        fields = (
+            ('left', Expression),
+            ('right', Expression),
+        )
+
+    @ns
+    class Conditional(Expression):
+        fields = (
+            ('condition', Expression),
+            ('left', Expression),
+            ('right', Expression),
+        )
+
+    @ns
+    class VariableDefinition(Statement, BaseVariableDefinition):
+        fields = (
+            ('final', bool),
+            ('type', Optional[str]),
+            ('name', str),
+            ('expression', Optional[Expression]),
+        )
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if self.type is None and self.expression is None:
+                raise Error(
+                    [self.token],
+                    'If explicit type is not specified for '
+                    'a variable definition, an expression must be supplied')
+
+    @ns
+    class ExpressionStatement(Statement):
+        fields = (
+            ('expression', Optional[Expression]),
+        )
+
+    @ns
+    class Return(Statement):
+        fields = (
+            ('expression', Optional[Expression]),
+        )
+
+    @ns
+    class Block(Statement):
+        fields = (
+            ('statements', List[Statement]),
+        )
+
+    @ns
+    class If(Statement):
+        fields = (
+            ('condition', Expression),
+            ('body', Block),
+            ('other', Optional[Statement]),
+        )
+
+        def __init__(self, *args ,**kwargs):
+            super().__init__(*args, **kwargs)
+            if not isinstance(self.other, (type(None), If, Block)):
+                raise Error(
+                    [self.other.token],
+                    f"Expected block or if statement")
+
+    @ns
+    class While(Statement):
+        fields = (
+            ('condition', Expression),
+            ('body', Block),
+        )
+
+    @ns
+    class Program(Node):
+        fields = (
+            ('definitions', List[GlobalDefinition]),
+            ('env', dict),
+        )
+
+    @ns
+    class GlobalVariableDefinition(GlobalDefinition):
+        fields = (
+            ('extern', bool),
+            ('type', str),
+            ('name', str),
+        )
+
+    @ns
+    class FunctionDefinition(GlobalDefinition):
+        fields = (
+            ('return_type', str),
+            ('name', str),
+            ('params', List[Parameter]),
+            ('body', Optional[Block]),
+        )
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            for m in ('Eq', 'Lt'):
+                if self.name.endswith(f':{m}'):
+                    if self.return_type != 'bool':
+                        raise Error([self.token],
+                                    f'{m} methods must return bool')
+            if self.name == 'main':
+                if self.return_type != 'void' or len(self.params):
+                    raise Error([self.token],
+                                'main function must have signature '
+                                "'void main()'")
+
+        @property
+        def extern(self):
+            return self.body is None
+
+    @ns
+    class TypeDefinition(GlobalDefinition):
+        pass
+
+    @ns
+    class TraitDefinition(GlobalDefinition):
+        # Trait kind of defines a type, but TraitDefinition not inheriting
+        # TypeDefinition is on purpose. Right now, there's no real support
+        # for declaring a variable as a trait type.
+        fields = (
+            ('name', str),
+            ('traits', List[str]),
+            ('methods', List[str]),
+        )
+
+        _trait_method_map = None
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    @ns
+    class ClassDefinition(TypeDefinition):
+        fields = (
+            ('name', str),
+            ('traits', List[str]),
+            ('fields', Optional[List[Field]]),
+            ('methods', List[str]),
+            ('untyped_methods', List[str]),
+        )
+
+        _method_map = None
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if self.untyped_methods and self.name != 'Closure':
+                raise Error(
+                    [self.token],
+                    'Closure is the only type allowed to have untyped methods')
+
+        @property
+        def extern(self):
+            return self.fields is None
+
+
+@Namespace
+def C(ns):
+    @ns
     class Scope(object):
         def __init__(self, parent):
             self.parent = parent
@@ -535,11 +963,11 @@ def ast(ns):
 
         def add(self, node):
             self.local_definitions.append(node)
-            if isinstance(node, GlobalDefinition):
+            if isinstance(node, ast.GlobalDefinition):
                 self._set(node.name, node)
-            elif isinstance(node, BaseVariableDefinition):
+            elif isinstance(node, ast.BaseVariableDefinition):
                 self.validate_vardef(node)
-                if isinstance(node, VariableDefinition):
+                if isinstance(node, ast.VariableDefinition):
                     self._check_for_shadow(node)
                 self._set(node.name, node)
             else:
@@ -548,11 +976,11 @@ def ast(ns):
         def validate_vardef(self, vardef):
             if vardef.type not in PRIMITIVE_TYPES and vardef.type != 'var':
                 typenode = self.get(vardef.type, [vardef.token])
-                if isinstance(typenode, TraitDefinition):
+                if isinstance(typenode, ast.TraitDefinition):
                     raise Error(
                         [vardef.token],
                         f'Using trait types variable type not supported')
-                if not isinstance(typenode, TypeDefinition):
+                if not isinstance(typenode, ast.TypeDefinition):
                     raise Error([vardef.token], f'{vardef.type} is not a type')
 
         def _check_for_shadow(self, node):
@@ -563,7 +991,7 @@ def ast(ns):
             scope = self.parent
             name = node.name
             while scope:
-                if name in scope.table and isinstance(scope.table[name], VariableDefinition):
+                if name in scope.table and isinstance(scope.table[name], ast.VariableDefinition):
                     raise Error([node.token, scope.table[name].token],
                                 f'Shadowed local variable')
                 scope = scope.parent
@@ -590,149 +1018,6 @@ def ast(ns):
             elif self.parent is not None:
                 return self.parent.get(name, tokens)
             raise self._missing_name_err(name, tokens)
-
-
-    @contextlib.contextmanager
-    def with_frame(ctx, token):
-        src = ctx.src
-        filename = token.source.filename.replace(os.sep, '/')
-        fname = ctx.fctx.fdef.name
-        src += f'KLC_push_frame("{filename}", "{fname}", {token.lineno});'
-        yield
-        src += f'KLC_pop_frame();'
-
-
-    @ns
-    class Node(object):
-        def __init__(self, token, *args):
-            self.token = token
-            for (fname, ftype), arg in zip(type(self).fields, args):
-                # sys.stderr.write('ftype = %r\n' % (ftype, ))
-                if not isinstance(arg, ftype):
-                    raise TypeError('Expected type of %r to be %r, but got %r' % (
-                        fname, ftype, arg))
-                try:
-                    setattr(self, fname, arg)
-                except AttributeError:
-                    sys.stderr.write(f'fname = {fname}\n')
-                    raise
-            if len(type(self).fields) != len(args):
-                raise TypeError('%s expects %s arguments, but got %s' % (
-                    type(self).__name__, len(type(self).fields), len(args)))
-
-        def __repr__(self):
-            return '%s(%s)' % (
-                type(self).__name__,
-                ', '.join(repr(getattr(self, n)) for n, _ in type(self).fields),
-            )
-
-
-    def _crelease(ctx, type_, cname):
-        if type_ in PRIMITIVE_TYPES:
-            return ''
-        elif type_ == 'var':
-            return f'KLC_release_var({cname});'
-        else:
-            return f'KLC_release((KLC_header*) {cname});'
-
-
-    def _cretain(ctx, type_, cname):
-        if type_ in PRIMITIVE_TYPES:
-            return ''
-        elif type_ == 'var':
-            return f'KLC_retain_var({cname});'
-        else:
-            return f'KLC_retain((KLC_header*) {cname});'
-
-
-    def _ctruthy(ctx, type_, cname):
-        if type_ == 'bool':
-            return cname
-        elif type_ in ('int', 'double'):
-            return f'({cname} != 0)'
-        elif type_ in ('function', 'type'):
-            return '1'
-        elif type_ == 'null':
-            return '0'
-        elif type_ == 'var':
-            return f'KLC_truthy({cname})'
-        else:
-            return f'KLC_truthy(KLC_object_to_var((KLC_header*) {cname}))'
-
-
-    @ns
-    class BaseVariableDefinition(Node):
-        fields = (
-            ('type', str),
-            ('name', str),
-        )
-
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            if self.type == 'void':
-                raise Error([self.token], f'Variable of type void is not allowed')
-            if self.type == 'Closure':
-                raise Error(
-                    [self.token],
-                    f'Variable of type Closure is not allowed (use var instead)')
-
-        def cproto(self, ctx):
-            return f'{ctx.cdecltype(self.type)} {ctx.cname(self.name)}'
-
-        def cname(self, ctx):
-            return ctx.cname(self.name)
-
-        def crelease(self, ctx):
-            return _crelease(ctx, self.type, self.cname(ctx))
-
-        def cretain(self, ctx):
-            return _cretain(ctx, self.type, self.cname(ctx))
-
-
-    @ns
-    class Parameter(BaseVariableDefinition):
-        pass
-
-
-    @ns
-    class Field(BaseVariableDefinition):
-        pass
-
-
-    @ns
-    class GlobalDefinition(Node):
-        pass
-
-
-    @ns
-    class Statement(Node):
-        def translate(self, ctx):
-            """Translates self with the given translation context.
-            Returns True if the current statement is terminal (e.g. return).
-            No statements directly after a translate that returns True should
-            be emitted, since those following statements will be unreachable.
-            """
-            raise NotImplementedError()
-
-
-    @ns
-    class Expression(Node):
-        def translate(self, ctx):
-            """Translates self with the given translation context.
-            Returns (type, tempvar) pair, where type is the type of
-            evaluating this expression, and tempvar is the name of the
-            temporary C variable where the result of this expression
-            is stored.
-            If type is 'void', tempvar should be None.
-            """
-            raise NotImplementedError()
-
-        def translate_value(self, ctx):
-            etype, evar = self.translate(ctx)
-            if etype == 'void':
-                raise Error([self.token], 'void type not allowed here')
-            return etype, evar
-
 
     @ns
     class TranslationContext(object):
@@ -780,846 +1065,6 @@ def ast(ns):
             else:
                 return f'({self.cdecltype(type_)}) KLC_var_to_object({cname}, &KLC_type{encode0(type_)})'
 
-
-    @ns
-    class Name(Expression):
-        fields = (
-            ('name', str),
-        )
-
-        def translate(self, ctx):
-            defn = ctx.scope.get(self.name, [self.token])
-            if isinstance(defn, GlobalVariableDefinition):
-                etype = defn.type
-                tempvar = ctx.mktemp(etype)
-                ctx.src += f'{tempvar} = KLC_get_global{encode(defn.name)}();'
-                return (etype, tempvar)
-            elif isinstance(defn, BaseVariableDefinition):
-                etype = defn.type
-                tempvar = ctx.mktemp(etype)
-                ctx.src += f'{tempvar} = {ctx.cname(self.name)};'
-                ctx.src += _cretain(ctx, etype, tempvar)
-                return (etype, tempvar)
-            elif isinstance(defn, ClassDefinition):
-                tempvar = ctx.mktemp('type')
-                ctx.src += f'{tempvar} = &KLC_type{encode0(defn.name)};'
-                return 'type', tempvar
-            elif isinstance(defn, FunctionDefinition):
-                tempvar = ctx.mktemp('function')
-                ctx.src += f'{tempvar} = &KLC_functioninfo{encode(defn.name)};'
-                return 'function', tempvar
-            else:
-                raise Error([self.token, defn.token],
-                            f'{name} is not a variable')
-
-
-    @ns
-    class SetName(Expression):
-        fields = (
-            ('name', str),
-            ('expression', Expression),
-        )
-
-        def translate(self, ctx):
-            defn = ctx.scope.get(self.name, [self.token])
-            if isinstance(defn, GlobalVariableDefinition):
-                raise Error(
-                    [self.token, defn.token],
-                    f'Global variables are final ({defn.name})')
-            elif isinstance(defn, BaseVariableDefinition):
-                etype = defn.type
-                tempvar = ctx.mktemp(etype)
-                etype, evar = self.expression.translate(ctx)
-                ctx.src += _cretain(ctx, etype, evar)
-                ctx.src += defn.crelease(ctx)
-                if etype != defn.type:
-                    if defn.type == 'var':
-                        evar = ctx.varify(etype, evar)
-                    else:
-                        raise Error([self.token, defn.token],
-                                    f'Tried to set {self.name} of type '
-                                    f'{defn.type} to {etype}')
-                ctx.src += f'{ctx.cname(self.name)} = {evar};'
-                return (etype, tempvar)
-            else:
-                raise Error([self.token, defn.token],
-                            f'{name} is not a variable')
-
-
-    @ns
-    class Cast(Expression):
-        fields = (
-            ('expression', Expression),
-            ('type', str),
-        )
-
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            if isinstance(self.expression, NullLiteral):
-                raise Error(
-                    [self.token],
-                    'Type assertions on null values will almost always fail '
-                    '(try a typed null instead, '
-                    'e.g. null(String) without the period)')
-
-        def translate(self, ctx):
-            etype, etempvar = self.expression.translate(ctx)
-            if etype != 'var':
-                raise Error(
-                    [self.token],
-                    f'Only var types can be cast '
-                    f'into other types but got {etype}')
-            tempvar = ctx.mktemp(self.type)
-            with with_frame(ctx, self.token):
-                ctx.src += f'{tempvar} = {ctx.unvarify(self.type, etempvar)};'
-            ctx.src += _cretain(ctx, self.type, tempvar)
-            return (self.type, tempvar)
-
-
-    @ns
-    class NullLiteral(Expression):
-        fields = (
-            ('type', str),
-        )
-
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            if not nullable(self.type):
-                raise Error([self.token], f'{self.type} is not nullable')
-
-        def translate(self, ctx):
-            tempvar = ctx.mktemp(self.type)
-            if self.type == 'var':
-                ctx.src += f'{tempvar} = KLC_null;'
-            else:
-                ctx.src += f'{tempvar} = NULL;'
-            return self.type, tempvar
-
-
-    @ns
-    class BoolLiteral(Expression):
-        fields = (
-            ('value', bool),
-        )
-
-        def translate(self, ctx):
-            tempvar = ctx.mktemp('bool')
-            ctx.src += f'{tempvar} = {1 if self.value else 0};'
-            return ('bool', tempvar)
-
-
-    @ns
-    class StringLiteral(Expression):
-        fields = (
-            ('value', str),
-        )
-
-        def translate(self, ctx):
-            tempvar = ctx.mktemp('String')
-            # TODO: properly escape the string literal
-            s = (self.value
-                .replace('\\', '\\\\')
-                .replace('\t', '\\t')
-                .replace('\n', '\\n')
-                .replace('\r', '\\r')
-                .replace('"', '\\"')
-                .replace("'", "\\'"))
-            ctx.src += f'{tempvar} = KLC_mkstr("{s}");'
-            return ('String', tempvar)
-
-
-    @ns
-    class IntLiteral(Expression):
-        fields = (
-            ('value', int),
-        )
-
-        def translate(self, ctx):
-            tempvar = ctx.mktemp('int')
-            # TODO: Warn if size of 'value' is too big
-            ctx.src += f'{tempvar} = {self.value}L;'
-            return ('int', tempvar)
-
-
-    @ns
-    class DoubleLiteral(Expression):
-        fields = (
-            ('value', float),
-        )
-
-        def translate(self, ctx):
-            tempvar = ctx.mktemp('double')
-            # TODO: Warn if size of 'value' is too big
-            ctx.src += f'{tempvar} = {self.value};'
-            return ('double', tempvar)
-
-
-    @ns
-    class ListDisplay(Expression):
-        fields = (
-            ('expressions', List[Expression]),
-        )
-
-        def translate(self, ctx):
-            argvars = []
-            for expr in self.expressions:
-                etype, evar = expr.translate(ctx)
-                argvars.append(ctx.varify(etype, evar))
-            xvar = ctx.mktemp('List')
-            ctx.src += f'{xvar} = KLC_mklist({len(argvars)});'
-            for arg in argvars:
-                ctx.src += f'{encode("List:push")}({xvar}, {arg});'
-            return 'List', xvar
-
-
-    @ns
-    class BinaryComparison(Expression):
-        """Base class for binary operations that return bool result.
-        """
-        fields = (
-            ('left', Expression),
-            ('right', Expression),
-        )
-
-        method_types = set()
-        fallback_method = None
-
-        # The operator to use to compare the two values if
-        # the either of the expressions are null
-        op_for_null = None
-
-        # Customizations for when using a fallback method.
-        reverse_method_args = False
-        invert_method_result = False
-
-        def translate(self, ctx):
-            fast_op_types = type(self).fast_op_types
-            fast_op = type(self).fast_op
-            fallback_method = type(self).fallback_method
-            fallback_fn = type(self).fallback_fn
-            op_for_null = type(self).op_for_null
-            reverse_method_args = type(self).reverse_method_args
-            invert_method_result = type(self).invert_method_result
-
-            ltok = self.left.token
-            ltype, lvar = self.left.translate_value(ctx)
-
-            rtok = self.right.token
-            rtype, rvar = self.right.translate_value(ctx)
-
-            # If the types are the same and not 'var', we might be able to
-            # do some optimizations.
-            if ltype == rtype and ltype != 'var':
-                # If the types are in fast_op_types,
-                # we can just run a single C operation to
-                # compute the result
-                if ltype in fast_op_types:
-                    xvar = ctx.mktemp('bool')
-                    ctx.src += f'{xvar} = ({lvar}) {fast_op} ({rvar});'
-                    return 'bool', xvar
-
-                # If there is a fallback method to call,
-                # try that. Since the types are the same and
-                # the type is not var, a method call is really
-                # a plain typed function call here, so would
-                # be faster than a generic function call
-                # like with the final fallback.
-                if fallback_method:
-                    if reverse_method_args:
-                        ltok, ltype, lvar, rtok, rtype, rvar = (
-                            rtok, rtype, rvar, ltok, ltype, lvar)
-
-                    argtriples = [
-                        (self.left.token, ltype, lvar),
-                        (self.right.token, rtype, rvar),
-                    ]
-
-                    # null check, but we only care about this if:
-                    #  1. we're comparing nullable types, and
-                    #  2. the operator supports some kind of alternate
-                    #     behavior on null. In our case, in case of null
-                    #     we substitute with the 'op_for_null' operator
-                    #     if set.
-                    #  *** We also cheat a little bit here.
-                    #      Since we know that the only operators that specify
-                    #      op_for_null are Equals and NotEquals, we can
-                    #      also skip doing the full method call if
-                    #      left and right are pointer equal.
-                    if nullable(ltype) and op_for_null:
-                        xvar0 = ctx.mktemp('bool')
-                        ctx.src += f'if ({lvar} && {rvar} && {lvar} != {rvar}) ''{'
-
-                    xtype, xvar = _translate_mcall(
-                        ctx, self.token, fallback_method, argtriples)
-                    assert xtype == 'bool', xtype
-                    if invert_method_result:
-                        ctx.src += f'{xvar} = !{xvar};'
-
-                    if nullable(ltype) and op_for_null:
-                        ctx.src += f'{xvar0} = {xvar};'
-                        ctx.src += '} else {'
-                        ctx.src += f'{xvar0} = {lvar} {op_for_null} {rvar};'
-                        ctx.src += '}'
-                        return 'bool', xvar0
-                    else:
-                        return 'bool', xvar
-
-            # If none of the above match, use the fallback function
-            fn = ctx.scope.get(fallback_fn, [self.token])
-            argtriples = [
-                (self.left.token, ltype, lvar),
-                (self.right.token, rtype, rvar),
-            ]
-            return _translate_fcall(ctx, self.token, fn, argtriples)
-
-
-    @ns
-    class Is(BinaryComparison):
-        fast_op_types = InverseSet({'var'})
-        fast_op = '=='
-        fallback_fn = '_Is'
-
-
-    @ns
-    class IsNot(BinaryComparison):
-        fast_op_types = InverseSet({'var'})
-        fast_op = '!='
-        fallback_fn = '_IsNot'
-
-
-    @ns
-    class Equals(BinaryComparison):
-        fast_op_types = frozenset(PRIMITIVE_TYPES)
-        fast_op = '=='
-        op_for_null = '=='
-        fallback_method = 'Eq'
-        fallback_fn = '_Eq'
-
-
-    @ns
-    class NotEquals(BinaryComparison):
-        fast_op_types = frozenset(PRIMITIVE_TYPES)
-        fast_op = '!='
-        op_for_null = '!='
-        fallback_method = 'Eq'
-        invert_method_result = True
-        fallback_fn = '_Ne'
-
-
-    @ns
-    class LessThan(BinaryComparison):
-        fast_op_types = ['int', 'double']
-        fast_op = '<'
-        fallback_method = 'Lt'
-        fallback_fn = '_Lt'
-
-
-    @ns
-    class LessThanOrEqual(BinaryComparison):
-        fast_op_types = ['int', 'double']
-        fast_op = '<='
-        fallback_method = 'Lt'
-        invert_method_result = True
-        reverse_method_args = True
-        fallback_fn = '_Le'
-
-
-    @ns
-    class GreaterThan(BinaryComparison):
-        fast_op_types = ['int', 'double']
-        fast_op = '>'
-        fallback_method = 'Lt'
-        reverse_method_args = True
-        fallback_fn = '_Gt'
-
-
-    @ns
-    class GreaterThanOrEqual(BinaryComparison):
-        fast_op_types = ['int', 'double']
-        fast_op = '>='
-        fallback_method = 'Lt'
-        invert_method_result = True
-        fallback_fn = '_Ge'
-
-
-    @ns
-    class FunctionCall(Expression):
-        fields = (
-            ('function', str),
-            ('args', List[Expression]),
-        )
-
-        def translate(self, ctx):
-            defn = ctx.scope.get(self.function, [self.token])
-            if isinstance(defn, FunctionDefinition):
-                argtriples = []
-                for arg in self.args:
-                    argtype, argtempvar = arg.translate(ctx)
-                    argtriples.append((arg.token, argtype, argtempvar))
-                return _translate_fcall(ctx, self.token, defn, argtriples)
-
-            if (isinstance(defn, BaseVariableDefinition) and
-                    defn.type in ('var', 'function')):
-                argtempvars = []
-                for arg in self.args:
-                    argtype, argtempvar = arg.translate(ctx)
-                    if argtype == 'void':
-                        raise Error(
-                            [arg.token],
-                            'void expression cannot be used as an argument')
-                    argtempvar = ctx.varify(argtype, argtempvar)
-                    argtempvars.append(argtempvar)
-                tempvar = ctx.mktemp('var')
-                nargs = len(self.args)
-                temparr = ctx.mktemparr(nargs) if nargs else 'NULL'
-                cfname = ctx.cname(defn.name)
-                for i, argtempvar in enumerate(argtempvars):
-                    ctx.src += f'{temparr}[{i}] = {argtempvar};'
-                if defn.type == 'function':
-                    ctx.src += f'{tempvar} = {cfname}->body({nargs}, {temparr});'
-                else:
-                    ctx.src += f'{tempvar} = KLC_var_call({cfname}, {nargs}, {temparr});'
-                return 'var', tempvar
-
-            if isinstance(defn, BaseVariableDefinition):
-                # At this point, we know defn.type cannot be var or function
-                # For these types, we just want to call the 'Call' method.
-                argtriples = [
-                    (self.token, defn.type, ctx.cname(defn.name)),
-                ]
-                for arg in self.args:
-                    argtype, argtempvar = arg.translate_value(ctx)
-                    argtriples.append((arg.token, argtype, argtempvar))
-                return _translate_mcall(ctx, self.token, 'Call', argtriples)
-
-            if isinstance(defn, ClassDefinition):
-                argtriples = []
-                for arg in self.args:
-                    argtype, argtempvar = arg.translate(ctx)
-                    argtriples.append((arg.token, argtype, argtempvar))
-                malloc_name = f'KLC_malloc{encode0(defn.name)}'
-                fname = f'{defn.name}#new'
-                fdefn = ctx.scope.get(fname, [self.token])
-                if not isinstance(fdefn, FunctionDefinition):
-                    raise Error([self.token], f'FUBAR: shadowed function name')
-
-                if defn.extern:
-                    # For extern types, constructing the type is
-                    # identical to a single function call
-                    return _translate_fcall(ctx, self.token, fdefn, argtriples)
-                else:
-                    # For normal types, we want to malloc first, and then
-                    # call the initializer
-                    # TODO: Simplify normal types so that these are also
-                    # just a single function call like extern types.
-                    this_tempvar = ctx.mktemp(defn.name)
-                    ctx.src += f'{this_tempvar} = {malloc_name}();'
-                    argtriples = [
-                        (self.token, defn.name, this_tempvar)
-                    ] + argtriples
-                    _translate_fcall(ctx, self.token, fdefn, argtriples)
-                    return defn.name, this_tempvar
-
-            raise Error([self.token, defn.token],
-                        f'{self.function} is not a function')
-
-
-    def _translate_fcall(ctx, token, defn, argtriples):
-        argtempvars = []
-        for param, (argtok, argtype, argtempvar) in zip(defn.params, argtriples):
-            if argtype != 'void' and param.type == 'var':
-                argtempvar = ctx.varify(argtype, argtempvar)
-                argtype = 'var'
-            if argtype != param.type:
-                raise Error([param.token, argtok],
-                            f'Expected {param.type} but got {argtype}')
-            argtempvars.append(argtempvar)
-        if len(defn.params) != len(argtriples):
-            raise Error([token, defn.token],
-                        f'{len(defn.params)} args expected '
-                        f'but got {len(argtriples)}')
-        argsstr = ', '.join(argtempvars)
-        with with_frame(ctx, token):
-            if defn.return_type == 'void':
-                ctx.src += f'{ctx.cname(defn.name)}({argsstr});'
-                return 'void', None
-            else:
-                tempvar = ctx.mktemp(defn.return_type)
-                ctx.src += f'{tempvar} = {ctx.cname(defn.name)}({argsstr});'
-                return defn.return_type, tempvar
-
-
-    def _no_such_method_error(token, name, ownertype):
-        return Error(
-            [token],
-            f'Method {name} does not exist for type {ownertype}')
-
-
-    def _translate_mcall(ctx, token, name, argtriples):
-        if len(argtriples) < 1:
-            raise Error([token], 'FUBAR: mcall requires at least one arg')
-
-        _, ownertype, ownertempvar = argtriples[0]
-
-        if ownertype == 'void':
-            raise Error([token], f'Cannot call method on void type')
-
-        if ownertype == 'var':
-            argtempvars = []
-            for argtoken, argtype, argtempvar in argtriples:
-                if argtype == 'void':
-                    raise Error(
-                        [arg.token],
-                        'void expression cannot be used as an argument')
-                argtempvar = ctx.varify(argtype, argtempvar)
-                argtempvars.append(argtempvar)
-            tarr = ctx.mktemparr(len(argtriples))
-            tv = ctx.mktemp('var')
-            for i, argtempvar in enumerate(argtempvars):
-                ctx.src += f'{tarr}[{i}] = {argtempvar};'
-            with with_frame(ctx, token):
-                ctx.src += (
-                    f'{tv} = KLC_mcall("{name}", '
-                    f'{len(argtempvars)}, {tarr});'
-                )
-            return 'var', tv
-        else:
-            # Check that this method actually exists on this type
-            if ownertype in PRIMITIVE_TYPES:
-                if name not in _primitive_method_names[ownertype]:
-                    raise _no_such_method_error(token, name, ownertype)
-                fname = f'{ownertype}:{name}'
-            else:
-                cdef = ctx.scope.get(ownertype, [token])
-                assert isinstance(cdef, ClassDefinition), cdef
-                if name not in cdef.method_map(ctx):
-                    raise _no_such_method_error(token, name, ownertype)
-                fname = cdef.method_map(ctx)[name]
-
-            # TODO: Consider looking up from global context
-            # to avoid coincidental names that shadow method names
-            defn = ctx.scope.get(fname, [token])
-            if not isinstance(defn, FunctionDefinition):
-                raise Error([token], f'FUBAR: shadowed method {fname}')
-
-            return _translate_fcall(ctx, token, defn, argtriples)
-
-    @ns
-    class MethodCall(Expression):
-        fields = (
-            ('owner', Expression),
-            ('name', str),
-            ('args', List[Expression]),
-        )
-
-        def translate(self, ctx):
-            ownertype, ownertempvar = self.owner.translate(ctx)
-            argtriples = [(self.token, ownertype, ownertempvar)]
-            for arg in self.args:
-                argtype, argvar = arg.translate(ctx)
-                argtriples.append((arg.token, argtype, argvar))
-            return _translate_mcall(ctx, self.token, self.name, argtriples)
-
-
-    @ns
-    class BaseInOperation(Expression):
-        fields = (
-            ('left', Expression),
-            ('right', Expression),
-        )
-
-        method_name = None
-
-        def translate(self, ctx):
-            ltype, lvar = self.left.translate(ctx)
-            rtype, rvar = self.right.translate(ctx)
-            # This could almost just be a simple MethodCall, but the problem
-            # is that the order or arguments have to be reversed
-            argtriples = [
-                (self.right.token, rtype, rvar),
-                (self.left.token, ltype, lvar),
-            ]
-            return _translate_mcall(
-                ctx, self.token, type(self).method_name, argtriples)
-
-
-    @ns
-    class In(BaseInOperation):
-        method_name = 'Contains'
-
-
-    @ns
-    class LogicalNot(Expression):
-        fields = (
-            ('expression', Expression),
-        )
-
-        def translate(self, ctx):
-            etype, evar = self.expression.translate(ctx)
-            xvar = ctx.mktemp('bool')
-            ctx.src += f'{xvar} = !{_ctruthy(ctx, etype, evar)};'
-            return 'bool', xvar
-
-
-    @ns
-    class LogicalOr(Expression):
-        fields = (
-            ('left', Expression),
-            ('right', Expression),
-        )
-
-        def translate(self, ctx):
-            ltype, lvar = self.left.translate(ctx)
-            xvar = ctx.mktemp('bool')
-            ctx.src += f'if (!{_ctruthy(ctx, ltype, lvar)})'
-            ctx.src += '{'
-            rtype, rvar = self.right.translate(ctx)
-            ctx.src += f'{xvar} = {_ctruthy(ctx, rtype, rvar)};'
-            ctx.src += '} else {'
-            ctx.src += f'{xvar} = 1;'
-            ctx.src += '}'
-            if 'void' in (ltype, rtype):
-                raise Error([self.token], 'void type in or operator')
-            return ('bool', xvar)
-
-
-    @ns
-    class LogicalAnd(Expression):
-        fields = (
-            ('left', Expression),
-            ('right', Expression),
-        )
-
-        def translate(self, ctx):
-            ltype, lvar = self.left.translate(ctx)
-            xvar = ctx.mktemp('bool')
-            ctx.src += f'if ({_ctruthy(ctx, ltype, lvar)})'
-            ctx.src += '{'
-            rtype, rvar = self.right.translate(ctx)
-            ctx.src += f'{xvar} = {_ctruthy(ctx, rtype, rvar)};'
-            ctx.src += '} else {'
-            ctx.src += f'{xvar} = 0;'
-            ctx.src += '}'
-            if 'void' in (ltype, rtype):
-                raise Erorr([self.token], 'void type in and operator')
-            return ('bool', xvar)
-
-
-    @ns
-    class Conditional(Expression):
-        fields = (
-            ('condition', Expression),
-            ('left', Expression),
-            ('right', Expression),
-        )
-
-        def translate(self, ctx):
-            ctype, cvar = self.condition.translate(ctx)
-            ctx.src += f'if ({_ctruthy(ctx, ctype, cvar)})'
-            ctx.src += '{'
-            ltype, lvar = self.left.translate(ctx)
-            lsrc = ctx.src.spawn()
-            ctx.src += '} else {'
-            rtype, rvar = self.right.translate(ctx)
-            rsrc = ctx.src.spawn()
-            ctx.src += '}'
-            if 'void' in (ltype, rtype):
-                raise Error([self.token], 'void type in conditional operator')
-            if 'var' in (ltype, rtype):
-                xtype = 'var'
-                lvar = ctx.varify(lvar)
-                rvar = ctx.varify(rvar)
-            elif ltype != rtype:
-                raise Error(
-                    [self.token],
-                    'conditional operator requires result types to be the same')
-            else:
-                xtype = ltype
-
-            xvar = ctx.mktemp(xtype)
-            lsrc += f'{xvar} = {lvar};'
-            rsrc += f'{xvar} = {rvar};'
-            ctx.src += _cretain(ctx, xtype, xvar)
-            return (xtype, xvar)
-
-
-    @ns
-    class VariableDefinition(Statement, BaseVariableDefinition):
-        fields = (
-            ('final', bool),
-            ('type', Optional[str]),
-            ('name', str),
-            ('expression', Optional[Expression]),
-        )
-
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            if self.type is None and self.expression is None:
-                raise Error(
-                    [self.token],
-                    'If explicit type is not specified for '
-                    'a variable definition, an expression must be supplied')
-
-        def translate(self, ctx):
-            if self.expression:
-                ectx = ctx.ectx()
-                etype, tempvar = self.expression.translate(ectx)
-                value = tempvar
-                if self.type is None:
-                    self.type = etype
-                elif self.type == 'var' and etype != 'void':
-                    value = ctx.varify(etype, tempvar)
-                elif self.type != etype:
-                    raise Error([self.token],
-                                f'Expected {self.type} but got {etype}')
-                ectx.src += f'{self.cname(ectx)} = {value};'
-                ectx.release_tempvars(tempvar)
-
-            ctx.scope.add(self)
-
-
-    @ns
-    class ExpressionStatement(Statement):
-        fields = (
-            ('expression', Optional[Expression]),
-        )
-
-        def translate(self, ctx):
-            ectx = ctx.ectx()
-            self.expression.translate(ectx)
-            ectx.release_tempvars()
-
-
-    @ns
-    class Return(Statement):
-        fields = (
-            ('expression', Optional[Expression]),
-        )
-
-        def translate(self, ctx):
-            ectx = ctx.ectx()
-            if self.expression:
-                rtype, tempvar = self.expression.translate(ectx)
-            else:
-                rtype = 'void'
-            fctx = ctx.fctx
-            expected_rtype = fctx.fdef.return_type
-            if expected_rtype != rtype:
-                raise Error([fctx.fdef.token, self.token],
-                            f'Function was declared to return {expected_rtype} '
-                            f'but tried to return {rtype} instead')
-            if rtype == 'void':
-                _release_for_return(ctx, ectx.src)
-                ectx.src += 'return;'
-            else:
-                ectx.release_tempvars(tempvar)
-                _release_for_return(ctx, ectx.src)
-                ectx.src += f'return {tempvar};'
-
-            return True
-
-
-    def _release_for_return(ctx, src):
-        # Before returning, we should release all local variables
-        # We need to take care not to release function parameters
-        # or global variables
-        scope = ctx.scope
-        while scope:
-            for vdef in reversed(scope.local_definitions):
-                if isinstance(vdef, VariableDefinition):
-                    src += vdef.crelease(ctx)
-            scope = scope.parent
-
-
-    @ns
-    class Block(Statement):
-        fields = (
-            ('statements', List[Statement]),
-        )
-
-        def translate(self, pctx):
-            pctx.src += '{'
-            prologue = pctx.src.spawn(1)
-            ctx = pctx.bctx(1)
-            epilogue = pctx.src.spawn(1)
-            pctx.src += '}'
-            early_return = False
-            for i, statement in enumerate(self.statements):
-                if statement.translate(ctx):
-                    early_return = True
-                    if i + 1 < len(self.statements):
-                        raise Error([self.statements[i + 1].token],
-                                    'Unreachable statement')
-                    break
-
-            # Declare the local variables for C
-            # To be C89 compatible, we need all variable definitions
-            # to appear at the beginning of the block.
-            for vdef in ctx.scope.local_definitions:
-                assert isinstance(vdef, VariableDefinition), vdef
-                prologue += f'{vdef.cproto(ctx)} = {ctx.czero(vdef.type)};'
-
-            # If there's an early return, there's no need to have an
-            # epilogue and generate unreachable code.
-            if not early_return:
-                # If we don't have an early return, we should
-                # make sure to release all local variables defined in
-                # this block before exiting
-                # We should also release in LIFO order
-                for vdef in reversed(ctx.scope.local_definitions):
-                    if vdef.type not in PRIMITIVE_TYPES:
-                        epilogue += vdef.crelease(ctx)
-
-
-    @ns
-    class If(Statement):
-        fields = (
-            ('condition', Expression),
-            ('body', Block),
-            ('other', Optional[Statement]),
-        )
-
-        def __init__(self, *args ,**kwargs):
-            super().__init__(*args, **kwargs)
-            if not isinstance(self.other, (type(None), If, Block)):
-                raise Error(
-                    [self.other.token],
-                    f"Expected block or if statement")
-
-        def translate(self, ctx):
-            ctx.src += '{'
-            ctx.src += 'KLC_bool b;'
-            ectx = ctx.ectx()
-            rtype, tempvar = self.condition.translate(ectx)
-            ectx.src += f'b = {_ctruthy(ctx, rtype, tempvar)};'
-            ectx.release_tempvars()
-            ctx.src += 'if (b)'
-            self.body.translate(ctx)
-            if self.other is not None:
-                ctx.src += 'else'
-                self.other.translate(ctx)
-            ctx.src += '}'
-
-
-    @ns
-    class While(Statement):
-        fields = (
-            ('condition', Expression),
-            ('body', Block),
-        )
-
-        def translate(self, ctx):
-            ctx.src += 'while (1) {'
-            ctx.src += 'KLC_bool b;'
-            ectx = ctx.ectx()
-            rtype, tempvar = self.condition.translate(ectx)
-            ectx.src += f'b = {_ctruthy(ctx, rtype, tempvar)};'
-            ectx.release_tempvars()
-            ctx.src += 'if (!b) { break; }'
-            self.body.translate(ctx)
-            ctx.src += '}'
-
-
     @ns
     class GlobalTranslationContext(TranslationContext):
         def __init__(self, program):
@@ -1638,13 +1083,11 @@ def ast(ns):
             "Create child function translation context"
             return FunctionTranslationContext(self, fdef)
 
-
     @ns
     class BodyTranslationContext(TranslationContext):
 
         def bctx(self, depth):
             return BlockTranslationContext(self, depth)
-
 
     @ns
     class FunctionTranslationContext(BodyTranslationContext):
@@ -1659,7 +1102,6 @@ def ast(ns):
             self.src = gctx.src.spawn()
             self.fctx = self
 
-
     @ns
     class BlockTranslationContext(BodyTranslationContext):
         def __init__(self, parent: BodyTranslationContext, depth):
@@ -1671,7 +1113,6 @@ def ast(ns):
 
         def ectx(self):
             return ExpressionTranslationContext(self)
-
 
     @ns
     class ExpressionTranslationContext(TranslationContext):
@@ -1714,153 +1155,750 @@ def ast(ns):
                 if cname != keepvar:
                     self.src += _crelease(self, type_, cname)
 
+    translate = Multimethod('translate')
+    ns(translate, name='translate')
 
-    @ns
-    class Program(Node):
-        fields = (
-            ('definitions', List[GlobalDefinition]),
-            ('env', dict),
-        )
+    @translate.on(ast.Name)
+    def translate(self, ctx):
+        defn = ctx.scope.get(self.name, [self.token])
+        if isinstance(defn, ast.GlobalVariableDefinition):
+            etype = defn.type
+            tempvar = ctx.mktemp(etype)
+            ctx.src += f'{tempvar} = KLC_get_global{encode(defn.name)}();'
+            return (etype, tempvar)
+        elif isinstance(defn, ast.BaseVariableDefinition):
+            etype = defn.type
+            tempvar = ctx.mktemp(etype)
+            ctx.src += f'{tempvar} = {ctx.cname(self.name)};'
+            ctx.src += _cretain(ctx, etype, tempvar)
+            return (etype, tempvar)
+        elif isinstance(defn, ast.ClassDefinition):
+            tempvar = ctx.mktemp('type')
+            ctx.src += f'{tempvar} = &KLC_type{encode0(defn.name)};'
+            return 'type', tempvar
+        elif isinstance(defn, ast.FunctionDefinition):
+            tempvar = ctx.mktemp('function')
+            ctx.src += f'{tempvar} = &KLC_functioninfo{encode(defn.name)};'
+            return 'function', tempvar
+        else:
+            raise Error([self.token, defn.token],
+                        f'{name} is not a variable')
 
-        def translate(self):
-            ctx = GlobalTranslationContext(self)
-            for inc in self.env['@vars']['C_HEADERS']:
-                ctx.inc += f'#include "{inc}"'
-            for ptype, mnames in sorted(_primitive_method_names.items()):
-                methodmap = _compute_method_map(
-                    token=self.token,
-                    cname=ptype,
-                    method_names=mnames,
-                    trait_names=['Object'],
-                    ctx=ctx)
-                _write_ctypeinfo(ctx.src, ptype, methodmap, use_null_deleter=True)
-            for d in self.definitions:
-                d.translate(ctx)
-            return str(ctx.out)
+    @translate.on(ast.SetName)
+    def translate(self, ctx):
+        defn = ctx.scope.get(self.name, [self.token])
+        if isinstance(defn, ast.GlobalVariableDefinition):
+            raise Error(
+                [self.token, defn.token],
+                f'Global variables are final ({defn.name})')
+        elif isinstance(defn, ast.BaseVariableDefinition):
+            etype = defn.type
+            tempvar = ctx.mktemp(etype)
+            etype, evar = translate(self.expression, ctx)
+            ctx.src += _cretain(ctx, etype, evar)
+            ctx.src += _defcrelease(defn, ctx)
+            if etype != defn.type:
+                if defn.type == 'var':
+                    evar = ctx.varify(etype, evar)
+                else:
+                    raise Error([self.token, defn.token],
+                                f'Tried to set {self.name} of type '
+                                f'{defn.type} to {etype}')
+            ctx.src += f'{ctx.cname(self.name)} = {evar};'
+            return (etype, tempvar)
+        else:
+            raise Error([self.token, defn.token],
+                        f'{name} is not a variable')
 
+    @translate.on(ast.Cast)
+    def translate(self, ctx):
+        etype, etempvar = translate(self.expression, ctx)
+        if etype != 'var':
+            raise Error(
+                [self.token],
+                f'Only var types can be cast '
+                f'into other types but got {etype}')
+        tempvar = ctx.mktemp(self.type)
+        with with_frame(ctx, self.token):
+            ctx.src += f'{tempvar} = {ctx.unvarify(self.type, etempvar)};'
+        ctx.src += _cretain(ctx, self.type, tempvar)
+        return (self.type, tempvar)
 
-    @ns
-    class GlobalVariableDefinition(GlobalDefinition):
-        fields = (
-            ('extern', bool),
-            ('type', str),
-            ('name', str),
-        )
+    @translate.on(ast.NullLiteral)
+    def translate(self, ctx):
+        tempvar = ctx.mktemp(self.type)
+        if self.type == 'var':
+            ctx.src += f'{tempvar} = KLC_null;'
+        else:
+            ctx.src += f'{tempvar} = NULL;'
+        return self.type, tempvar
 
-        def translate(self, ctx):
-            n = encode(self.name)
-            ifn = encode(self.name + '#init')
-            ctype = ctx.cdecltype(self.type)
-            ctx.hdr += f'{ctype} KLC_get_global{n}();'
-            ctx.src += f'int KLC_initialized_global{n} = 0;'
-            ctx.src += f'{ctype} KLC_global{n} = {ctx.czero(self.type)};'
+    @translate.on(ast.BoolLiteral)
+    def translate(self, ctx):
+        tempvar = ctx.mktemp('bool')
+        ctx.src += f'{tempvar} = {1 if self.value else 0};'
+        return ('bool', tempvar)
 
-            ctx.src += f'{ctype} KLC_get_global{n}() ' '{'
-            ctx.src += f'  if (!KLC_initialized_global{n}) ' '{'
-            ctx.src += f'    KLC_global{n} = {ifn}();'
-            ctx.src += f'    KLC_initialized_global{n} = 1;'
-            if self.type in PRIMITIVE_TYPES:
-                pass
-            elif self.type == 'var':
-                ctx.src += f'    KLC_release_var_on_exit(KLC_global{n});'
-            else:
-                ctx.src += f'    KLC_release_object_on_exit((KLC_header*) KLC_global{n});'
-            ctx.src += '  }'
-            src1 = ctx.src.spawn(1)
-            src1 += _cretain(ctx, self.type, f'KLC_global{n}')
-            src1 += f'return KLC_global{n};'
-            ctx.src += '}'
+    @translate.on(ast.StringLiteral)
+    def translate(self, ctx):
+        tempvar = ctx.mktemp('String')
+        # TODO: properly escape the string literal
+        s = (self.value
+            .replace('\\', '\\\\')
+            .replace('\t', '\\t')
+            .replace('\n', '\\n')
+            .replace('\r', '\\r')
+            .replace('"', '\\"')
+            .replace("'", "\\'"))
+        ctx.src += f'{tempvar} = KLC_mkstr("{s}");'
+        return ('String', tempvar)
 
+    @translate.on(ast.IntLiteral)
+    def translate(self, ctx):
+        tempvar = ctx.mktemp('int')
+        # TODO: Warn if size of 'value' is too big
+        ctx.src += f'{tempvar} = {self.value}L;'
+        return ('int', tempvar)
 
-    @ns
-    class FunctionDefinition(GlobalDefinition):
-        fields = (
-            ('return_type', str),
-            ('name', str),
-            ('params', List[Parameter]),
-            ('body', Optional[Block]),
-        )
+    @translate.on(ast.DoubleLiteral)
+    def translate(self, ctx):
+        tempvar = ctx.mktemp('double')
+        # TODO: Warn if size of 'value' is too big
+        ctx.src += f'{tempvar} = {self.value};'
+        return ('double', tempvar)
 
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            for m in ('Eq', 'Lt'):
-                if self.name.endswith(f':{m}'):
-                    if self.return_type != 'bool':
-                        raise Error([self.token],
-                                    f'{m} methods must return bool')
-            if self.name == 'main':
-                if self.return_type != 'void' or len(self.params):
-                    raise Error([self.token],
-                                'main function must have signature '
-                                "'void main()'")
+    @translate.on(ast.ListDisplay)
+    def translate(self, ctx):
+        argvars = []
+        for expr in self.expressions:
+            etype, evar = translate(expr, ctx)
+            argvars.append(ctx.varify(etype, evar))
+        xvar = ctx.mktemp('List')
+        ctx.src += f'{xvar} = KLC_mklist({len(argvars)});'
+        for arg in argvars:
+            ctx.src += f'{encode("List:push")}({xvar}, {arg});'
+        return 'List', xvar
 
-        @property
-        def extern(self):
-            return self.body is None
+    @translate.on(ast.BinaryComparison)
+    def translate(self, ctx):
+        fast_op_types = type(self).fast_op_types
+        fast_op = type(self).fast_op
+        fallback_method = type(self).fallback_method
+        fallback_fn = type(self).fallback_fn
+        op_for_null = type(self).op_for_null
+        reverse_method_args = type(self).reverse_method_args
+        invert_method_result = type(self).invert_method_result
 
-        def cproto(self, ctx):
-            crt = ctx.cdecltype(self.return_type)
-            cname = ctx.cname(self.name)
-            cparams = ', '.join(p.cproto(ctx) for p in self.params)
-            return f'{crt} {cname}({cparams})'
+        ltok = self.left.token
+        ltype, lvar = _translate_value(self.left, ctx)
 
-        def untyped_cproto(self, ctx):
-            return f'KLC_var KLC_untyped{encode(self.name)}(int argc, const KLC_var* argv)'
+        rtok = self.right.token
+        rtype, rvar = _translate_value(self.right, ctx)
 
-        def translate(self, gctx: GlobalTranslationContext):
-            ctx = gctx.fctx(self)
+        # If the types are the same and not 'var', we might be able to
+        # do some optimizations.
+        if ltype == rtype and ltype != 'var':
+            # If the types are in fast_op_types,
+            # we can just run a single C operation to
+            # compute the result
+            if ltype in fast_op_types:
+                xvar = ctx.mktemp('bool')
+                ctx.src += f'{xvar} = ({lvar}) {fast_op} ({rvar});'
+                return 'bool', xvar
 
-            rt = self.return_type
-            if rt not in PRIMITIVE_TYPES and rt != 'var':
-                rtnode = ctx.scope.get(self.return_type, [self.token])
-                if isinstance(rtnode, TraitDefinition):
+            # If there is a fallback method to call,
+            # try that. Since the types are the same and
+            # the type is not var, a method call is really
+            # a plain typed function call here, so would
+            # be faster than a generic function call
+            # like with the final fallback.
+            if fallback_method:
+                if reverse_method_args:
+                    ltok, ltype, lvar, rtok, rtype, rvar = (
+                        rtok, rtype, rvar, ltok, ltype, lvar)
+
+                argtriples = [
+                    (self.left.token, ltype, lvar),
+                    (self.right.token, rtype, rvar),
+                ]
+
+                # null check, but we only care about this if:
+                #  1. we're comparing nullable types, and
+                #  2. the operator supports some kind of alternate
+                #     behavior on null. In our case, in case of null
+                #     we substitute with the 'op_for_null' operator
+                #     if set.
+                #  *** We also cheat a little bit here.
+                #      Since we know that the only operators that specify
+                #      op_for_null are Equals and NotEquals, we can
+                #      also skip doing the full method call if
+                #      left and right are pointer equal.
+                if nullable(ltype) and op_for_null:
+                    xvar0 = ctx.mktemp('bool')
+                    ctx.src += f'if ({lvar} && {rvar} && {lvar} != {rvar}) ''{'
+
+                xtype, xvar = _translate_mcall(
+                    ctx, self.token, fallback_method, argtriples)
+                assert xtype == 'bool', xtype
+                if invert_method_result:
+                    ctx.src += f'{xvar} = !{xvar};'
+
+                if nullable(ltype) and op_for_null:
+                    ctx.src += f'{xvar0} = {xvar};'
+                    ctx.src += '} else {'
+                    ctx.src += f'{xvar0} = {lvar} {op_for_null} {rvar};'
+                    ctx.src += '}'
+                    return 'bool', xvar0
+                else:
+                    return 'bool', xvar
+
+        # If none of the above match, use the fallback function
+        fn = ctx.scope.get(fallback_fn, [self.token])
+        argtriples = [
+            (self.left.token, ltype, lvar),
+            (self.right.token, rtype, rvar),
+        ]
+        return _translate_fcall(ctx, self.token, fn, argtriples)
+
+    @translate.on(ast.FunctionCall)
+    def translate(self, ctx):
+        defn = ctx.scope.get(self.function, [self.token])
+        if isinstance(defn, ast.FunctionDefinition):
+            argtriples = []
+            for arg in self.args:
+                argtype, argtempvar = translate(arg, ctx)
+                argtriples.append((arg.token, argtype, argtempvar))
+            return _translate_fcall(ctx, self.token, defn, argtriples)
+
+        if (isinstance(defn, ast.BaseVariableDefinition) and
+                defn.type in ('var', 'function')):
+            argtempvars = []
+            for arg in self.args:
+                argtype, argtempvar = translate(arg, ctx)
+                if argtype == 'void':
                     raise Error(
-                        [vardef.token],
-                        f'Declaring trait as return type not supported')
-                if not isinstance(rtnode, TypeDefinition):
-                    raise Error([vardef.token], f'{vardef.type} is not a type')
-
-            self._translate_untyped(ctx)
-
-            ctx.hdr += self.cproto(ctx) + ';'
-            if self.body:
-                ctx.src += self.cproto(ctx)
-                self.body.translate(ctx)
-
-        def _translate_untyped(self, ctx):
-            name = self.name
-            ctx.hdr += self.untyped_cproto(ctx) + ';'
-            ctx.hdr += f'KLC_functioninfo KLC_functioninfo{encode(name)} = ' '{'
-            ctx.hdr += f'  "{name}",'
-            ctx.hdr += f'  KLC_untyped{encode(self.name)},'
-            ctx.hdr += '};'
-            ctx.src += self.untyped_cproto(ctx) + '{'
-            src = ctx.src.spawn(1)
-            ctx.src += '}'
-            for i, param in enumerate(self.params):
-                src += f'{ctx.cdecltype(param.type)} arg{i};'
-            src += f'if (argc != {len(self.params)}) ' '{'
-            src += f'  KLC_errorf("Function \'%s\' expected %d args but got %d", \"{self.name}\", {len(self.params)}, argc);'
-            src += '}'
-            for i, param in enumerate(self.params):
-                src += f'arg{i} = {ctx.unvarify(param.type, f"argv[{i}]")};'
-            argsstr = ', '.join(f'arg{i}' for i in range(len(self.params)))
-            call = f'{ctx.cname(self.name)}({argsstr})'
-            if self.return_type == 'void':
-                src += f'{call};'
-                src += 'return KLC_null;'
+                        [arg.token],
+                        'void expression cannot be used as an argument')
+                argtempvar = ctx.varify(argtype, argtempvar)
+                argtempvars.append(argtempvar)
+            tempvar = ctx.mktemp('var')
+            nargs = len(self.args)
+            temparr = ctx.mktemparr(nargs) if nargs else 'NULL'
+            cfname = ctx.cname(defn.name)
+            for i, argtempvar in enumerate(argtempvars):
+                ctx.src += f'{temparr}[{i}] = {argtempvar};'
+            if defn.type == 'function':
+                ctx.src += f'{tempvar} = {cfname}->body({nargs}, {temparr});'
             else:
-                src += f'return {ctx.varify(self.return_type, call)};'
+                ctx.src += f'{tempvar} = KLC_var_call({cfname}, {nargs}, {temparr});'
+            return 'var', tempvar
 
+        if isinstance(defn, ast.BaseVariableDefinition):
+            # At this point, we know defn.type cannot be var or function
+            # For these types, we just want to call the 'Call' method.
+            argtriples = [
+                (self.token, defn.type, ctx.cname(defn.name)),
+            ]
+            for arg in self.args:
+                argtype, argtempvar = _translate_value(arg, ctx)
+                argtriples.append((arg.token, argtype, argtempvar))
+            return _translate_mcall(ctx, self.token, 'Call', argtriples)
 
-    @ns
-    class TypeDefinition(GlobalDefinition):
-        pass
+        if isinstance(defn, ast.ClassDefinition):
+            argtriples = []
+            for arg in self.args:
+                argtype, argtempvar = translate(arg, ctx)
+                argtriples.append((arg.token, argtype, argtempvar))
+            malloc_name = f'KLC_malloc{encode0(defn.name)}'
+            fname = f'{defn.name}#new'
+            fdefn = ctx.scope.get(fname, [self.token])
+            if not isinstance(fdefn, ast.FunctionDefinition):
+                raise Error([self.token], f'FUBAR: shadowed function name')
 
+            if defn.extern:
+                # For extern types, constructing the type is
+                # identical to a single function call
+                return _translate_fcall(ctx, self.token, fdefn, argtriples)
+            else:
+                # For normal types, we want to malloc first, and then
+                # call the initializer
+                # TODO: Simplify normal types so that these are also
+                # just a single function call like extern types.
+                this_tempvar = ctx.mktemp(defn.name)
+                ctx.src += f'{this_tempvar} = {malloc_name}();'
+                argtriples = [
+                    (self.token, defn.name, this_tempvar)
+                ] + argtriples
+                _translate_fcall(ctx, self.token, fdefn, argtriples)
+                return defn.name, this_tempvar
+
+        raise Error([self.token, defn.token],
+                    f'{self.function} is not a function')
+
+    @translate.on(ast.MethodCall)
+    def translate(self, ctx):
+        ownertype, ownertempvar = translate(self.owner, ctx)
+        argtriples = [(self.token, ownertype, ownertempvar)]
+        for arg in self.args:
+            argtype, argvar = translate(arg, ctx)
+            argtriples.append((arg.token, argtype, argvar))
+        return _translate_mcall(ctx, self.token, self.name, argtriples)
+
+    @translate.on(ast.BaseInOperation)
+    def translate(self, ctx):
+        ltype, lvar = translate(self.left, ctx)
+        rtype, rvar = translate(self.right, ctx)
+        # This could almost just be a simple MethodCall, but the problem
+        # is that the order or arguments have to be reversed
+        argtriples = [
+            (self.right.token, rtype, rvar),
+            (self.left.token, ltype, lvar),
+        ]
+        return _translate_mcall(
+            ctx, self.token, type(self).method_name, argtriples)
+
+    @translate.on(ast.LogicalNot)
+    def translate(self, ctx):
+        etype, evar = translate(self.expression, ctx)
+        xvar = ctx.mktemp('bool')
+        ctx.src += f'{xvar} = !{_ctruthy(ctx, etype, evar)};'
+        return 'bool', xvar
+
+    @translate.on(ast.LogicalOr)
+    def translate(self, ctx):
+        ltype, lvar = translate(self.left, ctx)
+        xvar = ctx.mktemp('bool')
+        ctx.src += f'if (!{_ctruthy(ctx, ltype, lvar)})'
+        ctx.src += '{'
+        rtype, rvar = translate(self.right, ctx)
+        ctx.src += f'{xvar} = {_ctruthy(ctx, rtype, rvar)};'
+        ctx.src += '} else {'
+        ctx.src += f'{xvar} = 1;'
+        ctx.src += '}'
+        if 'void' in (ltype, rtype):
+            raise Error([self.token], 'void type in or operator')
+        return ('bool', xvar)
+
+    @translate.on(ast.LogicalAnd)
+    def translate(self, ctx):
+        ltype, lvar = translate(self.left, ctx)
+        xvar = ctx.mktemp('bool')
+        ctx.src += f'if ({_ctruthy(ctx, ltype, lvar)})'
+        ctx.src += '{'
+        rtype, rvar = translate(self.right, ctx)
+        ctx.src += f'{xvar} = {_ctruthy(ctx, rtype, rvar)};'
+        ctx.src += '} else {'
+        ctx.src += f'{xvar} = 0;'
+        ctx.src += '}'
+        if 'void' in (ltype, rtype):
+            raise Erorr([self.token], 'void type in and operator')
+        return ('bool', xvar)
+
+    @translate.on(ast.Conditional)
+    def translate(self, ctx):
+        ctype, cvar = translate(self.condition, ctx)
+        ctx.src += f'if ({_ctruthy(ctx, ctype, cvar)})'
+        ctx.src += '{'
+        ltype, lvar = translate(self.left, ctx)
+        lsrc = ctx.src.spawn()
+        ctx.src += '} else {'
+        rtype, rvar = translate(self.right, ctx)
+        rsrc = ctx.src.spawn()
+        ctx.src += '}'
+        if 'void' in (ltype, rtype):
+            raise Error([self.token], 'void type in conditional operator')
+        if 'var' in (ltype, rtype):
+            xtype = 'var'
+            lvar = ctx.varify(lvar)
+            rvar = ctx.varify(rvar)
+        elif ltype != rtype:
+            raise Error(
+                [self.token],
+                'conditional operator requires result types to be the same')
+        else:
+            xtype = ltype
+
+        xvar = ctx.mktemp(xtype)
+        lsrc += f'{xvar} = {lvar};'
+        rsrc += f'{xvar} = {rvar};'
+        ctx.src += _cretain(ctx, xtype, xvar)
+        return (xtype, xvar)
+
+    @translate.on(ast.VariableDefinition)
+    def translate(self, ctx):
+        if self.expression:
+            ectx = ctx.ectx()
+            etype, tempvar = translate(self.expression, ectx)
+            value = tempvar
+            if self.type is None:
+                self.type = etype
+            elif self.type == 'var' and etype != 'void':
+                value = ctx.varify(etype, tempvar)
+            elif self.type != etype:
+                raise Error([self.token],
+                            f'Expected {self.type} but got {etype}')
+            ectx.src += f'{_cname(self, ectx)} = {value};'
+            ectx.release_tempvars(tempvar)
+
+        ctx.scope.add(self)
+
+    @translate.on(ast.ExpressionStatement)
+    def translate(self, ctx):
+        ectx = ctx.ectx()
+        translate(self.expression, ectx)
+        ectx.release_tempvars()
+
+    @translate.on(ast.Return)
+    def translate(self, ctx):
+        ectx = ctx.ectx()
+        if self.expression:
+            rtype, tempvar = translate(self.expression, ectx)
+        else:
+            rtype = 'void'
+        fctx = ctx.fctx
+        expected_rtype = fctx.fdef.return_type
+        if expected_rtype != rtype:
+            raise Error([fctx.fdef.token, self.token],
+                        f'Function was declared to return {expected_rtype} '
+                        f'but tried to return {rtype} instead')
+        if rtype == 'void':
+            _release_for_return(ctx, ectx.src)
+            ectx.src += 'return;'
+        else:
+            ectx.release_tempvars(tempvar)
+            _release_for_return(ctx, ectx.src)
+            ectx.src += f'return {tempvar};'
+
+        return True
+
+    @translate.on(ast.Block)
+    def translate(self, pctx):
+        pctx.src += '{'
+        prologue = pctx.src.spawn(1)
+        ctx = pctx.bctx(1)
+        epilogue = pctx.src.spawn(1)
+        pctx.src += '}'
+        early_return = False
+        for i, statement in enumerate(self.statements):
+            if translate(statement, ctx):
+                early_return = True
+                if i + 1 < len(self.statements):
+                    raise Error([self.statements[i + 1].token],
+                                'Unreachable statement')
+                break
+
+        # Declare the local variables for C
+        # To be C89 compatible, we need all variable definitions
+        # to appear at the beginning of the block.
+        for vdef in ctx.scope.local_definitions:
+            assert isinstance(vdef, ast.VariableDefinition), vdef
+            prologue += f'{_cproto(vdef, ctx)} = {ctx.czero(vdef.type)};'
+
+        # If there's an early return, there's no need to have an
+        # epilogue and generate unreachable code.
+        if not early_return:
+            # If we don't have an early return, we should
+            # make sure to release all local variables defined in
+            # this block before exiting
+            # We should also release in LIFO order
+            for vdef in reversed(ctx.scope.local_definitions):
+                if vdef.type not in PRIMITIVE_TYPES:
+                    epilogue += _defcrelease(vdef, ctx)
+
+    @translate.on(ast.If)
+    def translate(self, ctx):
+        ctx.src += '{'
+        ctx.src += 'KLC_bool b;'
+        ectx = ctx.ectx()
+        rtype, tempvar = translate(self.condition, ectx)
+        ectx.src += f'b = {_ctruthy(ctx, rtype, tempvar)};'
+        ectx.release_tempvars()
+        ctx.src += 'if (b)'
+        translate(self.body, ctx)
+        if self.other is not None:
+            ctx.src += 'else'
+            translate(self.other, ctx)
+        ctx.src += '}'
+
+    @translate.on(ast.While)
+    def translate(self, ctx):
+        ctx.src += 'while (1) {'
+        ctx.src += 'KLC_bool b;'
+        ectx = ctx.ectx()
+        rtype, tempvar = translate(self.condition, ectx)
+        ectx.src += f'b = {_ctruthy(ctx, rtype, tempvar)};'
+        ectx.release_tempvars()
+        ctx.src += 'if (!b) { break; }'
+        translate(self.body, ctx)
+        ctx.src += '}'
+
+    @translate.on(ast.Program)
+    def translate(self):
+        ctx = GlobalTranslationContext(self)
+        for inc in self.env['@vars']['C_HEADERS']:
+            ctx.inc += f'#include "{inc}"'
+        for ptype, mnames in sorted(_primitive_method_names.items()):
+            methodmap = _compute_method_map(
+                token=self.token,
+                cname=ptype,
+                method_names=mnames,
+                trait_names=['Object'],
+                ctx=ctx)
+            _write_ctypeinfo(ctx.src, ptype, methodmap, use_null_deleter=True)
+        for d in self.definitions:
+            translate(d, ctx)
+        return str(ctx.out)
+
+    @translate.on(ast.GlobalVariableDefinition)
+    def translate(self, ctx):
+        n = encode(self.name)
+        ifn = encode(self.name + '#init')
+        ctype = ctx.cdecltype(self.type)
+        ctx.hdr += f'{ctype} KLC_get_global{n}();'
+        ctx.src += f'int KLC_initialized_global{n} = 0;'
+        ctx.src += f'{ctype} KLC_global{n} = {ctx.czero(self.type)};'
+
+        ctx.src += f'{ctype} KLC_get_global{n}() ' '{'
+        ctx.src += f'  if (!KLC_initialized_global{n}) ' '{'
+        ctx.src += f'    KLC_global{n} = {ifn}();'
+        ctx.src += f'    KLC_initialized_global{n} = 1;'
+        if self.type in PRIMITIVE_TYPES:
+            pass
+        elif self.type == 'var':
+            ctx.src += f'    KLC_release_var_on_exit(KLC_global{n});'
+        else:
+            ctx.src += f'    KLC_release_object_on_exit((KLC_header*) KLC_global{n});'
+        ctx.src += '  }'
+        src1 = ctx.src.spawn(1)
+        src1 += _cretain(ctx, self.type, f'KLC_global{n}')
+        src1 += f'return KLC_global{n};'
+        ctx.src += '}'
+
+    @translate.on(ast.FunctionDefinition)
+    def translate(self, gctx: GlobalTranslationContext):
+        ctx = gctx.fctx(self)
+
+        rt = self.return_type
+        if rt not in PRIMITIVE_TYPES and rt != 'var':
+            rtnode = ctx.scope.get(self.return_type, [self.token])
+            if isinstance(rtnode, ast.TraitDefinition):
+                raise Error(
+                    [vardef.token],
+                    f'Declaring trait as return type not supported')
+            if not isinstance(rtnode, ast.TypeDefinition):
+                raise Error([vardef.token], f'{vardef.type} is not a type')
+
+        _translate_untyped(self, ctx)
+
+        ctx.hdr += _cproto(self, ctx) + ';'
+        if self.body:
+            ctx.src += _cproto(self, ctx)
+            translate(self.body, ctx)
+
+    @translate.on(ast.TraitDefinition)
+    def translate(self, ctx: GlobalTranslationContext):
+        # Verify that there's no circular trait inheritance,
+        # and in the process, also verify all entries listed in 'traits'
+        # are actually defined and are traits.
+        _trait_method_map(self, ctx)
+
+    @translate.on(ast.ClassDefinition)
+    def translate(self, ctx: GlobalTranslationContext):
+        _check_all_are_traits(self.token, self.traits, ctx)
+        name = self.name
+        n0 = encode0(name)
+        cname = ctx.cname(name)
+        cdecltype = ctx.cdecltype(name)
+
+        del_name = _delname(n0)
+        malloc_name = f'KLC_malloc{n0}'
+
+        delete_proto = f'void {del_name}(KLC_header* robj, KLC_header** dq)'
+        malloc_proto = f'{cdecltype} {malloc_name}()'
+
+        ctx.hdr += delete_proto + ';'
+        ctx.hdr += malloc_proto + ';'
+
+        ctx.hdr += f'extern KLC_typeinfo KLC_type{n0};'
+
+        _write_ctypeinfo(
+            src=ctx.src,
+            cname=name,
+            methodmap=_xmethod_map(self, ctx),
+            untyped_methods=self.untyped_methods)
+
+        if self.extern:
+            return
+
+        _translate_field_implementations(self, ctx)
+
+        # if extern, this typedef should already exist
+        ctx.fwd += f'typedef struct {cname} {cname};'
+
+        ctx.hdr += f'struct {cname} ' '{'
+        ctx.hdr += '  KLC_header header;'
+        for field in self.fields:
+            ctx.hdr += f'  {_cproto(field, ctx)};'
+        ctx.hdr += '};'
+
+        ctx.src += delete_proto + ' {'
+        objfields = [f for f in self.fields if f.type not in PRIMITIVE_TYPES]
+        if objfields:
+            ctx.src += f'  {cdecltype} obj = ({cdecltype}) robj;'
+            for field in objfields:
+                cfname = ctx.cname(field.name)
+                if field.type == 'var':
+                    ctx.src += f'  KLC_partial_release_var(obj->{cfname}, dq);'
+                else:
+                    ctx.src += f'  KLC_partial_release((KLC_header*) obj->{cfname}, dq);'
+        ctx.src += '}'
+
+        ctx.src += malloc_proto + ' {'
+        ctx.src += f'  {cdecltype} obj = ({cdecltype}) malloc(sizeof({cname}));'
+        ctx.src += f'  KLC_init_header(&obj->header, &KLC_type{n0});'
+        for field in self.fields:
+            cfname = ctx.cname(field.name)
+            ctx.src += f'  obj->{cfname} = {ctx.czero(field.type)};'
+        ctx.src += '  return obj;'
+        ctx.src += '}'
+
+    _cproto = Multimethod('_cproto')
+
+    @_cproto.on(ast.BaseVariableDefinition)
+    def _cproto(self, ctx):
+        return f'{ctx.cdecltype(self.type)} {ctx.cname(self.name)}'
+
+    @_cproto.on(ast.FunctionDefinition)
+    def _cproto(self, ctx):
+        crt = ctx.cdecltype(self.return_type)
+        cname = ctx.cname(self.name)
+        cparams = ', '.join(_cproto(p, ctx) for p in self.params)
+        return f'{crt} {cname}({cparams})'
+
+    def _cname(self: ast.BaseVariableDefinition, ctx):
+        return ctx.cname(self.name)
+
+    def _translate_field_implementations(self: ast.ClassDefinition, ctx):
+        this_proto = f"{ctx.cdecltype(self.name)} {ctx.cname('this')}"
+        for field in self.fields:
+            field_ref = f'{encode("this")}->{ctx.cname(field.name)}'
+            ctype = ctx.cdecltype(field.type)
+
+            ## GETTER
+            getter_name = f'{self.name}:GET{field.name}'
+            getter_cname = ctx.cname(getter_name)
+            getter_proto = f'{ctype} {getter_cname}({this_proto})'
+            ctx.src += getter_proto + '{'
+            sp = ctx.src.spawn(1)
+            ctx.src += '}'
+            sp += _cretain(ctx, field.type, f'({field_ref})')
+            sp += f'return {field_ref};'
+
+            # SETTER
+            setter_name = f'{self.name}:SET{field.name}'
+            setter_cname = ctx.cname(setter_name)
+            setter_proto = f'{ctype} {setter_cname}({this_proto}, {ctype} v)'
+            ctx.src += setter_proto + '{'
+            sp = ctx.src.spawn(1)
+            ctx.src += '}'
+            # We have to retain 'v' twice:
+            #  once for returning this value, and
+            #  once more for attaching it to a field of this object.
+            sp += _cretain(ctx, field.type, 'v')
+            sp += _cretain(ctx, field.type, 'v')
+            sp += _crelease(ctx, field.type, f'({field_ref})')
+            sp += f'{field_ref} = v;'
+            sp += 'return v;'
+
+    def _defcretain(self: ast.BaseVariableDefinition, ctx):
+        return _cretain(ctx, self.type, _cname(self, ctx))
+
+    def _defcrelease(self: ast.BaseVariableDefinition, ctx):
+        return _crelease(ctx, self.type, _cname(self, ctx))
+
+    def _trait_method_map(self, ctx, stack=None):
+        if self._trait_method_map is None:
+            self._trait_method_map = _compute_method_map(
+                token=self.token,
+                cname=self.name,
+                method_names=self.methods,
+                trait_names=self.traits,
+                ctx=ctx,
+                stack=stack)
+
+        return self._trait_method_map
+
+    def _release_for_return(ctx, src):
+        # Before returning, we should release all local variables
+        # We need to take care not to release function parameters
+        # or global variables
+        scope = ctx.scope
+        while scope:
+            for vdef in reversed(scope.local_definitions):
+                if isinstance(vdef, ast.VariableDefinition):
+                    src += _defcrelease(vdef, ctx)
+            scope = scope.parent
+
+    def _compute_method_map(token, cname, method_names, trait_names, ctx, stack=None):
+        ctx = ctx.gctx  # double check that this is the global context
+        stack = [] if stack is None else stack
+        if cname in stack:
+            raise Error([tdef.token for tdef in stack],
+                        f'Circular trait inheritance')
+        _check_all_are_traits(token, trait_names, ctx)
+        method_map = {mname: f'{cname}:{mname}' for mname in method_names}
+        traits = [ctx.scope.get(n, [token]) for n in trait_names]
+        stack.append(cname)
+        # MRO is DFS
+        for trait in traits:
+            for mname, mfname in _trait_method_map(trait, ctx, stack).items():
+                if mname not in method_map:
+                    method_map[mname] = mfname
+        stack.pop()
+        return method_map
+
+    def _xmethod_map(self, ctx):
+        if self._method_map is None:
+            self._method_map = _compute_method_map(
+                token=self.token,
+                cname=self.name,
+                method_names=self.methods,
+                trait_names=self.traits,
+                ctx=ctx)
+        return self._method_map
 
     def _delname(cname):
         return f'KLC_delete{cname}'
 
+    def _crelease(ctx, type_, cname):
+        if type_ in PRIMITIVE_TYPES:
+            return ''
+        elif type_ == 'var':
+            return f'KLC_release_var({cname});'
+        else:
+            return f'KLC_release((KLC_header*) {cname});'
+
+    def _cretain(ctx, type_, cname):
+        if type_ in PRIMITIVE_TYPES:
+            return ''
+        elif type_ == 'var':
+            return f'KLC_retain_var({cname});'
+        else:
+            return f'KLC_retain((KLC_header*) {cname});'
+
+    def _ctruthy(ctx, type_, cname):
+        if type_ == 'bool':
+            return cname
+        elif type_ in ('int', 'double'):
+            return f'({cname} != 0)'
+        elif type_ in ('function', 'type'):
+            return '1'
+        elif type_ == 'null':
+            return '0'
+        elif type_ == 'var':
+            return f'KLC_truthy({cname})'
+        else:
+            return f'KLC_truthy(KLC_object_to_var((KLC_header*) {cname}))'
 
     def _write_ctypeinfo(src, cname, methodmap, use_null_deleter=False,
                          untyped_methods=None):
@@ -1891,198 +1929,133 @@ def ast(ns):
         src += f'  &KLC_methodlist{cn},'
         src += '};'
 
-
     def _check_all_are_traits(token, traits, ctx):
         for trait_name in traits:
             trait_defn = ctx.scope.get(trait_name, [token])
-            if not isinstance(trait_defn, TraitDefinition):
+            if not isinstance(trait_defn, ast.TraitDefinition):
                 raise Error([token, trait_defn.token],
                             f'{trait_name} is not a trait')
 
+    def _translate_fcall(ctx, token, defn, argtriples):
+        argtempvars = []
+        for param, (argtok, argtype, argtempvar) in zip(defn.params, argtriples):
+            if argtype != 'void' and param.type == 'var':
+                argtempvar = ctx.varify(argtype, argtempvar)
+                argtype = 'var'
+            if argtype != param.type:
+                raise Error([param.token, argtok],
+                            f'Expected {param.type} but got {argtype}')
+            argtempvars.append(argtempvar)
+        if len(defn.params) != len(argtriples):
+            raise Error([token, defn.token],
+                        f'{len(defn.params)} args expected '
+                        f'but got {len(argtriples)}')
+        argsstr = ', '.join(argtempvars)
+        with with_frame(ctx, token):
+            if defn.return_type == 'void':
+                ctx.src += f'{ctx.cname(defn.name)}({argsstr});'
+                return 'void', None
+            else:
+                tempvar = ctx.mktemp(defn.return_type)
+                ctx.src += f'{tempvar} = {ctx.cname(defn.name)}({argsstr});'
+                return defn.return_type, tempvar
 
-    @ns
-    class TraitDefinition(GlobalDefinition):
-        # Trait kind of defines a type, but TraitDefinition not inheriting
-        # TypeDefinition is on purpose. Right now, there's no real support
-        # for declaring a variable as a trait type.
-        fields = (
-            ('name', str),
-            ('traits', List[str]),
-            ('methods', List[str]),
-        )
+    def _no_such_method_error(token, name, ownertype):
+        return Error(
+            [token],
+            f'Method {name} does not exist for type {ownertype}')
 
-        _trait_method_map = None
+    def _translate_mcall(ctx, token, name, argtriples):
+        if len(argtriples) < 1:
+            raise Error([token], 'FUBAR: mcall requires at least one arg')
 
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
+        _, ownertype, ownertempvar = argtriples[0]
 
-        def translate(self, ctx: GlobalTranslationContext):
-            # Verify that there's no circular trait inheritance,
-            # and in the process, also verify all entries listed in 'traits'
-            # are actually defined and are traits.
-            self.trait_method_map(ctx)
+        if ownertype == 'void':
+            raise Error([token], f'Cannot call method on void type')
 
-        def trait_method_map(self, ctx, stack=None):
-            if self._trait_method_map is None:
-                self._trait_method_map = _compute_method_map(
-                    token=self.token,
-                    cname=self.name,
-                    method_names=self.methods,
-                    trait_names=self.traits,
-                    ctx=ctx,
-                    stack=stack)
+        if ownertype == 'var':
+            argtempvars = []
+            for argtoken, argtype, argtempvar in argtriples:
+                if argtype == 'void':
+                    raise Error(
+                        [arg.token],
+                        'void expression cannot be used as an argument')
+                argtempvar = ctx.varify(argtype, argtempvar)
+                argtempvars.append(argtempvar)
+            tarr = ctx.mktemparr(len(argtriples))
+            tv = ctx.mktemp('var')
+            for i, argtempvar in enumerate(argtempvars):
+                ctx.src += f'{tarr}[{i}] = {argtempvar};'
+            with with_frame(ctx, token):
+                ctx.src += (
+                    f'{tv} = KLC_mcall("{name}", '
+                    f'{len(argtempvars)}, {tarr});'
+                )
+            return 'var', tv
+        else:
+            # Check that this method actually exists on this type
+            if ownertype in PRIMITIVE_TYPES:
+                if name not in _primitive_method_names[ownertype]:
+                    raise _no_such_method_error(token, name, ownertype)
+                fname = f'{ownertype}:{name}'
+            else:
+                cdef = ctx.scope.get(ownertype, [token])
+                assert isinstance(cdef, ast.ClassDefinition), cdef
+                if name not in _xmethod_map(cdef, ctx):
+                    raise _no_such_method_error(token, name, ownertype)
+                fname = _xmethod_map(cdef, ctx)[name]
 
-            return self._trait_method_map
+            # TODO: Consider looking up from global context
+            # to avoid coincidental names that shadow method names
+            defn = ctx.scope.get(fname, [token])
+            if not isinstance(defn, ast.FunctionDefinition):
+                raise Error([token], f'FUBAR: shadowed method {fname}')
 
+            return _translate_fcall(ctx, token, defn, argtriples)
 
-    def _compute_method_map(token, cname, method_names, trait_names, ctx, stack=None):
-        ctx = ctx.gctx  # double check that this is the global context
-        stack = [] if stack is None else stack
-        if cname in stack:
-            raise Error([tdef.token for tdef in stack],
-                        f'Circular trait inheritance')
-        _check_all_are_traits(token, trait_names, ctx)
-        method_map = {mname: f'{cname}:{mname}' for mname in method_names}
-        traits = [ctx.scope.get(n, [token]) for n in trait_names]
-        stack.append(cname)
-        # MRO is DFS
-        for trait in traits:
-            for mname, mfname in trait.trait_method_map(ctx, stack).items():
-                if mname not in method_map:
-                    method_map[mname] = mfname
-        stack.pop()
-        return method_map
+    def _untyped_cproto(self, ctx):
+        return f'KLC_var KLC_untyped{encode(self.name)}(int argc, const KLC_var* argv)'
 
+    def _translate_untyped(self, ctx):
+        name = self.name
+        ctx.hdr += _untyped_cproto(self, ctx) + ';'
+        ctx.hdr += f'KLC_functioninfo KLC_functioninfo{encode(name)} = ' '{'
+        ctx.hdr += f'  "{name}",'
+        ctx.hdr += f'  KLC_untyped{encode(self.name)},'
+        ctx.hdr += '};'
+        ctx.src += _untyped_cproto(self, ctx) + '{'
+        src = ctx.src.spawn(1)
+        ctx.src += '}'
+        for i, param in enumerate(self.params):
+            src += f'{ctx.cdecltype(param.type)} arg{i};'
+        src += f'if (argc != {len(self.params)}) ' '{'
+        src += f'  KLC_errorf("Function \'%s\' expected %d args but got %d", \"{self.name}\", {len(self.params)}, argc);'
+        src += '}'
+        for i, param in enumerate(self.params):
+            src += f'arg{i} = {ctx.unvarify(param.type, f"argv[{i}]")};'
+        argsstr = ', '.join(f'arg{i}' for i in range(len(self.params)))
+        call = f'{ctx.cname(self.name)}({argsstr})'
+        if self.return_type == 'void':
+            src += f'{call};'
+            src += 'return KLC_null;'
+        else:
+            src += f'return {ctx.varify(self.return_type, call)};'
 
-    @ns
-    class ClassDefinition(TypeDefinition):
-        fields = (
-            ('name', str),
-            ('traits', List[str]),
-            ('fields', Optional[List[Field]]),
-            ('methods', List[str]),
-            ('untyped_methods', List[str]),
-        )
+    def _translate_value(self: ast.Expression, ctx):
+        etype, evar = translate(self, ctx)
+        if etype == 'void':
+            raise Error([self.token], 'void type not allowed here')
+        return etype, evar
 
-        _method_map = None
-
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            if self.untyped_methods and self.name != 'Closure':
-                raise Error(
-                    [self.token],
-                    'Closure is the only type allowed to have untyped methods')
-
-        @property
-        def extern(self):
-            return self.fields is None
-
-        def method_map(self, ctx):
-            if self._method_map is None:
-                self._method_map = _compute_method_map(
-                    token=self.token,
-                    cname=self.name,
-                    method_names=self.methods,
-                    trait_names=self.traits,
-                    ctx=ctx)
-            return self._method_map
-
-        def translate(self, ctx: GlobalTranslationContext):
-            _check_all_are_traits(self.token, self.traits, ctx)
-            name = self.name
-            n0 = encode0(name)
-            cname = ctx.cname(name)
-            cdecltype = ctx.cdecltype(name)
-
-            del_name = _delname(n0)
-            malloc_name = f'KLC_malloc{n0}'
-
-            delete_proto = f'void {del_name}(KLC_header* robj, KLC_header** dq)'
-            malloc_proto = f'{cdecltype} {malloc_name}()'
-
-            ctx.hdr += delete_proto + ';'
-            ctx.hdr += malloc_proto + ';'
-
-            ctx.hdr += f'extern KLC_typeinfo KLC_type{n0};'
-
-            _write_ctypeinfo(
-                src=ctx.src,
-                cname=name,
-                methodmap=self.method_map(ctx),
-                untyped_methods=self.untyped_methods)
-
-            if self.extern:
-                return
-
-            self._translate_field_implementations(ctx)
-
-            # if extern, this typedef should already exist
-            ctx.fwd += f'typedef struct {cname} {cname};'
-
-            ctx.hdr += f'struct {cname} ' '{'
-            ctx.hdr += '  KLC_header header;'
-            for field in self.fields:
-                ctx.hdr += f'  {field.cproto(ctx)};'
-            ctx.hdr += '};'
-
-            ctx.src += delete_proto + ' {'
-            objfields = [f for f in self.fields if f.type not in PRIMITIVE_TYPES]
-            if objfields:
-                ctx.src += f'  {cdecltype} obj = ({cdecltype}) robj;'
-                for field in objfields:
-                    cfname = ctx.cname(field.name)
-                    if field.type == 'var':
-                        ctx.src += f'  KLC_partial_release_var(obj->{cfname}, dq);'
-                    else:
-                        ctx.src += f'  KLC_partial_release((KLC_header*) obj->{cfname}, dq);'
-            ctx.src += '}'
-
-            ctx.src += malloc_proto + ' {'
-            ctx.src += f'  {cdecltype} obj = ({cdecltype}) malloc(sizeof({cname}));'
-            ctx.src += f'  KLC_init_header(&obj->header, &KLC_type{n0});'
-            for field in self.fields:
-                cfname = ctx.cname(field.name)
-                ctx.src += f'  obj->{cfname} = {ctx.czero(field.type)};'
-            ctx.src += '  return obj;'
-            ctx.src += '}'
-
-        def _translate_field_implementations(self, ctx):
-            this_proto = f"{ctx.cdecltype(self.name)} {ctx.cname('this')}"
-            for field in self.fields:
-                field_ref = f'{encode("this")}->{ctx.cname(field.name)}'
-                ctype = ctx.cdecltype(field.type)
-
-                ## GETTER
-                getter_name = f'{self.name}:GET{field.name}'
-                getter_cname = ctx.cname(getter_name)
-                getter_proto = f'{ctype} {getter_cname}({this_proto})'
-                ctx.src += getter_proto + '{'
-                sp = ctx.src.spawn(1)
-                ctx.src += '}'
-                sp += _cretain(ctx, field.type, f'({field_ref})')
-                sp += f'return {field_ref};'
-
-                # SETTER
-                setter_name = f'{self.name}:SET{field.name}'
-                setter_cname = ctx.cname(setter_name)
-                setter_proto = f'{ctype} {setter_cname}({this_proto}, {ctype} v)'
-                ctx.src += setter_proto + '{'
-                sp = ctx.src.spawn(1)
-                ctx.src += '}'
-                # We have to retain 'v' twice:
-                #  once for returning this value, and
-                #  once more for attaching it to a field of this object.
-                sp += _cretain(ctx, field.type, 'v')
-                sp += _cretain(ctx, field.type, 'v')
-                sp += _crelease(ctx, field.type, f'({field_ref})')
-                sp += f'{field_ref} = v;'
-                sp += 'return v;'
-
-
-@Namespace
-def translator(ns):
-    translate = Multimethod('translate')
-    ns(translate, name='translate')
+    @contextlib.contextmanager
+    def with_frame(ctx, token):
+        src = ctx.src
+        filename = token.source.filename.replace(os.sep, '/')
+        fname = ctx.fctx.fdef.name
+        src += f'KLC_push_frame("{filename}", "{fname}", {token.lineno});'
+        yield
+        src += f'KLC_pop_frame();'
 
 
 @Namespace
@@ -3390,7 +3363,7 @@ def main():
             node.definitions + builtins_node.definitions,
             node.env)
 
-        c_src = program.translate()
+        c_src = C.translate(program)
 
         env = program.env
 
