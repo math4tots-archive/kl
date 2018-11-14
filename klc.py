@@ -1,7 +1,7 @@
-from typing import NamedTuple, Tuple, List, Union, Optional, Callable, Iterable
 import abc
 import argparse
 import contextlib
+import itertools
 import os
 import re
 import string
@@ -77,6 +77,43 @@ class Namespace:
 
     def __repr__(self):
         return f'<namespace {object.__getattribute__(self, "name")}>'
+
+
+class Multimethod:
+    # TODO: support inheritance
+    def __init__(self, name, n=1):
+        # n = number of arguments whose types
+        # we take into account for dispatch
+        self.name = name
+        self.n = n
+        self.table = dict()
+
+    def __repr__(self):
+        return f'Multimethod({self.name}, {self.n})'
+
+    def on(self, *types):
+        if len(types) != self.n:
+            raise TypeError(f'self.n = {self.n}, types = {types}')
+        def wrapper(f):
+            self.table[types] = f
+            return self
+        return warpper
+
+    def find(self, types):
+        "Find and return the implementation for the given arg types"
+        if types not in self.table:
+            mrolist = [t.__mro__ for t in types]
+            for basetypes in itertools.product(*mrolist):
+                if basetypes in self.table:
+                    self.table[types] = self.table[basetypes]
+            else:
+                raise KeyError(types)
+        return self.table[types]
+
+    def __call__(self, *args):
+        types = tuple(type(arg) for arg in args[:self.n])
+        f = self.find(types)
+        return f(first_arg, *args)
 
 
 PRIMITIVE_TYPES = {
@@ -198,7 +235,7 @@ class InverseSet:
         return f'InverseSet({self._items})'
 
 
-class Source(NamedTuple):
+class Source(typing.NamedTuple):
     filename: str
     data: str
 
@@ -2043,7 +2080,16 @@ def ast(ns):
 
 
 @Namespace
+def translator(ns):
+    translate = Multimethod('translate')
+    ns(translate, name='translate')
+
+
+@Namespace
 def parser(ns):
+    class Context(typing.NamedTuple):
+        defs: list
+
     @ns
     def parse(source, local_prefix, env):
         plat = sys.platform
@@ -2297,39 +2343,40 @@ def parser(ns):
             consume_delim()
             token = peek()
             defs = []
+            ctx = Context(defs)
             while at('import'):
-                parse_import(defs)
+                parse_import(ctx)
             replace_tokens_with_update()
             consume_delim()
             while not at('EOF'):
-                parse_global_definition(defs)
+                parse_global_definition(ctx)
                 consume_delim()
             return ast.Program(token, defs, env)
 
-        def parse_global_definition(defs):
+        def parse_global_definition(ctx):
             if at('#'):
-                parse_macro(defs)
+                parse_macro(ctx)
                 return
 
             if at('trait'):
-                parse_trait_definition(defs)
+                parse_trait_definition(ctx)
                 return
 
             if at('class') or at('extern') and at('class', 1):
-                parse_class_definition(defs)
+                parse_class_definition(ctx)
                 return
 
             if at('NAME') and at('NAME', 1) and at('(', 2):
-                parse_function_definition(defs)
+                parse_function_definition(ctx)
                 return
 
             if (at('extern') or at('NAME')) and at('NAME', 1):
-                parse_global_variable_definition(defs)
+                parse_global_variable_definition(ctx)
                 return
 
             raise Error([peek()], f'Expected class, function or variable definition')
 
-        def parse_import(defs):
+        def parse_import(ctx):
             token = expect('import')
             parts = [expect('NAME').value]
             while consume('.'):
@@ -2361,7 +2408,7 @@ def parser(ns):
             finally:
                 stack.pop()
 
-        def parse_macro(defs):
+        def parse_macro(ctx):
             token = expect('#')
             if at('('):
                 parse_macro_expression()()
@@ -2488,12 +2535,12 @@ def parser(ns):
         def expect_type():
             return expect_maybe_exported_name()
 
-        def parse_global_variable_definition(defs):
+        def parse_global_variable_definition(ctx):
             token = peek()
             extern = bool(consume('extern'))
             vtype = expect_type()
             vname = expect_exported_name()
-            defs.append(ast.GlobalVariableDefinition(token, extern, vtype, vname))
+            ctx.defs.append(ast.GlobalVariableDefinition(token, extern, vtype, vname))
             ifname = f'{vname}#init'
             if extern:
                 initf = ast.FunctionDefinition(
@@ -2504,7 +2551,7 @@ def parser(ns):
                     None)
             else:
                 if consume('='):
-                    expr = parse_expression(defs)
+                    expr = parse_expression(ctx)
                     initf = ast.FunctionDefinition(
                         token,
                         vtype,
@@ -2521,21 +2568,21 @@ def parser(ns):
                             ast.VariableDefinition(token, True, vtype, 'ret', None),
                             ast.Return(token, ast.Name(token, 'ret')),
                         ]))
-            defs.append(initf)
+            ctx.defs.append(initf)
             expect_delim()
 
-        def parse_function_definition(defs):
+        def parse_function_definition(ctx):
             token = peek()
             return_type = expect_type()
             nametoken = peek()
             name = expect_exported_name()
             params = parse_params()
             if at('{'):
-                body = parse_block(defs)
+                body = parse_block(ctx)
             else:
                 body = None
                 expect_delim()
-            defs.append(ast.FunctionDefinition(token, return_type, name, params, body))
+            ctx.defs.append(ast.FunctionDefinition(token, return_type, name, params, body))
 
         def expect_non_exported_name():
             token = peek()
@@ -2551,7 +2598,7 @@ def parser(ns):
             assert name in local_symbols, (name, local_symbols)
             return f'{local_prefix}.{name}'
 
-        def parse_class_definition(defs):
+        def parse_class_definition(ctx):
             token = peek()
             extern = bool(consume('extern'))
             expect('class')
@@ -2606,10 +2653,10 @@ def parser(ns):
                         # TODO: Make 'new' return the actual object
                         # like extern types.
                         rt = 'void'
-                        body = parse_block(defs)
+                        body = parse_block(ctx)
                         params = [ast.Parameter(mtoken, name, 'this')] + declparams
                     newdef = ast.FunctionDefinition(mtoken, rt, fname, params, body)
-                    defs.append(newdef)
+                    ctx.defs.append(newdef)
                 elif at('NAME') and at('NAME', 1) and at_delim(2):
                     if extern:
                         raise Error(
@@ -2627,13 +2674,13 @@ def parser(ns):
                     # during the class translation
                     getter_name = f'{name}:GET{fname}'
                     setter_name = f'{name}:SET{fname}'
-                    defs.append(ast.FunctionDefinition(
+                    ctx.defs.append(ast.FunctionDefinition(
                         ftoken,
                         ftype,
                         getter_name,
                         [ast.Parameter(ftoken, name, 'this')],
                         None))
-                    defs.append(ast.FunctionDefinition(
+                    ctx.defs.append(ast.FunctionDefinition(
                         ftoken,
                         ftype,
                         setter_name,
@@ -2654,7 +2701,7 @@ def parser(ns):
                     mname = expect('NAME').value
                     _check_method_name(mtoken, mname)
                     params = [ast.Parameter(mtoken, name, 'this')] + parse_params()
-                    body = None if consume_delim() else parse_block(defs)
+                    body = None if consume_delim() else parse_block(ctx)
 
                     # A method is mapped to a function with a special name,
                     # and an implicit first parameter.
@@ -2662,13 +2709,13 @@ def parser(ns):
 
                     mark_method(mname, token)
 
-                    defs.append(ast.FunctionDefinition(mtoken, rtype, fname, params, body))
+                    ctx.defs.append(ast.FunctionDefinition(mtoken, rtype, fname, params, body))
                 consume_delim()
 
             consume_delim()
 
             if not extern and newdef is None:
-                defs.append(ast.FunctionDefinition(
+                ctx.defs.append(ast.FunctionDefinition(
                     token,
                     'void',
                     f'{name}#new',
@@ -2676,10 +2723,10 @@ def parser(ns):
                     ast.Block(token, [])))
 
             method_names = sorted(method_to_token_table)
-            defs.append(ast.ClassDefinition(
+            ctx.defs.append(ast.ClassDefinition(
                 token, name, traits, fields, method_names, untyped_methods))
 
-        def parse_trait_definition(defs):
+        def parse_trait_definition(ctx):
             token = expect('trait')
             name = expect_exported_name()
             method_to_token_table = dict()
@@ -2691,7 +2738,7 @@ def parser(ns):
                 rtype = expect_type()
                 mname = expect('NAME').value
                 params = parse_params()
-                body = parse_block(defs)
+                body = parse_block(ctx)
                 _check_method_name(mtoken, mname)
 
                 # A method is mapped to a function with a special name,
@@ -2705,12 +2752,12 @@ def parser(ns):
 
                 method_to_token_table[mname] = mtoken
 
-                defs.append(ast.FunctionDefinition(mtoken, rtype, fname, params, body))
+                ctx.defs.append(ast.FunctionDefinition(mtoken, rtype, fname, params, body))
                 consume_delim()
             consume_delim()
 
             method_names = sorted(method_to_token_table)
-            defs.append(ast.TraitDefinition(token, name, traits, method_names))
+            ctx.defs.append(ast.TraitDefinition(token, name, traits, method_names))
 
         def parse_trait_list():
             if consume('('):
@@ -2724,31 +2771,31 @@ def parser(ns):
                 traits = ['Object']
             return traits
 
-        def parse_block(defs):
+        def parse_block(ctx):
             token = expect('{')
             with skipping_newlines(False):
                 consume_delim()
                 statements = []
                 while not consume('}'):
-                    statements.append(parse_statement(defs))
+                    statements.append(parse_statement(ctx))
                     consume_delim()
                 return ast.Block(token, statements)
 
-        def parse_statement(defs):
+        def parse_statement(ctx):
             token = peek()
 
             if at('{'):
-                return parse_block(defs)
+                return parse_block(ctx)
 
             if at_variable_definition():
-                return parse_variable_definition(defs)
+                return parse_variable_definition(ctx)
 
             if consume('while'):
                 expect('(')
                 with skipping_newlines(True):
-                    condition = parse_expression(defs)
+                    condition = parse_expression(ctx)
                     expect(')')
-                body = parse_block(defs)
+                body = parse_block(ctx)
                 return ast.While(token, condition, body)
 
             if consume('for'):
@@ -2757,15 +2804,15 @@ def parser(ns):
                     if consume(';'):
                         pass
                     elif at_variable_definition():
-                        init.append(parse_variable_definition(defs))
+                        init.append(parse_variable_definition(ctx))
                     else:
-                        init.append(ast.ExpressionStatement(token, parse_expression(defs)))
+                        init.append(ast.ExpressionStatement(token, parse_expression(ctx)))
                         expect(';')
-                    cond = ast.BoolLiteral(token, True) if at(';') else parse_expression(defs)
+                    cond = ast.BoolLiteral(token, True) if at(';') else parse_expression(ctx)
                     expect(';')
-                    incr = ast.ExpressionStatement(token, parse_expression(defs))
+                    incr = ast.ExpressionStatement(token, parse_expression(ctx))
                     expect(')')
-                    raw_body = parse_block(defs)
+                    raw_body = parse_block(ctx)
                     body = ast.Block(token, raw_body.statements + [incr])
                     return ast.Block(token, init + [
                         ast.While(token, cond, body),
@@ -2777,8 +2824,8 @@ def parser(ns):
                         vtype = expect_type()
                     loopvar = expect_non_exported_name()
                     expect('in')
-                    container_expr = parse_expression(defs)
-                    body = parse_block(defs)
+                    container_expr = parse_expression(ctx)
+                    body = parse_block(ctx)
                     tempvar = mktempvar()
                     return ast.Block(token, [
                         ast.VariableDefinition(
@@ -2812,13 +2859,13 @@ def parser(ns):
                     ])
 
             if consume('with'):
-                expr = parse_expression(defs)
+                expr = parse_expression(ctx)
                 exprtempvar = mktempvar()
                 if consume('as'):
                     name = expect('NAME').value
                 else:
                     name = mktempvar()
-                body = parse_block(defs)
+                body = parse_block(ctx)
                 return ast.Block(token, [
                     ast.VariableDefinition(
                         token,
@@ -2844,183 +2891,183 @@ def parser(ns):
             if consume('if'):
                 expect('(')
                 with skipping_newlines(True):
-                    condition = parse_expression(defs)
+                    condition = parse_expression(ctx)
                     expect(')')
-                body = parse_block(defs)
+                body = parse_block(ctx)
                 if consume('else'):
-                    other = parse_statement(defs)
+                    other = parse_statement(ctx)
                 else:
                     other = None
                 return ast.If(token, condition, body, other)
 
             if consume('return'):
-                expression = None if at_delim() else parse_expression(defs)
+                expression = None if at_delim() else parse_expression(ctx)
                 expect_delim()
                 return ast.Return(token, expression)
 
-            expression = parse_expression(defs)
+            expression = parse_expression(ctx)
             expect_delim()
             return ast.ExpressionStatement(token, expression)
 
-        def parse_expression(defs):
-            return parse_conditional(defs)
+        def parse_expression(ctx):
+            return parse_conditional(ctx)
 
-        def parse_conditional(defs):
-            expr = parse_logical_or(defs)
+        def parse_conditional(ctx):
+            expr = parse_logical_or(ctx)
             token = peek()
             if consume('?'):
-                left = parse_expression(defs)
+                left = parse_expression(ctx)
                 expect(':')
-                right = parse_conditional(defs)
+                right = parse_conditional(ctx)
                 return ast.Conditional(token, expr, left, right)
             return expr
 
-        def parse_logical_or(defs):
-            expr = parse_logical_and(defs)
+        def parse_logical_or(ctx):
+            expr = parse_logical_and(ctx)
             while True:
                 token = peek()
                 if consume('or'):
-                    right = parse_logical_and(defs)
+                    right = parse_logical_and(ctx)
                     expr = ast.LogicalOr(token, expr, right)
                 else:
                     break
             return expr
 
-        def parse_logical_and(defs):
-            expr = parse_relational(defs)
+        def parse_logical_and(ctx):
+            expr = parse_relational(ctx)
             while True:
                 token = peek()
                 if consume('and'):
-                    right = parse_relational(defs)
+                    right = parse_relational(ctx)
                     expr = ast.LogicalAnd(token, expr, right)
                 else:
                     break
             return expr
 
-        def parse_relational(defs):
-            expr = parse_bitwise_or(defs)
+        def parse_relational(ctx):
+            expr = parse_bitwise_or(ctx)
             while True:
                 token = peek()
                 if consume('=='):
-                    expr = ast.Equals(token, expr, parse_bitwise_or(defs))
+                    expr = ast.Equals(token, expr, parse_bitwise_or(ctx))
                 elif consume('!='):
-                    expr = ast.NotEquals(token, expr, parse_bitwise_or(defs))
+                    expr = ast.NotEquals(token, expr, parse_bitwise_or(ctx))
                 elif consume('<'):
-                    expr = ast.LessThan(token, expr, parse_bitwise_or(defs))
+                    expr = ast.LessThan(token, expr, parse_bitwise_or(ctx))
                 elif consume('<='):
-                    expr = ast.LessThanOrEqual(token, expr, parse_bitwise_or(defs))
+                    expr = ast.LessThanOrEqual(token, expr, parse_bitwise_or(ctx))
                 elif consume('>'):
-                    expr = ast.GreaterThan(token, expr, parse_bitwise_or(defs))
+                    expr = ast.GreaterThan(token, expr, parse_bitwise_or(ctx))
                 elif consume('>='):
-                    expr = ast.GreaterThanOrEqual(token, expr, parse_bitwise_or(defs))
+                    expr = ast.GreaterThanOrEqual(token, expr, parse_bitwise_or(ctx))
                 elif consume('is'):
                     if consume('not'):
-                        expr = ast.IsNot(token, expr, parse_bitwise_or(defs))
+                        expr = ast.IsNot(token, expr, parse_bitwise_or(ctx))
                     else:
-                        expr = ast.Is(token, expr, parse_bitwise_or(defs))
+                        expr = ast.Is(token, expr, parse_bitwise_or(ctx))
                 elif consume('in'):
-                    expr = ast.In(token, expr, parse_bitwise_or(defs))
+                    expr = ast.In(token, expr, parse_bitwise_or(ctx))
                 elif consume('not'):
                     expect('in')
-                    expr = ast.LogicalNot(token, ast.In(token, expr, parse_bitwise_or(defs)))
+                    expr = ast.LogicalNot(token, ast.In(token, expr, parse_bitwise_or(ctx)))
                 else:
                     break
             return expr
 
-        def parse_bitwise_or(defs):
-            expr = parse_bitwise_xor(defs)
+        def parse_bitwise_or(ctx):
+            expr = parse_bitwise_xor(ctx)
             while True:
                 token = peek()
                 if consume('|'):
-                    expr = ast.MethodCall(token, expr, 'Or', [parse_bitwise_xor(defs)])
+                    expr = ast.MethodCall(token, expr, 'Or', [parse_bitwise_xor(ctx)])
                 else:
                     break
             return expr
 
-        def parse_bitwise_xor(defs):
-            expr = parse_bitwise_and(defs)
+        def parse_bitwise_xor(ctx):
+            expr = parse_bitwise_and(ctx)
             while True:
                 token = peek()
                 if consume('^'):
-                    expr = ast.MethodCall(token, expr, 'Xor', [parse_bitwise_and(defs)])
+                    expr = ast.MethodCall(token, expr, 'Xor', [parse_bitwise_and(ctx)])
                 else:
                     break
             return expr
 
-        def parse_bitwise_and(defs):
-            expr = parse_bitwise_shift(defs)
+        def parse_bitwise_and(ctx):
+            expr = parse_bitwise_shift(ctx)
             while True:
                 token = peek()
                 if consume('&'):
-                    expr = ast.MethodCall(token, expr, 'And', [parse_bitwise_shift(defs)])
+                    expr = ast.MethodCall(token, expr, 'And', [parse_bitwise_shift(ctx)])
                 else:
                     break
             return expr
 
-        def parse_bitwise_shift(defs):
-            expr = parse_additive(defs)
+        def parse_bitwise_shift(ctx):
+            expr = parse_additive(ctx)
             while True:
                 token = peek()
                 if consume('>>'):
-                    expr = ast.MethodCall(token, expr, 'Rshift', [parse_additive(defs)])
+                    expr = ast.MethodCall(token, expr, 'Rshift', [parse_additive(ctx)])
                 elif consume('<<'):
-                    expr = ast.MethodCall(token, expr, 'Lshift', [parse_additive(defs)])
+                    expr = ast.MethodCall(token, expr, 'Lshift', [parse_additive(ctx)])
                 else:
                     break
             return expr
 
-        def parse_additive(defs):
-            expr = parse_multiplicative(defs)
+        def parse_additive(ctx):
+            expr = parse_multiplicative(ctx)
             while True:
                 token = peek()
                 if consume('+'):
-                    expr = ast.MethodCall(token, expr, 'Add', [parse_multiplicative(defs)])
+                    expr = ast.MethodCall(token, expr, 'Add', [parse_multiplicative(ctx)])
                 elif consume('-'):
-                    expr = ast.MethodCall(token, expr, 'Sub', [parse_multiplicative(defs)])
+                    expr = ast.MethodCall(token, expr, 'Sub', [parse_multiplicative(ctx)])
                 else:
                     break
             return expr
 
-        def parse_multiplicative(defs):
-            expr = parse_unary(defs)
+        def parse_multiplicative(ctx):
+            expr = parse_unary(ctx)
             while True:
                 token = peek()
                 if consume('*'):
-                    expr = ast.MethodCall(token, expr, 'Mul', [parse_unary(defs)])
+                    expr = ast.MethodCall(token, expr, 'Mul', [parse_unary(ctx)])
                 elif consume('/'):
-                    expr = ast.MethodCall(token, expr, 'Div', [parse_unary(defs)])
+                    expr = ast.MethodCall(token, expr, 'Div', [parse_unary(ctx)])
                 elif consume('%'):
-                    expr = ast.MethodCall(token, expr, 'Mod', [parse_unary(defs)])
+                    expr = ast.MethodCall(token, expr, 'Mod', [parse_unary(ctx)])
                 else:
                     break
             return expr
 
-        def parse_unary(defs):
+        def parse_unary(ctx):
             token = peek()
             if consume('-'):
-                expr = parse_unary(defs)
+                expr = parse_unary(ctx)
                 if isinstance(expr, (ast.IntLiteral, ast.DoubleLiteral)):
                     type_ = type(expr)
                     return type_(expr.token, -expr.value)
                 else:
                     return ast.MethodCall(token, expr, 'Neg', [])
             if consume('~'):
-                expr = parse_unary(defs)
+                expr = parse_unary(ctx)
                 return ast.MethodCall(token, expr, 'Invert', [])
             if consume('!'):
-                expr = parse_unary(defs)
+                expr = parse_unary(ctx)
                 return ast.LogicalNot(token, expr)
-            return parse_pow(defs)
+            return parse_pow(ctx)
 
-        def parse_pow(defs):
-            expr = parse_postfix(defs)
+        def parse_pow(ctx):
+            expr = parse_postfix(ctx)
             token = peek()
             if consume('**'):
-                expr = ast.MethodCall(token, expr, 'Pow', [parse_pow(defs)])
+                expr = ast.MethodCall(token, expr, 'Pow', [parse_pow(ctx)])
             return expr
 
-        def parse_postfix(defs):
-            expr = parse_primary(defs)
+        def parse_postfix(ctx):
+            expr = parse_primary(ctx)
             while True:
                 token = peek()
                 if consume('.'):
@@ -3032,11 +3079,11 @@ def parser(ns):
                     else:
                         name = expect('NAME').value
                         if at('('):
-                            args = parse_args(defs)
+                            args = parse_args(ctx)
                             expr = ast.MethodCall(token, expr, name, args)
                             continue
                         elif consume('='):
-                            val = parse_expression(defs)
+                            val = parse_expression(ctx)
                             expr = ast.MethodCall(token, expr, f'SET{name}', [val])
                             continue
                         else:
@@ -3059,20 +3106,20 @@ def parser(ns):
                         if consume(']'):
                             pass
                         else:
-                            right = parse_expression(defs)
+                            right = parse_expression(ctx)
                             args.append(right)
                             expect(']')
                     elif consume(']'):
                         pass
                     else:
-                        left = parse_expression(defs)
+                        left = parse_expression(ctx)
                         args.append(left)
                         if consume(':'):
                             is_slice = True
                             if consume(']'):
                                 pass
                             else:
-                                right = parse_expression(defs)
+                                right = parse_expression(ctx)
                                 args.append(right)
                                 expect(']')
                         elif consume(']'):
@@ -3080,14 +3127,14 @@ def parser(ns):
                         else:
                             expect(',')
                             while not consume(']'):
-                                args.append(parse_expression(defs))
+                                args.append(parse_expression(ctx))
                                 if not consume(','):
                                     expect(']')
                                     break
                     assign = False
                     if consume('='):
                         assign = True
-                        args.append(parse_expression(defs))
+                        args.append(parse_expression(ctx))
                     if is_slice:
                         method_name = (
                             'SliceAll' if left is None and right is None else
@@ -3106,7 +3153,7 @@ def parser(ns):
                 break
             return expr
 
-        def parse_primary(defs):
+        def parse_primary(ctx):
             token = peek()
 
             if consume('def'):
@@ -3127,8 +3174,8 @@ def parser(ns):
                             expect(']')
                             break
                 params = parse_params()
-                body = parse_block(defs)
-                defs.append(ast.FunctionDefinition(
+                body = parse_block(ctx)
+                ctx.defs.append(ast.FunctionDefinition(
                     token,
                     return_type,
                     lambda_name,
@@ -3143,7 +3190,7 @@ def parser(ns):
 
             if consume('('):
                 with skipping_newlines(True):
-                    expr = parse_expression(defs)
+                    expr = parse_expression(ctx)
                     expect(')')
                 return expr
 
@@ -3151,7 +3198,7 @@ def parser(ns):
                 exprs = []
                 with skipping_newlines(True):
                     while not consume(']'):
-                        exprs.append(parse_expression(defs))
+                        exprs.append(parse_expression(ctx))
                         if not consume(','):
                             expect(']')
                             break
@@ -3164,15 +3211,15 @@ def parser(ns):
                     if consume(':'):
                         expect('}')
                         return ast.FunctionCall(token, 'Map', [])
-                    key = parse_expression(defs)
+                    key = parse_expression(ctx)
                     if consume(':'):
-                        value = parse_expression(defs)
+                        value = parse_expression(ctx)
                         pairs = [ast.ListDisplay(token, [key, value])]
                         if consume(','):
                             while not consume('}'):
-                                key = parse_expression(defs)
+                                key = parse_expression(ctx)
                                 expect(':')
-                                value = parse_expression(defs)
+                                value = parse_expression(ctx)
                                 pairs.append(ast.ListDisplay(token, [key, value]))
                                 if not consume(','):
                                     expect('}')
@@ -3185,7 +3232,7 @@ def parser(ns):
                     args = [key]
                     if consume(','):
                         while not consume('}'):
-                            args.append(parse_expression(defs))
+                            args.append(parse_expression(ctx))
                             if not consume(','):
                                 expect('}')
                                 break
@@ -3223,10 +3270,10 @@ def parser(ns):
                     return ast.SetName(token, name, ast.MethodCall(
                         token, ast.Name(token, name), 'Sub', [ast.IntLiteral(token, 1)]))
                 elif consume('='):
-                    expr = parse_expression(defs)
+                    expr = parse_expression(ctx)
                     return ast.SetName(token, name, expr)
                 elif at('('):
-                    args = parse_args(defs)
+                    args = parse_args(ctx)
                     return ast.FunctionCall(token, name, args)
                 else:
                     return ast.Name(token, name)
@@ -3239,7 +3286,7 @@ def parser(ns):
         def at_variable_definition():
             return (at('final') or at('auto') or at('NAME')) and at('NAME', 1)
 
-        def parse_variable_definition(defs):
+        def parse_variable_definition(ctx):
             token = peek()
             if consume('final'):
                 final = True
@@ -3251,7 +3298,7 @@ def parser(ns):
                 final = False
                 vartype = expect_type()
             name = expect_non_exported_name()
-            value = parse_expression(defs) if consume('=') else None
+            value = parse_expression(ctx) if consume('=') else None
             expect_delim()
             if final and value is None:
                 raise Error(
@@ -3259,12 +3306,12 @@ def parser(ns):
                     'final variables definitions must specify an expression')
             return ast.VariableDefinition(token, final, vartype, name, value)
 
-        def parse_args(defs, opener='(', closer=')'):
+        def parse_args(ctx, opener='(', closer=')'):
             args = []
             with skipping_newlines(True):
                 expect(opener)
                 while not consume(closer):
-                    args.append(parse_expression(defs))
+                    args.append(parse_expression(ctx))
                     if not consume(','):
                         expect(closer)
                         break
