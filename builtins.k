@@ -7,10 +7,14 @@
 #(global APPLE_FRAMEWORKS [])
 
 #(global assert (lambda (condition message)
-  (cond
+  (if
       condition 1
       (error 'assertion failed')
     )
+))
+
+#(global not (lambda (condition)
+  (if condition 0 1)
 ))
 
 // Special functions required by the language

@@ -12,7 +12,7 @@
 #(assert 1 '1 should be true')
 
 #(define asdf (lambda ()
-  (assert 0 '0 is false')
+  (assert (not 0) '0 is false')
 ))
 
 #(asdf)

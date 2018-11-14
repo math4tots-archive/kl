@@ -298,6 +298,7 @@ def lexer(ns):
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
       'with', 'from', 'import', 'as', 'try', 'catch', 'finally',
     }
+    ns(KEYWORDS, 'KEYWORDS')
 
     SYMBOLS = tuple(reversed(sorted([
       '\n',
@@ -2087,7 +2088,7 @@ def parser(ns):
             elif self.parent is not None:
                 return self.parent[key]
             else:
-                raise Error(self.stack, f'No such macro variable {key}')
+                raise Error(self.stack, f'No such macro name {repr(key)}')
 
         def __setitem__(self, key, value):
             if key in self.table:
@@ -2095,12 +2096,12 @@ def parser(ns):
             elif self.parent is not None:
                 self.parent[key] = value
             else:
-                raise Error(self.stack, f'No such macro variable {key}')
+                raise Error(self.stack, f'No such macro name {repr(key)}')
 
         def define(self, key, value):
             if key in self.table:
                 raise Error(
-                    self.stack, f'Macro variable already defined {key}')
+                    self.stack, f'Macro name already defined {repr(key)}')
             self.table[key] = value
 
     class MacroLambda(typing.NamedTuple):
@@ -2445,6 +2446,12 @@ def parser(ns):
                     f'Macro function {fn} expects {expect} args '
                     f'but got {len(args)}')
 
+        def parse_macro_name():
+            return (
+                gettok().type if peek().type in lexer.KEYWORDS else
+                expect('NAME').value
+            )
+
         def parse_macro_expression():
             # The result of parsing a macro expression is just a Python
             # function that accepts no arguments. Simply running the
@@ -2456,9 +2463,9 @@ def parser(ns):
             token = peek()
             if consume('('):
                 with skipping_newlines(True):
-                    fn = expect('NAME').value
+                    fn = parse_macro_name()
                     if fn in ('global', 'define', 'set'):
-                        vname = expect('NAME').value
+                        vname = parse_macro_name()
                         expr = parse_macro_expression()
                         expect(')')
                         if fn == 'global':
@@ -2484,7 +2491,7 @@ def parser(ns):
                         expect('(')
                         params = []
                         while not consume(')'):
-                            params.append(expect('NAME').value)
+                            params.append(parse_macro_name())
                         bodyexprs = []
                         while not consume(')'):
                             bodyexprs.append(parse_macro_expression())
@@ -2496,7 +2503,7 @@ def parser(ns):
                     while not consume(')'):
                         argexprs.append(parse_macro_expression())
                     def run(mscope, token=token):
-                        if fn == 'cond':
+                        if fn == 'if':
                             i = 0
                             while i + 1 < len(argexprs):
                                 if argexprs[i](mscope):
@@ -2549,8 +2556,10 @@ def parser(ns):
                             _check_args(token, fn, 2, args)
                             return args[0] < args[1]
                         else:
+                            # TODO: Stop this hack and support
+                            # expressions of the form:
+                            #  ((make_function) arguments_to_new_function)
                             with mscope.using(token):
-                                print(f'enter {len(mscope.stack)}')
                                 lambda_ = mscope[fn]
                                 new_scope = MacroScope(lambda_.scope)
                                 if len(lambda_.params) != len(args):
@@ -2563,7 +2572,6 @@ def parser(ns):
                                     new_scope.define(param, arg)
                                 for expr in lambda_.body:
                                     last = expr(new_scope)
-                                print('exit')
                                 return last
                     return run
             elif consume('['):
@@ -2581,7 +2589,7 @@ def parser(ns):
                 value = expect('STRING').value
                 return lambda mscope: value
             elif at('NAME'):
-                name = expect('NAME').value
+                name = parse_macro_name()
                 def run(mscope, token=token):
                     with mscope.using(token):
                         return mscope[name]
