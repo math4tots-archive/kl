@@ -946,7 +946,7 @@ def ast(ns):
 
 
 @Namespace
-def C(ns):
+def LegacyC(ns):
     @ns
     class Scope(object):
         def __init__(self, parent):
@@ -3363,7 +3363,7 @@ def main():
             node.definitions + builtins_node.definitions,
             node.env)
 
-        c_src = C.translate(program)
+        c_src = LegacyC.translate(program)
 
         env = program.env
 
