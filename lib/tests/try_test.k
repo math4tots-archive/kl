@@ -23,5 +23,6 @@ void main() {
   assert(Foo().try.foo())
   assert(Foo().try.foo().orDie() == 'hello foo')
 
-  print(bar(489))
+  assert(!try.bar(489))
+  assert(try.bar(489).getRawValue() == 489)
 }
