@@ -10,7 +10,6 @@ extern KLC_typeinfo KLC_typehacksZBguiZBApi;
 void KLC_deletehacksZBguiZBApi(KLC_header*, KLC_header**);
 KLCNhacksZBguiZBApi* KLCNhacksZBguiZBapiZEinit();
 
-void KLCNhacksZBguiZBApiZFalert(
-    KLCNhacksZBguiZBApi* api, KLCNString* message, KLCNString* title);
+void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message);
 
 #endif/*klc_os_fs_h*/

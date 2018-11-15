@@ -11,7 +11,7 @@ extern class Api {
   // Dead simple dialog box that will show a message
   // to the user.
   // Synchronous -- blocks until user exits the message box.
-  void alert(String message, String title)
+  void alert(String message)
 }
 
 extern Api api

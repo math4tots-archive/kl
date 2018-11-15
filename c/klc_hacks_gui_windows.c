@@ -19,11 +19,10 @@ KLCNhacksZBguiZBApi* KLCNhacksZBguiZBapiZEinit() {
   return win;
 }
 
-void KLCNhacksZBguiZBApiZFalert(
-    KLCNhacksZBguiZBApi* api, KLCNString* message, KLCNString* title) {
+void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message) {
   MessageBoxW(
     NULL,
     KLC_windows_get_wstr(message),
-    KLC_windows_get_wstr(title),
+    L"Alert",
     0);
 }
