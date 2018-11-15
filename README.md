@@ -95,7 +95,9 @@ void main() {
 
 ## TODO
 
-* (should be easy) implement `HashCode` for `String`
+* try functions should automatically convert and propagate errors of
+  calls to other try functions rather than just call the vanilla
+  version that dies on failure as it does now.
 * Consider adding a `Tuple` type like Python
   Or maybe consider freezing a `List` like in Ruby.
   Relevant consideration for the hash table.
