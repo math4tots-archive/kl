@@ -12,4 +12,6 @@ KLCNhacksZBguiZBApi* KLCNhacksZBguiZBapiZEinit();
 
 void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message);
 
+void KLCNhacksZBguiZBApiZFmkwin(KLCNhacksZBguiZBApi* api);
+
 #endif/*klc_os_fs_h*/

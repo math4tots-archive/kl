@@ -12,6 +12,9 @@ extern class Api {
   // to the user.
   // Synchronous -- blocks until user exits the message box.
   void alert(String message)
+
+  // Just a quick test
+  void mkwin()
 }
 
 extern Api api
