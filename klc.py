@@ -2519,17 +2519,17 @@ def parser(ns):
                                     return argexprs[i + 1](mscope)
                                 i += 2
                             return argexprs[i](mscope) if i < len(argexprs) else 0.0
+                        elif fn == 'begin':
+                            last = 0.0
+                            for expr in argexprs:
+                                last = expr(mscope)
+                            return last
                         args = [expr(mscope) for expr in argexprs]
                         if fn == 'eq':
                             _check_args(token, fn, 2, args)
                             return args[0] == args[1]
                         elif fn == 'str':
                             return ''.join(map(str, args))
-                        elif fn == 'begin':
-                            last = 0.0
-                            for arg in args:
-                                last = arg()
-                            return last
                         elif fn == 'append':
                             _check_args(token, fn, 2, args)
                             args[0].append(args[1])
