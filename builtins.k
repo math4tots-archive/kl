@@ -657,6 +657,14 @@ extern class Try {
   }
 }
 
+Try `%Success`(var value) {
+  return Try(true, value)
+}
+
+Try `%Failure`(var value) {
+  return Try(false, value)
+}
+
 class Map {
   // Dead simple hash table implementation
   //   contains a list of buckets,

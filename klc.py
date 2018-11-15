@@ -296,7 +296,8 @@ def lexer(ns):
       'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
       'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
-      'with', 'from', 'import', 'as', 'try', 'catch', 'finally',
+      'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
+      'except',
     }
     ns(KEYWORDS, 'KEYWORDS')
 
@@ -519,7 +520,9 @@ Optional = OptionalType(object)
 
 
 @Namespace
-def ast(ns):
+def ir(ns):
+    "intermediate representation"
+
     @ns
     class Node(object):
         def __init__(self, token, *args):
@@ -543,15 +546,6 @@ def ast(ns):
                 type(self).__name__,
                 ', '.join(repr(getattr(self, n)) for n, _ in type(self).fields),
             )
-
-
-@Namespace
-def ir(ns):
-    "intermediate representation"
-
-    @ns
-    class Node(ast.Node):
-        pass
 
     @ns
     class BaseVariableDefinition(Node):
@@ -2121,6 +2115,13 @@ def parser(ns):
     class Context(typing.NamedTuple):
         defs: list
         macro_scope: MacroScope
+        inside_try: bool
+
+        def copy(self, **kwargs):
+            for key in Context.__annotations__.keys():
+                if key not in kwargs:
+                    kwargs[key] = getattr(self, key)
+            return Context(**kwargs)
 
     @ns
     def parse(source, local_prefix, env):
@@ -2149,9 +2150,6 @@ def parser(ns):
         for lib_node in env['@cache'].values():
             defs.extend(lib_node.definitions)
         return ir.Program(main_node.token, defs, env)
-
-    def _has_lower(s):
-        return s.upper() != s
 
     def _has_upper(s):
         return s.lower() != s
@@ -2375,7 +2373,8 @@ def parser(ns):
             defs = []
             ctx = Context(
                 defs=defs,
-                macro_scope=env['@macro_scope'])
+                macro_scope=env['@macro_scope'],
+                inside_try=False)
             while at('import'):
                 parse_import(ctx)
             replace_tokens_with_update()
@@ -2398,7 +2397,9 @@ def parser(ns):
                 parse_class_definition(ctx)
                 return
 
-            if at('NAME') and at('NAME', 1) and at('(', 2):
+            if (at('NAME') and at('NAME', 1) and at('(', 2) or
+                    at('try') and at('NAME', 1) and at('NAME', 2) and
+                        at('(', 3)):
                 parse_function_definition(ctx)
                 return
 
@@ -2654,16 +2655,38 @@ def parser(ns):
 
         def parse_function_definition(ctx):
             token = peek()
+            try_ = consume('try')
             return_type = expect_type()
-            nametoken = peek()
             name = expect_exported_name()
             params = parse_params()
             if at('{'):
-                body = parse_block(ctx)
+                body = parse_block(ctx.copy(inside_try=try_))
             else:
                 body = None
                 expect_delim()
-            ctx.defs.append(ir.FunctionDefinition(token, return_type, name, params, body))
+            if try_:
+                tryname = f'{name}%try'
+                ctx.defs.append(ir.FunctionDefinition(
+                    token, return_type, name, params,
+                    ir.Block(token, [
+                        ir.Return(token,
+                            ir.Cast(token,
+                                ir.MethodCall(token,
+                                    ir.FunctionCall(token, tryname, [
+                                        ir.Name(token, p.name)
+                                        for p in params
+                                    ]),
+                                    'orDie', []
+                                ),
+                                return_type,
+                            ),
+                        ),
+                    ])))
+                ctx.defs.append(ir.FunctionDefinition(
+                    token, 'Try', tryname, params, body))
+            else:
+                ctx.defs.append(ir.FunctionDefinition(
+                    token, return_type, name, params, body))
 
         def expect_non_exported_name():
             token = peek()
@@ -2778,11 +2801,13 @@ def parser(ns):
                     mark_member(ufname, uftoken)
                 else:
                     mtoken = peek()
+                    try_ = consume('try')
                     rtype = expect_type()
                     mname = expect('NAME').value
                     _check_method_name(mtoken, mname)
                     params = [ir.Parameter(mtoken, name, 'this')] + parse_params()
-                    body = None if consume_delim() else parse_block(ctx)
+                    body = None if consume_delim() else parse_block(
+                        ctx.copy(inside_try=try_))
 
                     # A method is mapped to a function with a special name,
                     # and an implicit first parameter.
@@ -2790,7 +2815,32 @@ def parser(ns):
 
                     mark_method(mname, token)
 
-                    ctx.defs.append(ir.FunctionDefinition(mtoken, rtype, fname, params, body))
+                    if try_:
+                        trymname = f'{mname}%try'
+                        tryfname = f'{fname}%try'
+                        assert tryfname == f'{name}:{trymname}'
+                        mark_method(trymname, token)
+                        ctx.defs.append(ir.FunctionDefinition(
+                            token, rtype, fname, params,
+                            ir.Block(token, [
+                                ir.Return(token,
+                                    ir.Cast(token,
+                                        ir.MethodCall(token,
+                                            ir.FunctionCall(token, tryfname, [
+                                                ir.Name(token, p.name)
+                                                for p in params
+                                            ]),
+                                            'orDie', []
+                                        ),
+                                        rtype,
+                                    ),
+                                ),
+                            ])))
+                        ctx.defs.append(ir.FunctionDefinition(
+                            token, 'Try', tryfname, params, body))
+                    else:
+                        ctx.defs.append(ir.FunctionDefinition(
+                            mtoken, rtype, fname, params, body))
                 consume_delim()
 
             consume_delim()
@@ -2984,6 +3034,16 @@ def parser(ns):
             if consume('return'):
                 expression = None if at_delim() else parse_expression(ctx)
                 expect_delim()
+                if ctx.inside_try:
+                    expression = ir.FunctionCall(
+                        token, '%Success', [expression])
+                return ir.Return(token, expression)
+
+            if consume('raise'):
+                if not ctx.inside_try:
+                    raise Error([token], 'Raise outside a try function')
+                expression = ir.FunctionCall(
+                    token, '%Failure', [parse_expression(ctx)])
                 return ir.Return(token, expression)
 
             expression = parse_expression(ctx)
@@ -3158,7 +3218,12 @@ def parser(ns):
                         expr = ir.Cast(token, expr, cast_type)
                         continue
                     else:
+                        try_ = consume('try')
+                        if try_:
+                            expect('.')
                         name = expect('NAME').value
+                        if try_:
+                            name = f'{name}%try'
                         if at('('):
                             args = parse_args(ctx)
                             expr = ir.MethodCall(token, expr, name, args)
@@ -3342,22 +3407,26 @@ def parser(ns):
                 value = expect('FLOAT').value
                 return ir.DoubleLiteral(token, value)
 
-            if at('NAME'):
+            if at('NAME') or (at('try') and at('.', 1) and at('NAME', 2)):
+                try_ = consume('try')
+                if try_:
+                    expect('.')
                 name = expect_maybe_exported_name()
+                if try_:
+                    name = f'{name}%try'
                 if consume('++'):
                     return ir.SetName(token, name, ir.MethodCall(
                         token, ir.Name(token, name), 'Add', [ir.IntLiteral(token, 1)]))
                 if consume('--'):
                     return ir.SetName(token, name, ir.MethodCall(
                         token, ir.Name(token, name), 'Sub', [ir.IntLiteral(token, 1)]))
-                elif consume('='):
+                if consume('='):
                     expr = parse_expression(ctx)
                     return ir.SetName(token, name, expr)
-                elif at('('):
+                if at('('):
                     args = parse_args(ctx)
                     return ir.FunctionCall(token, name, args)
-                else:
-                    return ir.Name(token, name)
+                return ir.Name(token, name)
 
             if at('STRING'):
                 return ir.StringLiteral(token, expect('STRING').value)
