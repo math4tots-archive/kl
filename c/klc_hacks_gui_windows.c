@@ -12,6 +12,12 @@ struct KLCNhacksZBguiZBApi {
   ATOM windowClassName;
 };
 
+struct KLCNhacksZBguiZBWindow {
+  KLC_header header;
+  KLCNhacksZBguiZBApi* api;
+  HWND hWnd;
+};
+
 static LRESULT CALLBACK WndProc(
     _In_ HWND   hWnd,
     _In_ UINT   uMsg,
@@ -37,7 +43,25 @@ static LRESULT CALLBACK WndProc(
   return 0;
 }
 
+static KLCNhacksZBguiZBWindow* mkwindow(KLCNhacksZBguiZBApi* api, HWND hWnd) {
+  KLCNhacksZBguiZBWindow* win =
+    (KLCNhacksZBguiZBWindow*) malloc(sizeof(KLCNhacksZBguiZBWindow));
+  KLC_init_header(&win->header, &KLC_typehacksZBguiZBWindow);
+  KLC_retain(&api->header);
+  win->api = api;
+  win->hWnd = hWnd;
+  return win;
+}
+
 void KLC_deletehacksZBguiZBApi(KLC_header* api, KLC_header** dq) {
+}
+
+void KLC_deletehacksZBguiZBWindow(KLC_header* robj, KLC_header** dq) {
+  KLCNhacksZBguiZBWindow* win = (KLCNhacksZBguiZBWindow*) robj;
+  KLC_partial_release(&win->api->header, dq);
+  /*
+   TODO: Determine if DestroyWindow should be called here
+  */
 }
 
 KLCNhacksZBguiZBApi* KLCNhacksZBguiZBapiZEinit() {
@@ -76,28 +100,53 @@ void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message) {
     0);
 }
 
-void KLCNhacksZBguiZBApiZFmkwin(KLCNhacksZBguiZBApi* api) {
+
+void KLCNhacksZBguiZBApiZFmain(KLCNhacksZBguiZBApi* api) {
   MSG msg;
-  HWND hWnd = CreateWindowW(
-    lpszClassName,
-    L"Title",
-    WS_OVERLAPPEDWINDOW,
-    CW_USEDEFAULT, CW_USEDEFAULT,
-    500, 100,
-    NULL,
-    NULL,
-    api->hInstance,
-    NULL);
-
-  if (!hWnd) {
-    KLC_errorf("Call to CreateWindow failed");
-  }
-
-  ShowWindow(hWnd, SW_SHOW);
-  UpdateWindow(hWnd);
-
   while (GetMessage(&msg, NULL, 0, 0)) {
     TranslateMessage(&msg);
     DispatchMessage(&msg);
   }
+  exit((int) msg.wParam);
+}
+
+KLCNTry* KLCNhacksZBguiZBApiZFwindowZDtry(
+    KLCNhacksZBguiZBApi* api,
+    KLCNString* title,
+    KLC_int width,
+    KLC_int height) {
+  KLCNhacksZBguiZBWindow* win;
+  KLCNTry* ret;
+  HWND hWnd = CreateWindowW(
+      lpszClassName,
+      KLC_windows_get_wstr(title),
+      WS_OVERLAPPEDWINDOW,
+      CW_USEDEFAULT, CW_USEDEFAULT,
+      width, height,
+      NULL,
+      NULL,
+      api->hInstance,
+      NULL);
+
+  if (!hWnd) {
+    /* TODO: Return Try instead */
+    return KLC_failm("Call to CreateWindow failed");
+  }
+
+  win = mkwindow(api, hWnd);
+  SetWindowLongPtrW(hWnd, 0, (LONG_PTR) win);
+  if ((KLCNhacksZBguiZBWindow*) GetWindowLongPtrW(hWnd, 0) != win) {
+    KLC_errorf("FUBAR: GetWindowLongPtrW doesn't work as expected");
+  }
+  ret = KLCNTryZEnew(1, KLC_object_to_var((KLC_header*) win));
+  KLC_release((KLC_header*) win);
+  return ret;
+}
+
+void KLCNhacksZBguiZBWindowZFshow(KLCNhacksZBguiZBWindow* win) {
+  ShowWindow(win->hWnd, SW_SHOW);
+}
+
+void KLCNhacksZBguiZBWindowZFupdate(KLCNhacksZBguiZBWindow* win) {
+  UpdateWindow(win->hWnd);
 }

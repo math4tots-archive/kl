@@ -7,14 +7,24 @@
   (error (add 'Unsupported platform: ' PLATFORM))
 )
 
+extern Api api
+
 extern class Api {
   // Dead simple dialog box that will show a message
   // to the user.
   // Synchronous -- blocks until user exits the message box.
+  // Mostly for debugging
   void alert(String message)
 
-  // Just a quick test
-  void mkwin()
+  // main loop
+  // Will not return
+  void main()
+
+  // Creates a new window
+  try Window window(String title, int width, int height)
 }
 
-extern Api api
+extern class Window {
+  void show()
+  void update()
+}
