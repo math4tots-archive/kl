@@ -3610,7 +3610,7 @@ def run_compiler_for_osx(env, out_file, opt, debug):
         out_file,
         opt,
         debug,
-        flags=f'{framework_flags} {warning_flags} -flto')
+        flags=f'{framework_flags} {warning_flags} -flto -fobjc-arc')
 
 
 def run_compiler_for_linux(env, out_file, opt, debug):

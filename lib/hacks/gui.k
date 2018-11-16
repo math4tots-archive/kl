@@ -4,6 +4,10 @@
   (eq PLATFORM 'win32') (begin
     (append C_SOURCES 'klc_hacks_gui_windows.c')
   )
+  (eq PLATFORM 'darwin') (begin
+    (append C_SOURCES 'klc_hacks_gui_osx.m')
+    (append APPLE_FRAMEWORKS 'Cocoa')
+  )
   (error (add 'Unsupported platform: ' PLATFORM))
 )
 
@@ -16,8 +20,7 @@ extern class Api {
   // Mostly for debugging
   void alert(String message)
 
-  // main loop
-  // Will not return
+  // main loop: this function does not return
   void main()
 
   // Creates a new window
