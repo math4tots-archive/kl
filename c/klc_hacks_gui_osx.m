@@ -1,11 +1,10 @@
 #include "klc_hacks_gui.h"
 #import "Cocoa/Cocoa.h"
 
+/* NOTE: ARC is assumed here */
+
 /* NOTE: You should always create an autoreleasepool */
 /* when making calls to any objective-C libraries. */
-
-/* Uses ARC, and needs a new enough clang version such that */
-/* we can store object pointers in struct body */
 
 struct KLCNhacksZBguiZBApi {
   KLC_header header;
