@@ -32,6 +32,7 @@ static KLCNhacksZBguiZBWindow* mkwindow(NSWindow* window) {
   @autoreleasepool {
     [getWindowRetainSet() addObject:window];
   }
+  win->window = window;
   return win;
 }
 
