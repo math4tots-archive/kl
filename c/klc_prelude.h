@@ -247,6 +247,7 @@ void KLC_release(KLC_header *obj);
 KLC_bool KLC_var_to_bool(KLC_var v);
 KLC_var KLC_int_to_var(KLC_int i);
 KLC_var KLC_object_to_var(KLC_header* obj);
+KLC_var KLC_var_call(KLC_var f, int argc, KLC_var* argv);
 void KLCNFileZFclose(KLCNFile* file);
 KLCNList* KLC_mklist(size_t cap);
 void KLCNListZFpush(KLCNList* list, KLC_var v);

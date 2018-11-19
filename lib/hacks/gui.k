@@ -50,8 +50,47 @@ class Options {
     return this
   }
 
-  Options setDrawCallback(var drawCallback) {
+  Options onDraw(var drawCallback) {
     this.drawCallback = drawCallback
     return this
   }
 }
+
+extern class GraphicsContext {
+  double GETwidth()
+  double GETheight()
+  void setFillColor(Color color)
+  void fillRect(double x, double y, double width, double height)
+  void fillBackground() {
+    this.fillRect(0.0, 0.0, this.width, this.height)
+  }
+}
+
+// TODO: Make this an extern class so that platform specific
+// color objects can be cached here.
+class Color {
+  double r
+  double g
+  double b
+  double a
+
+  new(double r, double g, double b, double a) {
+    this.r = r
+    this.g = g
+    this.b = b
+    this.a = a
+  }
+
+  String Repr() {
+    return 'Color(' + ', '.join([
+      this.r, this.g, this.b, this.a,
+    ].map(repr)) + ')'
+  }
+}
+
+Color black = Color(0.0, 0.0, 0.0, 1.0)
+Color white = Color(1.0, 1.0, 1.0, 1.0)
+Color red = Color(1.0, 0.0, 0.0, 1.0)
+Color green = Color(0.0, 1.0, 0.0, 1.0)
+Color blue = Color(0.0, 0.0, 1.0, 1.0)
+

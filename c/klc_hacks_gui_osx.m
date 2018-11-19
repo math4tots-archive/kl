@@ -2,13 +2,17 @@
 #import "Cocoa/Cocoa.h"
 
 typedef struct KLCNhacksZBguiZBOptions Options;
+typedef struct KLCNhacksZBguiZBGraphicsContext GC;
+typedef struct KLCNhacksZBguiZBColor Color;
 
 /* NOTE: ARC is assumed/required here */
 
 /* NOTE: You should always create an autoreleasepool */
 /* when making calls to any objective-C libraries. */
 
-@class KLCOBJCWindow;
+/* TODO: Once ARC support for object pointers in structs is */
+/* more widely available, remove all the '__unsafe_unretained' */
+
 @class KLCOBJCView;
 @class KLCOBJCAppDelegate;
 
@@ -17,37 +21,87 @@ struct KLCNhacksZBguiZBApi {
   Options* opts;
 };
 
-@interface KLCOBJCWindow: NSWindow
-@end
-@implementation KLCOBJCWindow: NSWindow
-@end
+struct KLCNhacksZBguiZBGraphicsContext {
+  KLC_header header;
+
+  /* This is safe to do because every onDraw cycle, we */
+  /* check that graphics contexts are always released at the end */
+  /* of the call. So they should never outlive the view that */
+  /* spawned them */
+  __unsafe_unretained KLCOBJCView* view;
+};
 
 @interface KLCOBJCView: NSView {
-  KLCOBJCAppDelegate* appDelegate;
+  __weak KLCOBJCAppDelegate* appDelegate;
 }
-@end
-@implementation KLCOBJCView: NSView
 @end
 
 @interface KLCOBJCAppDelegate: NSObject <NSApplicationDelegate> {
-  KLCOBJCWindow* window;
+  NSWindow* window;
+@public
   Options* opts;
 }
 @end
-@implementation KLCOBJCAppDelegate: NSObject
-- (id) initWithContentRect:(NSRect)windowRect options:(Options*)xopts {
+
+static GC* makeGC(KLCOBJCView* view) {
+  GC* gc = (GC*) malloc(sizeof(GC));
+  KLC_init_header((KLC_header*) gc, &KLC_typehacksZBguiZBGraphicsContext);
+  gc->view = view;
+  return gc;
+}
+
+static NSColor* convertColor(Color* color) {
+  return [NSColor
+    colorWithRed: KLCNhacksZBguiZBColorZFGETr(color)
+    green: KLCNhacksZBguiZBColorZFGETg(color)
+    blue: KLCNhacksZBguiZBColorZFGETb(color)
+    alpha: KLCNhacksZBguiZBColorZFGETa(color)];
+}
+
+@implementation KLCOBJCView: NSView
+- (id)initWithAppDelegate:(KLCOBJCAppDelegate*) appdel {
   if (self = [super init]) {
-    window = [[KLCOBJCWindow alloc]
+    appDelegate = appdel;
+  }
+  return self;
+}
+- (void)drawRect:(NSRect)dirtyRect {
+  /* NOTE: There's an implicit assumption here that bounds.origin is always (0, 0) */
+  NSRect bounds = self.bounds;
+  GC* gc = makeGC(self);
+  KLC_var drawCallback = KLCNhacksZBguiZBOptionsZFGETdrawCallback(appDelegate->opts);
+  if (KLC_truthy(drawCallback)) {
+    KLC_var gcvar = KLC_object_to_var((KLC_header*) gc);
+    KLC_release_var(KLC_var_call(drawCallback, 1, &gcvar));
+  }
+  if (gc->header.refcnt) {
+    KLC_errorf("Retaining GraphicsContext outside onDraw callback is illegal");
+  }
+  KLC_release_var(drawCallback);
+  KLC_release((KLC_header*) gc);
+}
+@end
+
+
+@implementation KLCOBJCAppDelegate: NSObject
+- (id)initWithContentRect:(NSRect)windowRect options:(Options*)xopts {
+  if (self = [super init]) {
+    window = [[NSWindow alloc]
       initWithContentRect: windowRect
-      styleMask: NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+      styleMask:
+        NSWindowStyleMaskTitled |
+        NSWindowStyleMaskClosable |
+        NSWindowStyleMaskMiniaturizable |
+        NSWindowStyleMaskResizable
       backing: NSBackingStoreBuffered
       defer: NO];
+    window.contentView = [[KLCOBJCView alloc] initWithAppDelegate: self];
     opts = xopts;
     KLC_retain((KLC_header*) opts);
   }
   return self;
 }
-- (void) dealloc {
+- (void)dealloc {
   KLC_release((KLC_header*) opts);
 }
 - (void)applicationWillFinishLaunching:(NSNotification *)notification {
@@ -58,6 +112,9 @@ struct KLCNhacksZBguiZBApi {
 @end
 
 void KLC_deletehacksZBguiZBApi(KLC_header* api, KLC_header** dq) {
+}
+
+void KLC_deletehacksZBguiZBGraphicsContext(KLC_header* api, KLC_header** dq) {
 }
 
 KLCNTry* KLCNhacksZBguiZBtryApiZEinit() {
@@ -104,4 +161,23 @@ void KLCNhacksZBguiZBApiZFstart(KLCNhacksZBguiZBApi* api, Options* opts) {
     app.delegate = appDelegate;
     [NSApp run];
   }
+}
+
+double KLCNhacksZBguiZBGraphicsContextZFGETwidth(KLCNhacksZBguiZBGraphicsContext* gc) {
+  return gc->view.bounds.size.width;
+}
+
+double KLCNhacksZBguiZBGraphicsContextZFGETheight(KLCNhacksZBguiZBGraphicsContext* gc) {
+  return gc->view.bounds.size.height;
+}
+
+void KLCNhacksZBguiZBGraphicsContextZFsetFillColor(
+    KLCNhacksZBguiZBGraphicsContext* gc, Color* color) {
+  [convertColor(color) setFill];
+}
+
+void KLCNhacksZBguiZBGraphicsContextZFfillRect(
+    KLCNhacksZBguiZBGraphicsContext* gc,
+    double x, double y, double width, double height) {
+  NSRectFill(NSMakeRect(x, y, width, height));
 }
