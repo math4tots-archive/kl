@@ -4,7 +4,11 @@
 ])
 
 // Frameworks that are required for deploying to darwin targets.
-#(global APPLE_FRAMEWORKS [])
+#(if
+  (eq PLATFORM 'darwin') (begin
+    (global APPLE_FRAMEWORKS [])
+  )
+)
 
 #(global assert (lambda (condition message)
   (if

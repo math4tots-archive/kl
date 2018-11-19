@@ -1,54 +1,74 @@
 #include "klc_hacks_gui.h"
 #import "Cocoa/Cocoa.h"
 
-/* NOTE: ARC is assumed here */
+typedef struct KLCNhacksZBguiZBOptions Options;
+
+/* NOTE: ARC is assumed/required here */
 
 /* NOTE: You should always create an autoreleasepool */
 /* when making calls to any objective-C libraries. */
 
+@class KLCOBJCWindow;
+@class KLCOBJCView;
+@class KLCOBJCAppDelegate;
+
 struct KLCNhacksZBguiZBApi {
   KLC_header header;
+  Options* opts;
 };
 
-struct KLCNhacksZBguiZBWindow {
-  KLC_header header;
-  __unsafe_unretained NSWindow* window;
-};
+@interface KLCOBJCWindow: NSWindow
+@end
+@implementation KLCOBJCWindow: NSWindow
+@end
 
-static NSMutableSet<NSWindow*>* windowRetainSet = nil;
-
-static NSMutableSet<NSWindow*>* getWindowRetainSet() {
-  if (windowRetainSet == nil) {
-    windowRetainSet = [[NSMutableSet alloc] init];
-  }
-  return windowRetainSet;
+@interface KLCOBJCView: NSView {
+  KLCOBJCAppDelegate* appDelegate;
 }
+@end
+@implementation KLCOBJCView: NSView
+@end
 
-static KLCNhacksZBguiZBWindow* mkwindow(NSWindow* window) {
-  KLCNhacksZBguiZBWindow* win =
-    (KLCNhacksZBguiZBWindow*) malloc(sizeof(KLCNhacksZBguiZBWindow));
-  KLC_init_header(&win->header, &KLC_typehacksZBguiZBWindow);
-  @autoreleasepool {
-    [getWindowRetainSet() addObject:window];
-  }
-  win->window = window;
-  return win;
+@interface KLCOBJCAppDelegate: NSObject <NSApplicationDelegate> {
+  KLCOBJCWindow* window;
+  Options* opts;
 }
-
+@end
+@implementation KLCOBJCAppDelegate: NSObject
+- (id) initWithContentRect:(NSRect)windowRect options:(Options*)xopts {
+  if (self = [super init]) {
+    window = [[KLCOBJCWindow alloc]
+      initWithContentRect: windowRect
+      styleMask: NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+      backing: NSBackingStoreBuffered
+      defer: NO];
+    opts = xopts;
+    KLC_retain((KLC_header*) opts);
+  }
+  return self;
+}
+- (void) dealloc {
+  KLC_release((KLC_header*) opts);
+}
+- (void)applicationWillFinishLaunching:(NSNotification *)notification {
+  window.title = NSProcessInfo.processInfo.processName;
+  [window cascadeTopLeftFromPoint: NSMakePoint(20,20)];
+  [window makeKeyAndOrderFront: self];
+}
+@end
 
 void KLC_deletehacksZBguiZBApi(KLC_header* api, KLC_header** dq) {
 }
 
-void KLC_deletehacksZBguiZBWindow(KLC_header *robj, KLC_header** dq) {
-  KLCNhacksZBguiZBWindow* win = (KLCNhacksZBguiZBWindow*) robj;
-  [getWindowRetainSet() removeObject:win->window];
-}
-
-KLCNhacksZBguiZBApi* KLCNhacksZBguiZBapiZEinit() {
+KLCNTry* KLCNhacksZBguiZBtryApiZEinit() {
+  KLCNTry* ret;
   KLCNhacksZBguiZBApi* api =
     (KLCNhacksZBguiZBApi*) malloc(sizeof(KLCNhacksZBguiZBApi));
   KLC_init_header(&api->header, &KLC_typehacksZBguiZBApi);
-  return api;
+  api->opts = NULL;
+  ret = KLCNTryZEnew(1, KLC_object_to_var((KLC_header*) api));
+  KLC_release((KLC_header*) api);
+  return ret;
 }
 
 void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message) {
@@ -60,50 +80,28 @@ void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message) {
   }
 }
 
-void KLCNhacksZBguiZBApiZFmain(KLCNhacksZBguiZBApi* api) {
+void KLCNhacksZBguiZBApiZFstart(KLCNhacksZBguiZBApi* api, Options* opts) {
   @autoreleasepool {
+    NSApplication* app = NSApplication.sharedApplication;
+    KLCOBJCAppDelegate* appDelegate = [[KLCOBJCAppDelegate alloc]
+      initWithContentRect: NSMakeRect(
+        KLCNhacksZBguiZBOptionsZFGETx(opts),
+        KLCNhacksZBguiZBOptionsZFGETy(opts),
+        KLCNhacksZBguiZBOptionsZFGETwidth(opts),
+        KLCNhacksZBguiZBOptionsZFGETheight(opts))
+      options: opts];
+    NSMenuItem* item;
+
+    app.ActivationPolicy = NSApplicationActivationPolicyRegular;
+    item = NSMenuItem.new;
+    NSApp.mainMenu = NSMenu.new;
+    item.submenu = NSMenu.new;
+    [app.mainMenu addItem: item];
+    [item.submenu addItem: [[NSMenuItem alloc]
+      initWithTitle: [@"Quit "
+          stringByAppendingString: NSProcessInfo.processInfo.processName]
+      action:@selector(terminate:) keyEquivalent:@"q"]];
+    app.delegate = appDelegate;
     [NSApp run];
   }
-}
-
-KLCNTry* KLCNhacksZBguiZBApiZFwindowZDtry(
-    KLCNhacksZBguiZBApi* api,
-    KLCNString* title,
-    KLC_int width,
-    KLC_int height) {
-  KLCNTry* ret;
-  KLCNhacksZBguiZBWindow* win;
-  @autoreleasepool {
-    NSRect windowRect = NSMakeRect(100, 100, width, height);
-    NSUInteger windowStyle =
-      NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable;
-    NSWindow* window = [[NSWindow alloc]
-      initWithContentRect:windowRect
-      styleMask:windowStyle
-      backing:NSBackingStoreBuffered
-      defer:NO];
-
-    NSTextView* textView = [[NSTextView alloc] initWithFrame:windowRect];
-
-    if (!window) {
-      return KLC_failm("NSWindow creation failed");
-    }
-
-    [window setContentView:textView];
-    [textView
-      insertText: @"Hello OSX/Cocoa world!"
-      replacementRange: textView.selectedRange];
-
-    win = mkwindow(window);
-    ret = KLCNTryZEnew(1, KLC_object_to_var((KLC_header*) win));
-    KLC_release((KLC_header*) win);
-  }
-  return ret;
-}
-
-void KLCNhacksZBguiZBWindowZFshow(KLCNhacksZBguiZBWindow* win) {
-  [win->window orderFrontRegardless];
-}
-
-void KLCNhacksZBguiZBWindowZFupdate(KLCNhacksZBguiZBWindow* win) {
 }

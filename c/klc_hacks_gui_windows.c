@@ -1,6 +1,11 @@
 #include "klc_hacks_gui.h"
 #include <windows.h>
 
+
+/* NOTE: IN IMPLEMENTING OS X, THE INTERFACE WAS THIS FILE
+ * was updated so that this file is now broken.
+ * TODO: FIX THIS
+ */
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "Gdi32.lib")
 

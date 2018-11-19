@@ -1,9 +1,8 @@
+// Dead simple single window desktop GUI API
+
 #(append C_HEADERS 'klc_hacks_gui.h')
 
 #(if
-  (eq PLATFORM 'win32') (begin
-    (append C_SOURCES 'klc_hacks_gui_windows.c')
-  )
   (eq PLATFORM 'darwin') (begin
     (append C_SOURCES 'klc_hacks_gui_osx.m')
     (append APPLE_FRAMEWORKS 'Cocoa')
@@ -11,7 +10,9 @@
   (error (add 'Unsupported platform: ' PLATFORM))
 )
 
-extern Api api
+extern Try tryApi
+
+Api api = tryApi.orDie().(Api)
 
 extern class Api {
   // Dead simple dialog box that will show a message
@@ -20,14 +21,37 @@ extern class Api {
   // Mostly for debugging
   void alert(String message)
 
-  // main loop: this function does not return
-  void main()
-
-  // Creates a new window
-  try Window window(String title, int width, int height)
+  // start main loop: this function does not return
+  // starts the application
+  void start(Options options)
 }
 
-extern class Window {
-  void show()
-  void update()
+class Options {
+  int x
+  int y
+  int width
+  int height
+  var drawCallback
+
+  new() {
+    this.x = this.y = 0
+    this.width = this.height = 300
+  }
+
+  Options setPos(int x, int y) {
+    this.x = x
+    this.y = y
+    return this
+  }
+
+  Options setSize(int width, int height) {
+    this.width = width
+    this.height = height
+    return this
+  }
+
+  Options setDrawCallback(var drawCallback) {
+    this.drawCallback = drawCallback
+    return this
+  }
 }

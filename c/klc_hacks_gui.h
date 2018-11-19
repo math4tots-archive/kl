@@ -4,22 +4,22 @@
 #include "klc_prelude.h"
 
 typedef struct KLCNhacksZBguiZBApi KLCNhacksZBguiZBApi;
-typedef struct KLCNhacksZBguiZBWindow KLCNhacksZBguiZBWindow;
+struct KLCNhacksZBguiZBOptions;
 
 extern KLC_typeinfo KLC_typehacksZBguiZBApi;
-extern KLC_typeinfo KLC_typehacksZBguiZBWindow;
 
 void KLC_deletehacksZBguiZBApi(KLC_header*, KLC_header**);
-void KLC_deletehacksZBguiZBWindow(KLC_header*, KLC_header**);
 
-KLCNhacksZBguiZBApi* KLCNhacksZBguiZBapiZEinit();
+KLCNTry* KLCNhacksZBguiZBtryApiZEinit();
 
 void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message);
-void KLCNhacksZBguiZBApiZFmain(KLCNhacksZBguiZBApi* api);
-KLCNTry* KLCNhacksZBguiZBApiZFwindowZDtry(
-  KLCNhacksZBguiZBApi* api, KLCNString* title, KLC_int width, KLC_int height);
+void KLCNhacksZBguiZBApiZFstart(KLCNhacksZBguiZBApi* api, struct KLCNhacksZBguiZBOptions*);
 
-void KLCNhacksZBguiZBWindowZFshow(KLCNhacksZBguiZBWindow* win);
-void KLCNhacksZBguiZBWindowZFupdate(KLCNhacksZBguiZBWindow* win);
+/* BEGIN Function declarations for extracting data from Options */
+KLC_int KLCNhacksZBguiZBOptionsZFGETx(struct KLCNhacksZBguiZBOptions* opts);
+KLC_int KLCNhacksZBguiZBOptionsZFGETy(struct KLCNhacksZBguiZBOptions* opts);
+KLC_int KLCNhacksZBguiZBOptionsZFGETwidth(struct KLCNhacksZBguiZBOptions* opts);
+KLC_int KLCNhacksZBguiZBOptionsZFGETheight(struct KLCNhacksZBguiZBOptions* opts);
+/* END */
 
 #endif/*klc_os_fs_h*/
