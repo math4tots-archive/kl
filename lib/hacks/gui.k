@@ -32,6 +32,8 @@ class Options {
   int width
   int height
   var drawCallback
+  var keyCallback
+  var modifierKeyCallback
 
   new() {
     this.x = this.y = 0
@@ -50,8 +52,18 @@ class Options {
     return this
   }
 
-  Options onDraw(var drawCallback) {
-    this.drawCallback = drawCallback
+  Options onDraw(var callback) {
+    this.drawCallback = callback
+    return this
+  }
+
+  Options onKey(var callback) {
+    this.keyCallback = callback
+    return this
+  }
+
+  Options onModifierKey(var callback) {
+    this.modifierKeyCallback = callback
     return this
   }
 }
@@ -90,6 +102,34 @@ class Size {
   }
 }
 
+List keyModifiers = [
+  'shift',
+  'control',
+  'alt',
+  'command',
+]
+
+extern class KeyEvent {
+  // Characters associated with the key event
+  String GETchars()
+  bool GetItem(String modifier)
+
+  String Repr() {
+    final liveMods = []
+    for String mod in keyModifiers {
+      if (this[mod]) {
+        liveMods.push(mod)
+      }
+    }
+    final modifiers = '|'.join(liveMods)
+    if (modifiers) {
+      return 'KeyEvent(' + repr(this.chars) + ', ' + modifiers + ')'
+    } else {
+      return 'KeyEvent(' + repr(this.chars) + ')'
+    }
+  }
+}
+
 // TODO: Make this an extern class so that platform specific
 // color objects can be cached here.
 class Color {
@@ -118,7 +158,6 @@ Color red = Color(1.0, 0.0, 0.0, 1.0)
 Color green = Color(0.0, 1.0, 0.0, 1.0)
 Color blue = Color(0.0, 0.0, 1.0, 1.0)
 
-
 extern class Font {
   String GETname()
   int GETsize()
@@ -132,7 +171,6 @@ bool fontExists(String name) {
 }
 
 try Font getFont(String name, int size)
-
 
 Font monospaceFont = (
   fontExists('Monaco') ?

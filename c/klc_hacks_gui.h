@@ -6,16 +6,19 @@
 typedef struct KLCNhacksZBguiZBApi KLCNhacksZBguiZBApi;
 typedef struct KLCNhacksZBguiZBGraphicsContext KLCNhacksZBguiZBGraphicsContext;
 typedef struct KLCNhacksZBguiZBFont KLCNhacksZBguiZBFont;
+typedef struct KLCNhacksZBguiZBKeyEvent KLCNhacksZBguiZBKeyEvent;
 struct KLCNhacksZBguiZBOptions;
 struct KLCNhacksZBguiZBColor;
 
 extern KLC_typeinfo KLC_typehacksZBguiZBApi;
 extern KLC_typeinfo KLC_typehacksZBguiZBGraphicsContext;
 extern KLC_typeinfo KLC_typehacksZBguiZBFont;
+extern KLC_typeinfo KLC_typehacksZBguiZBKeyEvent;
 
 void KLC_deletehacksZBguiZBApi(KLC_header*, KLC_header**);
 void KLC_deletehacksZBguiZBGraphicsContext(KLC_header*, KLC_header**);
 void KLC_deletehacksZBguiZBFont(KLC_header*, KLC_header**);
+void KLC_deletehacksZBguiZBKeyEvent(KLC_header*, KLC_header**);
 
 KLCNTry* KLCNhacksZBguiZBtryApiZEinit();
 
@@ -46,6 +49,9 @@ void KLCNhacksZBguiZBGraphicsContextZFfillText(
   KLCNhacksZBguiZBGraphicsContext* gc,
   double x, double y, KLCNString* text);
 
+KLCNString* KLCNhacksZBguiZBKeyEventZFGETchars(KLCNhacksZBguiZBKeyEvent* e);
+KLC_bool KLCNhacksZBguiZBKeyEventZFGetItem(KLCNhacksZBguiZBKeyEvent* e, KLCNString* mod);
+
 KLCNString* KLCNhacksZBguiZBFontZFGETname(KLCNhacksZBguiZBFont* font);
 KLC_int KLCNhacksZBguiZBFontZFGETsize(KLCNhacksZBguiZBFont* font);
 
@@ -57,6 +63,8 @@ KLC_int KLCNhacksZBguiZBOptionsZFGETy(struct KLCNhacksZBguiZBOptions* opts);
 KLC_int KLCNhacksZBguiZBOptionsZFGETwidth(struct KLCNhacksZBguiZBOptions* opts);
 KLC_int KLCNhacksZBguiZBOptionsZFGETheight(struct KLCNhacksZBguiZBOptions* opts);
 KLC_var KLCNhacksZBguiZBOptionsZFGETdrawCallback(struct KLCNhacksZBguiZBOptions* opts);
+KLC_var KLCNhacksZBguiZBOptionsZFGETkeyCallback(struct KLCNhacksZBguiZBOptions* opts);
+KLC_var KLCNhacksZBguiZBOptionsZFGETmodifierKeyCallback(struct KLCNhacksZBguiZBOptions* opts);
 /* END */
 
 /* BEGIN Function declarations for extracting data from Color */

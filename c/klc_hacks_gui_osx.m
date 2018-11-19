@@ -5,6 +5,7 @@ typedef struct KLCNhacksZBguiZBOptions Options;
 typedef struct KLCNhacksZBguiZBGraphicsContext GC;
 typedef struct KLCNhacksZBguiZBColor Color;
 typedef struct KLCNhacksZBguiZBFont Font;
+typedef struct KLCNhacksZBguiZBKeyEvent KeyEvent;
 
 /* NOTE: ARC is assumed/required here */
 
@@ -44,6 +45,12 @@ struct KLCNhacksZBguiZBFont {
   __unsafe_unretained NSFont* font;
 };
 
+struct KLCNhacksZBguiZBKeyEvent {
+  KLC_header header;
+  KLCNString* chars;
+  NSEventModifierFlags modifierFlags;
+};
+
 @interface KLCOBJCView: NSView {
   __weak KLCOBJCAppDelegate* appDelegate;
 }
@@ -67,6 +74,14 @@ static NSMutableArray<NSObject*>* getRetainSet() {
 
 static void retainForever(NSObject* obj) {
   [getRetainSet() addObject: obj];
+}
+
+static KeyEvent* makeKeyEvent(const char* utf8, NSEventModifierFlags flags) {
+  KeyEvent* e = (KeyEvent*) malloc(sizeof(KeyEvent));
+  KLC_init_header((KLC_header*) e, &KLC_typehacksZBguiZBKeyEvent);
+  e->chars = KLC_mkstr(utf8);
+  e->modifierFlags = flags;
+  return e;
 }
 
 static Font* mkfont(NSFont* font) {
@@ -118,6 +133,9 @@ static NSDictionary* getDrawTextAttributes(KLCNhacksZBguiZBGraphicsContext* gc) 
   }
   return self;
 }
+- (BOOL)acceptsFirstResponder {
+  return YES;
+}
 - (void)drawRect:(NSRect)dirtyRect {
   @autoreleasepool {
     /* NOTE: There's an implicit assumption here that bounds.origin is always (0, 0) */
@@ -133,6 +151,37 @@ static NSDictionary* getDrawTextAttributes(KLCNhacksZBguiZBGraphicsContext* gc) 
     }
     KLC_release_var(drawCallback);
     KLC_release((KLC_header*) gc);
+  }
+}
+- (void)keyDown:(NSEvent*)event {
+  @autoreleasepool {
+    KLC_var keyCallback =
+      KLCNhacksZBguiZBOptionsZFGETkeyCallback(appDelegate->opts);
+    if (KLC_truthy(keyCallback)) {
+      KeyEvent* ke = makeKeyEvent(
+        [[event characters] UTF8String], [event modifierFlags]);
+      KLC_var evar = KLC_object_to_var((KLC_header*) ke);
+      KLC_release_var(KLC_var_call(keyCallback, 1, &evar));
+      KLC_release((KLC_header*) ke);
+    } else {
+      [super keyDown: event];
+    }
+    KLC_release_var(keyCallback);
+  }
+}
+- (void)flagsChanged:(NSEvent*)event {
+  @autoreleasepool {
+    KLC_var modifierKeyCallback =
+      KLCNhacksZBguiZBOptionsZFGETmodifierKeyCallback(appDelegate->opts);
+    if (KLC_truthy(modifierKeyCallback)) {
+      KeyEvent* ke = makeKeyEvent("", [event modifierFlags]);
+      KLC_var evar = KLC_object_to_var((KLC_header*) ke);
+      KLC_release_var(KLC_var_call(modifierKeyCallback, 1, &evar));
+      KLC_release((KLC_header*) ke);
+    } else {
+      [super flagsChanged: event];
+    }
+    KLC_release_var(modifierKeyCallback);
   }
 }
 @end
@@ -179,6 +228,11 @@ void KLC_deletehacksZBguiZBFont(KLC_header* robj, KLC_header** dq) {
     KLCNhacksZBguiZBFont* font = (KLCNhacksZBguiZBFont*) robj;
     /* nsrelease(font->font); */
   }
+}
+
+void KLC_deletehacksZBguiZBKeyEvent(KLC_header* robj, KLC_header** dq) {
+  KeyEvent* e = (KeyEvent*) robj;
+  KLC_partial_release((KLC_header*) e->chars, dq);
 }
 
 KLCNTry* KLCNhacksZBguiZBtryApiZEinit() {
@@ -289,6 +343,45 @@ void KLCNhacksZBguiZBGraphicsContextZFfillText(
       drawAtPoint: NSMakePoint(x, y)
       withAttributes:getDrawTextAttributes(gc)];
   }
+}
+
+KLCNString* KLCNhacksZBguiZBKeyEventZFGETchars(KLCNhacksZBguiZBKeyEvent* e) {
+  KLC_retain((KLC_header*) e->chars);
+  return e->chars;
+}
+
+KLC_bool KLCNhacksZBguiZBKeyEventZFGetItem(
+    KLCNhacksZBguiZBKeyEvent* e, KLCNString* mod) {
+  NSEventModifierFlags flag = 0;
+  if (strcmp(mod->utf8, "shift") == 0) {
+    flag = NSEventModifierFlagShift;
+  } else if (strcmp(mod->utf8, "control") == 0) {
+    flag = NSEventModifierFlagControl;
+  } else if (strcmp(mod->utf8, "alt") == 0) {
+    flag = NSEventModifierFlagOption;
+  } else if (strcmp(mod->utf8, "command") == 0) {
+    flag = NSEventModifierFlagCommand;
+  }
+  if (flag == 0) {
+    KLC_errorf("Unrecognized modifier name");
+  }
+  return (e->modifierFlags & flag) ? 1 : 0;
+}
+
+KLC_bool KLCNhacksZBguiZBKeyEventZFGETshift(KLCNhacksZBguiZBKeyEvent* e) {
+  return (e->modifierFlags & NSEventModifierFlagShift) ? 1 : 0;
+}
+
+KLC_bool KLCNhacksZBguiZBKeyEventZFGETcontrol(KLCNhacksZBguiZBKeyEvent* e) {
+  return (e->modifierFlags & NSEventModifierFlagControl) ? 1 : 0;
+}
+
+KLC_bool KLCNhacksZBguiZBKeyEventZFGETalt(KLCNhacksZBguiZBKeyEvent* e) {
+  return (e->modifierFlags & NSEventModifierFlagOption) ? 1 : 0;
+}
+
+KLC_bool KLCNhacksZBguiZBKeyEventZFGETcommand(KLCNhacksZBguiZBKeyEvent* e) {
+  return (e->modifierFlags & NSEventModifierFlagCommand) ? 1 : 0;
 }
 
 KLCNString* KLCNhacksZBguiZBFontZFGETname(KLCNhacksZBguiZBFont* font) {
