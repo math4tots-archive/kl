@@ -2279,6 +2279,19 @@ def parser(ns):
                         source=token.source,
                         i=token.i))
                     continue
+                elif (i + 4 < len(tokens) and
+                        tokens[i + 1].type == '.' and
+                        tokens[i + 2].type == 'try' and
+                        tokens[i + 3].type == '.' and
+                        tokens[i + 4].type == 'NAME'):
+                    new_name = f'{module_name}.{tokens[i + 4].value}%try'
+                    i += 5
+                    new_tokens.append(Token(
+                        type='NAME',
+                        value=new_name,
+                        source=token.source,
+                        i=token.i))
+                    continue
                 raise Error(
                     [token],
                     'Module aliases must be followed by a dot and NAME')
