@@ -252,7 +252,7 @@ class Token(typing.NamedTuple):
 
     @property
     def lineno(self):
-        return self.source.data.count('\n', self.i) + 1
+        return self.source.data.count('\n', 0, self.i) + 1
 
     @property
     def colno(self):
