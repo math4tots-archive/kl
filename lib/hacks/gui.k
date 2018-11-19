@@ -59,7 +59,7 @@ class Options {
 extern class GraphicsContext {
   double GETwidth()
   double GETheight()
-  List fillTextSize(String text)  // [width, height] of bounding rect
+  List fillTextSizeAsList(String text)  // [width, height] of bounding rect
   void setFillColor(Color color)
   void setFont(Font font)
   void setTextForegroundColor(Color color)
@@ -69,6 +69,24 @@ extern class GraphicsContext {
 
   void fillBackground() {
     this.fillRect(0.0, 0.0, this.width, this.height)
+  }
+
+  Size fillTextSize(String text) {
+    final dim = this.fillTextSizeAsList(text)
+    return Size(dim[0].(double), dim[1].(double))
+  }
+}
+
+class Size {
+  double width
+  double height
+  new(double width, double height) {
+    this.width = width
+    this.height = height
+  }
+
+  String Repr() {
+    return 'Size(' + str(this.width) + ', ' + str(this.height) + ')'
   }
 }
 

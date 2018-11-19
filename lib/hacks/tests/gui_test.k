@@ -20,10 +20,9 @@ void main() {
       gc.setFont(GUI.monospaceFont)
       gc.fillText(gc.width / 2.0, gc.height / 2.0, 'Hello world!')
 
-      final dim = gc.fillTextSize('Hello world!')
-      final twidth = dim[0].(double)
-      final theight = dim[1].(double)
-      print('dim = ' + str(dim))
+      final size = gc.fillTextSize('Hello world!')
+      final twidth = size.width
+      final theight = size.height
 
       gc.setTextForegroundColor(GUI.green)
       gc.setTextBackgroundColor(GUI.red)

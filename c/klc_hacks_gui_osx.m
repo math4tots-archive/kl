@@ -235,7 +235,7 @@ double KLCNhacksZBguiZBGraphicsContextZFGETheight(KLCNhacksZBguiZBGraphicsContex
   return gc->view.bounds.size.height;
 }
 
-KLCNList* KLCNhacksZBguiZBGraphicsContextZFfillTextSize(
+KLCNList* KLCNhacksZBguiZBGraphicsContextZFfillTextSizeAsList(
     KLCNhacksZBguiZBGraphicsContext* gc,
     KLCNString* text) {
   NSString* nstext = [NSString stringWithUTF8String: text->utf8];

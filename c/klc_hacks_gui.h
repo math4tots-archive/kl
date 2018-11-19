@@ -24,7 +24,7 @@ void KLCNhacksZBguiZBApiZFstart(KLCNhacksZBguiZBApi* api, struct KLCNhacksZBguiZ
 
 double KLCNhacksZBguiZBGraphicsContextZFGETwidth(KLCNhacksZBguiZBGraphicsContext* gc);
 double KLCNhacksZBguiZBGraphicsContextZFGETheight(KLCNhacksZBguiZBGraphicsContext* gc);
-KLCNList* KLCNhacksZBguiZBGraphicsContextZFfillTextSize(
+KLCNList* KLCNhacksZBguiZBGraphicsContextZFfillTextSizeAsList(
   KLCNhacksZBguiZBGraphicsContext* gc,
   KLCNString* text);
 void KLCNhacksZBguiZBGraphicsContextZFsetFillColor(
