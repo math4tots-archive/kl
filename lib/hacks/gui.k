@@ -59,8 +59,14 @@ class Options {
 extern class GraphicsContext {
   double GETwidth()
   double GETheight()
+  List fillTextSize(String text)  // [width, height] of bounding rect
   void setFillColor(Color color)
+  void setFont(Font font)
+  void setTextForegroundColor(Color color)
+  void setTextBackgroundColor(Color color)
   void fillRect(double x, double y, double width, double height)
+  void fillText(double x, double y, String text)
+
   void fillBackground() {
     this.fillRect(0.0, 0.0, this.width, this.height)
   }
@@ -94,3 +100,24 @@ Color red = Color(1.0, 0.0, 0.0, 1.0)
 Color green = Color(0.0, 1.0, 0.0, 1.0)
 Color blue = Color(0.0, 0.0, 1.0, 1.0)
 
+
+extern class Font {
+  String GETname()
+  int GETsize()
+  String Repr() {
+    return 'Font(' + repr(this.name) + ', ' + str(this.size) + ')'
+  }
+}
+
+bool fontExists(String name) {
+  return bool(getFont(name, 12))
+}
+
+try Font getFont(String name, int size)
+
+
+Font monospaceFont = (
+  fontExists('Monaco') ?
+    getFont('Monaco', 12) :
+    getFont('Courier', 12)
+)
