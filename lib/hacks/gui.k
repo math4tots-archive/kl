@@ -167,7 +167,7 @@ extern class Font {
 }
 
 bool fontExists(String name) {
-  return bool(getFont(name, 12))
+  return bool(try.getFont(name, 12))
 }
 
 try Font getFont(String name, int size)
