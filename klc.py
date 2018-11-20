@@ -297,7 +297,7 @@ def lexer(ns):
       'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
       'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
-      'except',
+      'except', 'case','switch'
     }
     ns(KEYWORDS, 'KEYWORDS')
 
@@ -2406,7 +2406,8 @@ def parser(ns):
                 parse_trait_definition(ctx)
                 return
 
-            if at('class') or at('extern') and at('class', 1):
+            if at('class') or (at('extern') and at('class', 1)) or (
+                    at('case') and at('class', 1)):
                 parse_class_definition(ctx)
                 return
 
@@ -2718,6 +2719,7 @@ def parser(ns):
         def parse_class_definition(ctx):
             token = peek()
             extern = bool(consume('extern'))
+            case_ = False if extern else bool(consume('case'))
             expect('class')
             name = expect_exported_name()
             traits = parse_trait_list()
@@ -2858,13 +2860,138 @@ def parser(ns):
 
             consume_delim()
 
-            if not extern and newdef is None:
+            if not extern and not case_ and newdef is None:
                 ctx.defs.append(ir.FunctionDefinition(
                     token,
                     'void',
                     f'{name}#new',
                     [ir.Parameter(token, name, 'this')],
                     ir.Block(token, [])))
+
+            if case_:
+                if newdef is None:
+                    ctx.defs.append(ir.FunctionDefinition(
+                        token,
+                        'void',
+                        f'{name}#new',
+                        [ir.Parameter(token, name, 'this')] + [
+                            ir.Parameter(field.token, field.type, field.name)
+                            for field in fields
+                        ],
+                        ir.Block(token, [
+                            ir.ExpressionStatement(token, ir.MethodCall(
+                                token,
+                                ir.Name(token, 'this'),
+                                f'SET{field.name}',
+                                [ir.Name(token, field.name)],
+                            ))
+                            for field in fields
+                        ])
+                    ))
+                if 'Eq' not in method_to_token_table:
+                    mark_method('Eq', token)
+                    eqexpr = ir.BoolLiteral(token, True)
+                    for field in reversed(fields):
+                        eqexpr = ir.LogicalAnd(
+                            token,
+                            ir.Equals(
+                                field.token,
+                                ir.MethodCall(
+                                    field.token,
+                                    ir.Name(token, 'this'),
+                                    f'GET{field.name}',
+                                    []),
+                                ir.MethodCall(
+                                    field.token,
+                                    ir.Name(token, 'other'),
+                                    f'GET{field.name}',
+                                    []),
+                            ),
+                            eqexpr,
+                        )
+                    ctx.defs.append(ir.FunctionDefinition(
+                        token,
+                        'bool',
+                        f'{name}:Eq',
+                        [ir.Parameter(token, name, 'this'),
+                            ir.Parameter(token, name, 'other')],
+                        ir.Block(token, [
+                            ir.Return(token, eqexpr),
+                        ])
+                    ))
+                if 'Hash' not in method_to_token_table:
+                    mark_method('Hash', token)
+                    hashexpr = ir.IntLiteral(token, 1)
+                    for field in fields:
+                        hashexpr = ir.MethodCall(
+                            field.token,
+                            ir.MethodCall(
+                                field.token,
+                                ir.IntLiteral(field.token, 31),
+                                'Mul',
+                                [hashexpr],
+                            ),
+                            'Add',
+                            [
+                                ir.FunctionCall(
+                                    field.token,
+                                    'hash',
+                                    [
+                                        ir.MethodCall(
+                                            field.token,
+                                            ir.Name(token, 'this'),
+                                            f'GET{field.name}',
+                                            [],
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        )
+                    ctx.defs.append(ir.FunctionDefinition(
+                        token,
+                        'int',
+                        f'{name}:Hash',
+                        [ir.Parameter(token, name, 'this')],
+                        ir.Block(token, [
+                            ir.Return(token, hashexpr)
+                        ])
+                    ))
+                if 'Repr' not in method_to_token_table:
+                    mark_method('Repr', token)
+                    partexprs = []
+                    partexprs.append(ir.StringLiteral(token, f'{name}('))
+                    first = True
+                    for field in fields:
+                        if not first:
+                            partexprs.append(ir.StringLiteral(token, ', '))
+                        partexprs.append(ir.FunctionCall(
+                            token,
+                            'repr',
+                            [
+                                ir.MethodCall(
+                                    token,
+                                    ir.Name(token, 'this'),
+                                    f'GET{field.name}',
+                                    [],
+                                ),
+                            ],
+                        ))
+                        first = False
+                    partexprs.append(ir.StringLiteral(token, ')'))
+                    ctx.defs.append(ir.FunctionDefinition(
+                        token,
+                        'String',
+                        f'{name}:Repr',
+                        [ir.Parameter(token, name, 'this')],
+                        ir.Block(token, [
+                            ir.Return(token, ir.MethodCall(
+                                token,
+                                ir.StringLiteral(token, ''),
+                                'join',
+                                [ir.ListDisplay(token, partexprs)],
+                            ))
+                        ])
+                    ))
 
             method_names = sorted(method_to_token_table)
             ctx.defs.append(ir.ClassDefinition(
