@@ -591,6 +591,24 @@ extern class List(Iterable) {
     }
     return ret
   }
+
+  bool all(var f) {
+    for x in this {
+      if (!f(x)) {
+        return false
+      }
+    }
+    return true
+  }
+
+  bool any(var f) {
+    for x in this {
+      if (f(x)) {
+        return true
+      }
+    }
+    return false
+  }
 }
 
 List sorted(var iterable) {
@@ -667,6 +685,64 @@ Try `%Success`(var value) {
 
 Try `%Failure`(var value) {
   return Try(false, value)
+}
+
+class zip {
+  List iterables
+
+  new(List iterables) {
+    this.iterables = iterables
+  }
+
+  ZipIterator Iterator() {
+    return ZipIterator(this.iterables.map(def var(var iterable) {
+      return iterable.Iterator()
+    }))
+  }
+}
+
+class ZipIterator {
+  List iterators
+
+  new(List iterators) {
+    this.iterators = iterators
+  }
+
+  bool HasNext() {
+    return this.iterators.all(def bool(var iterator) {
+      return iterator.HasNext().(bool)
+    })
+  }
+
+  List Next() {
+    return this.iterators.map(def var(var iterator) {
+      return iterator.Next()
+    })
+  }
+}
+
+trait `%CaseClass` {
+  // TODO: Generating this function like 'Eq' might be better
+  // for better type safety
+  bool Lt(var other) {
+    if (type(this) != type(other)) {
+      panic(
+        'Unsupported "<" types: ' +
+        str(type(this)) +
+        ' < ' +
+        str(type(other)))
+    }
+    for List pair in zip([this.GetFields(), other.GetFields()]) {
+      final left = pair[0]
+      final right = pair[1]
+      if (left < right) {
+        return true
+      } else if (left > right) {
+        return false
+      }
+    }
+    return false
+  }
 }
 
 class Map {

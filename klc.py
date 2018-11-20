@@ -629,6 +629,13 @@ def ir(ns):
                     'e.g. null(String) without the period)')
 
     @ns
+    def maybe_cast(token, expression, type):
+        if type == 'var':
+            return expression
+        else:
+            return Cast(token, expression, type)
+
+    @ns
     class NullLiteral(Expression):
         fields = (
             ('type', str),
@@ -1216,11 +1223,13 @@ def Cee(ns):
     @translate.on(ir.Cast)
     def translate(self, ctx):
         etype, etempvar = translate(self.expression, ctx)
+        if etype == self.type:
+            return etype, etempvar
         if etype != 'var':
             raise Error(
                 [self.token],
                 f'Only var types can be cast '
-                f'into other types but got {etype}')
+                f'into other types but got {etype} -> {self.type}')
         tempvar = ctx.mktemp(self.type)
         with with_frame(ctx, self.token):
             ctx.src += f'{tempvar} = {ctx.unvarify(self.type, etempvar)};'
@@ -2723,6 +2732,8 @@ def parser(ns):
             expect('class')
             name = expect_exported_name()
             traits = parse_trait_list()
+            if case_ and '%CaseClass' not in traits:
+                traits = ['%CaseClass'] + traits
             method_to_token_table = dict()
             member_to_token_table = dict()
 
@@ -2888,6 +2899,25 @@ def parser(ns):
                             for field in fields
                         ])
                     ))
+                if 'GetFields' not in method_to_token_table:
+                    mark_method('GetFields', token)
+                    ctx.defs.append(ir.FunctionDefinition(
+                        token,
+                        'List',
+                        f'{name}:GetFields',
+                        [ir.Parameter(token, name, 'this')],
+                        ir.Block(token, [
+                            ir.Return(token, ir.ListDisplay(token, [
+                                ir.MethodCall(
+                                    token,
+                                    ir.Name(token, 'this'),
+                                    f'GET{field.name}',
+                                    []
+                                )
+                                for field in fields
+                            ]))
+                        ])
+                    ))
                 if 'Eq' not in method_to_token_table:
                     mark_method('Eq', token)
                     eqexpr = ir.BoolLiteral(token, True)
@@ -2919,8 +2949,8 @@ def parser(ns):
                             ir.Return(token, eqexpr),
                         ])
                     ))
-                if 'Hash' not in method_to_token_table:
-                    mark_method('Hash', token)
+                if 'HashCode' not in method_to_token_table:
+                    mark_method('HashCode', token)
                     hashexpr = ir.IntLiteral(token, 1)
                     for field in fields:
                         hashexpr = ir.MethodCall(
@@ -2950,7 +2980,7 @@ def parser(ns):
                     ctx.defs.append(ir.FunctionDefinition(
                         token,
                         'int',
-                        f'{name}:Hash',
+                        f'{name}:HashCode',
                         [ir.Parameter(token, name, 'this')],
                         ir.Block(token, [
                             ir.Return(token, hashexpr)
@@ -3114,7 +3144,7 @@ def parser(ns):
                                     True,
                                     None,
                                     loopvar,
-                                    ir.Cast(
+                                    ir.maybe_cast(
                                         token,
                                         ir.MethodCall(
                                             token,
