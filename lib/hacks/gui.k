@@ -24,6 +24,39 @@ extern class Api {
   // start main loop: this function does not return
   // starts the application
   void start(Options options)
+
+  // These three methods should be used together properly
+  // Prefer using the 'graphics()' method rather than
+  // calling these methods directly
+  GraphicsContext _getGc()
+  void _beginDraw()
+  void _endDraw()
+
+  _WithGraphicsContext graphics() {
+    return _WithGraphicsContext(this)
+  }
+}
+
+class _WithGraphicsContext {
+  Api api
+  GraphicsContext gc
+
+  new(Api a) {
+    this.api = a
+  }
+
+  GraphicsContext Enter() {
+    this.api._beginDraw()
+    this.gc = this.api._getGc()
+    return this.gc
+  }
+
+  void Exit() {
+    this.api._endDraw()
+    // TODO: Use WeakReference.refcnt to
+    // verify that this.gc does not escape this scope
+    // panic if gc is found to have escaped
+  }
 }
 
 class Options {
@@ -31,7 +64,7 @@ class Options {
   int y
   int width
   int height
-  var drawCallback
+  var startCallback
   var keyCallback
   var modifierKeyCallback
 
@@ -52,8 +85,8 @@ class Options {
     return this
   }
 
-  Options onDraw(var callback) {
-    this.drawCallback = callback
+  Options onStart(var callback) {
+    this.startCallback = callback
     return this
   }
 
@@ -89,17 +122,19 @@ extern class GraphicsContext {
   }
 }
 
-class Size {
+case class Rect {
+  Point point
+  Size size
+}
+
+case class Point {
+  double x
+  double y
+}
+
+case class Size {
   double width
   double height
-  new(double width, double height) {
-    this.width = width
-    this.height = height
-  }
-
-  String Repr() {
-    return 'Size(' + str(this.width) + ', ' + str(this.height) + ')'
-  }
 }
 
 List keyModifiers = [

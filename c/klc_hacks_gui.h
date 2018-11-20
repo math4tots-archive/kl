@@ -24,6 +24,9 @@ KLCNTry* KLCNhacksZBguiZBtryApiZEinit();
 
 void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message);
 void KLCNhacksZBguiZBApiZFstart(KLCNhacksZBguiZBApi* api, struct KLCNhacksZBguiZBOptions*);
+KLCNhacksZBguiZBGraphicsContext* KLCNhacksZBguiZBApiZFZAgetGc(KLCNhacksZBguiZBApi* api);
+void KLCNhacksZBguiZBApiZFZAbeginDraw(KLCNhacksZBguiZBApi* api);
+void KLCNhacksZBguiZBApiZFZAendDraw(KLCNhacksZBguiZBApi* api);
 
 double KLCNhacksZBguiZBGraphicsContextZFGETwidth(KLCNhacksZBguiZBGraphicsContext* gc);
 double KLCNhacksZBguiZBGraphicsContextZFGETheight(KLCNhacksZBguiZBGraphicsContext* gc);
@@ -62,7 +65,7 @@ KLC_int KLCNhacksZBguiZBOptionsZFGETx(struct KLCNhacksZBguiZBOptions* opts);
 KLC_int KLCNhacksZBguiZBOptionsZFGETy(struct KLCNhacksZBguiZBOptions* opts);
 KLC_int KLCNhacksZBguiZBOptionsZFGETwidth(struct KLCNhacksZBguiZBOptions* opts);
 KLC_int KLCNhacksZBguiZBOptionsZFGETheight(struct KLCNhacksZBguiZBOptions* opts);
-KLC_var KLCNhacksZBguiZBOptionsZFGETdrawCallback(struct KLCNhacksZBguiZBOptions* opts);
+KLC_var KLCNhacksZBguiZBOptionsZFGETstartCallback(struct KLCNhacksZBguiZBOptions* opts);
 KLC_var KLCNhacksZBguiZBOptionsZFGETkeyCallback(struct KLCNhacksZBguiZBOptions* opts);
 KLC_var KLCNhacksZBguiZBOptionsZFGETmodifierKeyCallback(struct KLCNhacksZBguiZBOptions* opts);
 /* END */
