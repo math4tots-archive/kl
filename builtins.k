@@ -1,5 +1,8 @@
-#(global C_HEADERS [])
+#(global C_HEADERS [
+  'klc_prelude.h'
+])
 #(global C_SOURCES [
+  'klc_prelude.c'
   'generated_main.c'    // This is where the main program is
 ])
 

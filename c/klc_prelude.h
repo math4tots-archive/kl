@@ -1,8 +1,10 @@
 #ifndef klc_prelude_h
 #define klc_prelude_h
-#include <stdlib.h>
-#include <stdio.h>
 #include "klc_plat.h"
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* TODO: Figure out what to do if <stdint.h> isn't available
  * This is particularly necessary for:
@@ -19,6 +21,19 @@
 #include <inttypes.h>
 #else
 #include <stdint.h>
+#endif
+
+#if KLC_POSIX
+#include <errno.h>
+#endif
+
+/* For now we assume that
+ * we always want command line programs.
+ * But in the future we can enable
+ * KLC_WIN_APP to create windows GUI programs
+ */
+#if KLC_OS_WINDOWS
+#define KLC_WIN_APP 0
 #endif
 
 #include <limits.h>
@@ -239,16 +254,29 @@ void KLC_partial_release_var(KLC_var v, KLC_header** delete_queue);
 void KLC_release(KLC_header *obj);
 void KLC_release_var(KLC_var v);
 void KLC_init_header(KLC_header* header, KLC_type type);
+void KLC_push_frame(const char* filename, const char* function, long ln);
+void KLC_pop_frame();
+void KLC_release_object_on_exit(KLC_header* obj);
+void KLC_release_var_on_exit(KLC_var v);
+void KLCNassert(KLC_var cond);
 KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii);
 KLCNString* KLC_mkstr(const char *str);
 KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
 KLC_bool KLC_truthy(KLC_var v);
-void KLC_release(KLC_header *obj);
 KLC_bool KLC_var_to_bool(KLC_var v);
+KLC_int KLC_var_to_int(KLC_var v);
+double KLC_var_to_double(KLC_var v);
+KLC_function KLC_var_to_function(KLC_var v);
+KLC_type KLC_var_to_type(KLC_var v);
+KLC_header* KLC_var_to_object(KLC_var v, KLC_type ti);
+KLC_var KLC_bool_to_var(KLC_bool b);
 KLC_var KLC_int_to_var(KLC_int i);
 KLC_var KLC_double_to_var(double d);
+KLC_var KLC_function_to_var(KLC_function f);
+KLC_var KLC_type_to_var(KLC_type t);
 KLC_var KLC_object_to_var(KLC_header* obj);
 KLC_var KLC_var_call(KLC_var f, int argc, KLC_var* argv);
+KLC_var KLC_untypedKLCNClosureZFCall(int argc, const KLC_var* argv);
 void KLCNFileZFclose(KLCNFile* file);
 KLCNList* KLC_mklist(size_t cap);
 void KLCNListZFpush(KLCNList* list, KLC_var v);

@@ -159,9 +159,6 @@ _primitive_method_names = {
 def nullable(type_):
     return type_ not in ('void', 'bool', 'int', 'double')
 
-with open(os.path.join(_scriptdir, 'c', 'klc_prelude.c')) as f:
-    CPRELUDE = f.read()
-
 with open(os.path.join(_scriptdir, 'builtins.k')) as f:
     BUILTINS = f.read()
 
@@ -1084,7 +1081,6 @@ def Cee(ns):
                 self.scope.add(d)
             self.out = FractalStringBuilder(0)
             self.inc = self.out.spawn()
-            self.out(CPRELUDE)
             self.fwd = self.out.spawn()
             self.hdr = self.out.spawn()
             self.src = self.out.spawn()
