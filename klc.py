@@ -3163,26 +3163,46 @@ def parser(ns):
                 else:
                     name = mktempvar()
                 body = parse_block(ctx)
+                exitvar = mktempvar()
+                # We nest two blocks so that by the time that 'Exit'
+                # is called, the references to the other temp vars
+                # are gone. This allows us to use context manager
+                # to check that the reference they give out doesn't
+                # escape the given scope.
                 return ir.Block(token, [
                     ir.VariableDefinition(
                         token,
-                        True,
+                        False,
+                        '%With',
+                        exitvar,
                         None,
-                        exprtempvar,
-                        expr),
-                    ir.VariableDefinition(
-                        token,
-                        True,
-                        None,
-                        name,
-                        ir.MethodCall(token, ir.Name(token, exprtempvar), 'Enter', [])),
-                    ir.VariableDefinition(
-                        token,
-                        True,
-                        None,
-                        mktempvar(),
-                        ir.FunctionCall(token, '%With', [ir.Name(token, exprtempvar)])),
-                    body,
+                    ),
+                    ir.Block(token, [
+                        ir.VariableDefinition(
+                            token,
+                            True,
+                            None,
+                            exprtempvar,
+                            expr),
+                        ir.VariableDefinition(
+                            token,
+                            True,
+                            None,
+                            name,
+                            ir.MethodCall(
+                                token,
+                                ir.Name(token, exprtempvar),
+                                'Enter',
+                                [])),
+                        ir.ExpressionStatement(token, ir.SetName(token,
+                            exitvar,
+                            ir.FunctionCall(
+                                token,
+                                '%With',
+                                [ir.Name(token, exprtempvar)]),
+                        )),
+                        body,
+                    ])
                 ])
 
             if consume('if'):
