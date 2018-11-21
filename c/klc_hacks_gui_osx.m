@@ -240,23 +240,15 @@ static NSDictionary* getDrawTextAttributes(KLCNhacksZBguiZBGraphicsContext* gc) 
     layer = [[NSImage alloc] initWithSize:windowRect.size];
     opts = xopts;
     KLC_retain((KLC_header*) opts);
-    [self prepareLayerAndRunStartCallback];
   }
   return self;
 }
 - (void)prepareLayerAndRunStartCallback {
-  [layer lockFocus];
-  {
-    GC* gx = makeGC(layer);
-    KLC_var startCallback = KLCNhacksZBguiZBOptionsZFGETstartCallback(opts);
-    if (KLC_truthy(startCallback)) {
-      KLC_var gcvar = KLC_object_to_var((KLC_header*) gx);
-      KLC_release_var(KLC_var_call(startCallback, 1, &gcvar));
-    }
-    KLC_release_var(startCallback);
-    KLC_release((KLC_header*) gx);
+  KLC_var startCallback = KLCNhacksZBguiZBOptionsZFGETstartCallback(opts);
+  if (KLC_truthy(startCallback)) {
+    KLC_release_var(KLC_var_call(startCallback, 0, NULL));
   }
-  [layer unlockFocus];
+  KLC_release_var(startCallback);
 }
 - (void)dealloc {
   KLC_release((KLC_header*) opts);
@@ -303,15 +295,6 @@ KLCNTry* KLCNhacksZBguiZBtryApiZEinit() {
   return ret;
 }
 
-void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message) {
-  @autoreleasepool {
-    NSAlert *alert = [[NSAlert alloc] init];
-    [alert setMessageText:
-      [NSString stringWithUTF8String:message->utf8]];
-    [alert runModal];
-  }
-}
-
 void KLCNhacksZBguiZBApiZFstart(KLCNhacksZBguiZBApi* api, Options* opts) {
   @autoreleasepool {
     NSApplication* app = NSApplication.sharedApplication;
@@ -336,6 +319,8 @@ void KLCNhacksZBguiZBApiZFstart(KLCNhacksZBguiZBApi* api, Options* opts) {
     app.delegate = appDelegate;
     api->appDelegate = appDelegate;
     nsretain(api->appDelegate);
+
+    [appDelegate prepareLayerAndRunStartCallback];
     [NSApp run];
   }
 }

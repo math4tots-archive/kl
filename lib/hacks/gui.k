@@ -1,4 +1,12 @@
 // Dead simple single window desktop GUI API
+// There are some limitations for the sake of simplicity:
+//   1. No explicit multi-threading.
+//      There may be multi-threading, but you can't
+//      control it.
+//   2. Only one window.
+//      This is an API design issue.
+//      And I'm not sure how annoying this would be to
+//      implement on all platforms yet.
 
 #(append C_HEADERS 'klc_hacks_gui.h')
 
@@ -10,17 +18,19 @@
   (error (add 'Unsupported platform: ' PLATFORM))
 )
 
+_WithGraphicsContext graphics() {
+  return api.graphics()
+}
+
+void start(Options opts) {
+  api.start(opts)
+}
+
 extern Try tryApi
 
 Api api = tryApi.orDie().(Api)
 
 extern class Api {
-  // Dead simple dialog box that will show a message
-  // to the user.
-  // Synchronous -- blocks until user exits the message box.
-  // Mostly for debugging
-  void alert(String message)
-
   // start main loop: this function does not return
   // starts the application
   void start(Options options)
@@ -210,6 +220,8 @@ bool fontExists(String name) {
 try Font getFont(String name, int size)
 
 Font monospaceFont = (
+  fontExists('Courier New') ?
+    getFont('Courier New', 12) :
   fontExists('Monaco') ?
     getFont('Monaco', 12) :
     getFont('Courier', 12)

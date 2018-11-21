@@ -22,7 +22,6 @@ void KLC_deletehacksZBguiZBKeyEvent(KLC_header*, KLC_header**);
 
 KLCNTry* KLCNhacksZBguiZBtryApiZEinit();
 
-void KLCNhacksZBguiZBApiZFalert(KLCNhacksZBguiZBApi* api, KLCNString* message);
 void KLCNhacksZBguiZBApiZFstart(KLCNhacksZBguiZBApi* api, struct KLCNhacksZBguiZBOptions*);
 KLCNhacksZBguiZBGraphicsContext* KLCNhacksZBguiZBApiZFZAgetGc(KLCNhacksZBguiZBApi* api);
 void KLCNhacksZBguiZBApiZFZAbeginDraw(KLCNhacksZBguiZBApi* api);
