@@ -895,14 +895,43 @@ def ir(ns):
     @ns
     class FunctionDefinition(GlobalDefinition):
         fields = (
+            ('storage', str),
             ('return_type', str),
             ('name', str),
             ('params', List[Parameter]),
             ('body', Optional[Block]),
         )
 
+        storage_types = (
+            'normal',
+            # This is the default.
+            # All metadata about the function is generated,
+            # i.e.
+            #   * The function itself,
+            #   * The untyped version of the function,
+            #   * functioninfo
+
+            'inline',
+            # This means only the C function itself is emitted.
+            # No metadata associated with the function
+            # is generated.
+
+            'static',
+            # Like 'inline', but additionally the emitted
+            # C function is declared' static'.
+            # I would've called this 'private', but currently
+            # all generated sources are lumped together into
+            # a single translation unit, and I don't want to
+            # do the extra work right now to enforce it here
+            # so I just called it static.
+        )
+
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
+            if self.storage not in ('normal', 'inline', 'static'):
+                raise Error(
+                    f'FunctionDefinition storage must be "normal" or '
+                    f'"inline" but got {repr(self.storage)}')
             for m in ('Eq', 'Lt'):
                 if self.name.endswith(f':{m}'):
                     if self.return_type != 'bool':
@@ -915,8 +944,23 @@ def ir(ns):
                                 "'void main()'")
 
         @property
+        def inline(self):
+            # In the future, we may support 'private'
+            # which would also be considered 'inline'
+            return self.storage in ('inline', 'static')
+
+        @property
+        def static(self):
+            return self.storage == 'static'
+
+        @property
         def extern(self):
             return self.body is None
+
+    @ns
+    def normalFuncDef(token, return_type, name, params, body):
+        return FunctionDefinition(
+            token, 'normal', return_type, name, params, body)
 
     @ns
     class TypeDefinition(GlobalDefinition):
@@ -1193,6 +1237,10 @@ def Cee(ns):
             ctx.src += f'{tempvar} = &KLC_type{encode0(defn.name)};'
             return 'type', tempvar
         elif isinstance(defn, ir.FunctionDefinition):
+            if defn.inline:
+                raise Error(
+                    [defn.token, self.token],
+                    f'Inline functions may not be used like variables')
             tempvar = ctx.mktemp('function')
             ctx.src += f'{tempvar} = &KLC_functioninfo{encode(defn.name)};'
             return 'function', tempvar
@@ -1699,7 +1747,8 @@ def Cee(ns):
             if not isinstance(rtnode, ir.TypeDefinition):
                 raise Error([vardef.token], f'{vardef.type} is not a type')
 
-        _translate_untyped(self, ctx)
+        if not self.inline:
+            _translate_untyped(self, ctx)
 
         ctx.hdr += _cproto(self, ctx) + ';'
         if self.body:
@@ -1781,10 +1830,11 @@ def Cee(ns):
 
     @_cproto.on(ir.FunctionDefinition)
     def _cproto(self, ctx):
+        static_prefix = 'static ' if self.static else ''
         crt = ctx.cdecltype(self.return_type)
         cname = ctx.cname(self.name)
         cparams = ', '.join(_cproto(p, ctx) for p in self.params)
-        return f'{crt} {cname}({cparams})'
+        return f'{static_prefix}{crt} {cname}({cparams})'
 
     def _cname(self: ir.BaseVariableDefinition, ctx):
         return ctx.cname(self.name)
@@ -2647,7 +2697,7 @@ def parser(ns):
             ctx.defs.append(ir.GlobalVariableDefinition(token, extern, vtype, vname))
             ifname = f'{vname}#init'
             if extern:
-                initf = ir.FunctionDefinition(
+                initf = ir.normalFuncDef(
                     token,
                     vtype,
                     ifname,
@@ -2656,14 +2706,14 @@ def parser(ns):
             else:
                 if consume('='):
                     expr = parse_expression(ctx)
-                    initf = ir.FunctionDefinition(
+                    initf = ir.normalFuncDef(
                         token,
                         vtype,
                         ifname,
                         [],
                         ir.Block(token, [ir.Return(token, expr)]))
                 else:
-                    initf = ir.FunctionDefinition(
+                    initf = ir.normalFuncDef(
                         token,
                         vtype,
                         ifname,
@@ -2688,7 +2738,7 @@ def parser(ns):
                 expect_delim()
             if try_:
                 tryname = f'{name}%try'
-                ctx.defs.append(ir.FunctionDefinition(
+                ctx.defs.append(ir.normalFuncDef(
                     token, return_type, name, params,
                     ir.Block(token, [
                         ir.Return(token,
@@ -2704,10 +2754,10 @@ def parser(ns):
                             ),
                         ),
                     ])))
-                ctx.defs.append(ir.FunctionDefinition(
+                ctx.defs.append(ir.normalFuncDef(
                     token, 'Try', tryname, params, body))
             else:
-                ctx.defs.append(ir.FunctionDefinition(
+                ctx.defs.append(ir.normalFuncDef(
                     token, return_type, name, params, body))
 
         def expect_non_exported_name():
@@ -2784,7 +2834,7 @@ def parser(ns):
                         ibody = parse_block(ctx)
                         iparams = [ir.Parameter(mtoken, name, 'this')] + declparams
                         ctx.defs.append(ir.FunctionDefinition(
-                            mtoken, 'void', ifname, iparams, ibody))
+                            mtoken, 'static', 'void', ifname, iparams, ibody))
                         rt = name
                         body = ir.Block(mtoken, [
                             ir.VariableDefinition(
@@ -2806,7 +2856,7 @@ def parser(ns):
                             ),
                             ir.Return(mtoken, ir.Name(mtoken, 'this')),
                         ])
-                    newdef = ir.FunctionDefinition(
+                    newdef = ir.normalFuncDef(
                         mtoken,
                         rt,
                         fname,
@@ -2830,13 +2880,13 @@ def parser(ns):
                     # during the class translation
                     getter_name = f'{name}:GET{fname}'
                     setter_name = f'{name}:SET{fname}'
-                    ctx.defs.append(ir.FunctionDefinition(
+                    ctx.defs.append(ir.normalFuncDef(
                         ftoken,
                         ftype,
                         getter_name,
                         [ir.Parameter(ftoken, name, 'this')],
                         None))
-                    ctx.defs.append(ir.FunctionDefinition(
+                    ctx.defs.append(ir.normalFuncDef(
                         ftoken,
                         ftype,
                         setter_name,
@@ -2872,7 +2922,7 @@ def parser(ns):
                         tryfname = f'{fname}%try'
                         assert tryfname == f'{name}:{trymname}'
                         mark_method(trymname, token)
-                        ctx.defs.append(ir.FunctionDefinition(
+                        ctx.defs.append(ir.normalFuncDef(
                             token, rtype, fname, params,
                             ir.Block(token, [
                                 ir.Return(token,
@@ -2888,17 +2938,17 @@ def parser(ns):
                                     ),
                                 ),
                             ])))
-                        ctx.defs.append(ir.FunctionDefinition(
+                        ctx.defs.append(ir.normalFuncDef(
                             token, 'Try', tryfname, params, body))
                     else:
-                        ctx.defs.append(ir.FunctionDefinition(
+                        ctx.defs.append(ir.normalFuncDef(
                             mtoken, rtype, fname, params, body))
                 consume_delim()
 
             consume_delim()
 
             if not extern and not case_ and newdef is None:
-                ctx.defs.append(ir.FunctionDefinition(
+                ctx.defs.append(ir.normalFuncDef(
                     token,
                     name,
                     f'{name}#new',
@@ -2909,7 +2959,7 @@ def parser(ns):
 
             if case_:
                 if newdef is None:
-                    ctx.defs.append(ir.FunctionDefinition(
+                    ctx.defs.append(ir.normalFuncDef(
                         token,
                         name,
                         f'{name}#new',
@@ -2938,7 +2988,7 @@ def parser(ns):
                     ))
                 if 'GetFields' not in method_to_token_table:
                     mark_method('GetFields', token)
-                    ctx.defs.append(ir.FunctionDefinition(
+                    ctx.defs.append(ir.normalFuncDef(
                         token,
                         'List',
                         f'{name}:GetFields',
@@ -2976,7 +3026,7 @@ def parser(ns):
                             ),
                             eqexpr,
                         )
-                    ctx.defs.append(ir.FunctionDefinition(
+                    ctx.defs.append(ir.normalFuncDef(
                         token,
                         'bool',
                         f'{name}:Eq',
@@ -3014,7 +3064,7 @@ def parser(ns):
                                 ),
                             ],
                         )
-                    ctx.defs.append(ir.FunctionDefinition(
+                    ctx.defs.append(ir.normalFuncDef(
                         token,
                         'int',
                         f'{name}:HashCode',
@@ -3045,7 +3095,7 @@ def parser(ns):
                         ))
                         first = False
                     partexprs.append(ir.StringLiteral(token, ')'))
-                    ctx.defs.append(ir.FunctionDefinition(
+                    ctx.defs.append(ir.normalFuncDef(
                         token,
                         'String',
                         f'{name}:Repr',
@@ -3090,7 +3140,7 @@ def parser(ns):
 
                 method_to_token_table[mname] = mtoken
 
-                ctx.defs.append(ir.FunctionDefinition(mtoken, rtype, fname, params, body))
+                ctx.defs.append(ir.normalFuncDef(mtoken, rtype, fname, params, body))
                 consume_delim()
             consume_delim()
 
@@ -3548,7 +3598,7 @@ def parser(ns):
                             break
                 params = parse_params()
                 body = parse_block(ctx)
-                ctx.defs.append(ir.FunctionDefinition(
+                ctx.defs.append(ir.normalFuncDef(
                     token,
                     return_type,
                     lambda_name,
