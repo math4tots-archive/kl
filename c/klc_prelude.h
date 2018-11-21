@@ -259,6 +259,7 @@ void KLC_pop_frame();
 void KLC_release_object_on_exit(KLC_header* obj);
 void KLC_release_var_on_exit(KLC_var v);
 void KLCNassert(KLC_var cond);
+KLC_bool KLC_is_null(KLC_var v);
 KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii);
 KLCNString* KLC_mkstr(const char *str);
 KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);

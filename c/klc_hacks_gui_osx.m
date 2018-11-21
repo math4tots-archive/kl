@@ -196,7 +196,19 @@ static NSDictionary* getDrawTextAttributes(KLCNhacksZBguiZBGraphicsContext* gc) 
       KeyEvent* ke = makeKeyEvent(
         [[event characters] UTF8String], [event modifierFlags]);
       KLC_var evar = KLC_object_to_var((KLC_header*) ke);
-      KLC_release_var(KLC_var_call(keyCallback, 1, &evar));
+      KLC_var hvar = KLC_var_call(keyCallback, 1, &evar);
+      if (KLC_is_null(hvar)) {
+        KLC_errorf(
+          "onKey callback must return bool to indicate whether event "
+          "was handled, but the callback returned null.");
+      }
+      if (!KLC_truthy(hvar)) {
+        /* If falsey value is returned, it indicates that the callback
+        didn't knwo what to do with this. In this case, we want to
+        propagate the event up the chain. */
+        [super keyDown: event];
+      }
+      KLC_release_var(hvar);
       KLC_release((KLC_header*) ke);
       [self setNeedsDisplayInRect:self.bounds];
     } else {

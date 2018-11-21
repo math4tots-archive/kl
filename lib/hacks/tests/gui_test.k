@@ -40,7 +40,7 @@ void main() {
     .setPos(gui.Point(0.0, 0.0))
     .setSize(gui.Size(400.0, 400.0))
     .setResizable(false)
-    .onKey(def void[](gui.KeyEvent e) {
+    .onKey(def bool[](gui.KeyEvent e) {
       bool changed = false
       if (e.chars == 'a' and state.c > 0) {
         state.c = state.c - 1
@@ -58,6 +58,7 @@ void main() {
       if (changed) {
         redraw()
       }
+      return changed
     })
     .onStart(def void[]() {
       print(gui.monospaceFont)

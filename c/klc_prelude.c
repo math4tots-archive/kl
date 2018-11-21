@@ -1435,6 +1435,10 @@ void KLCNassert(KLC_var cond) {
   }
 }
 
+KLC_bool KLC_is_null(KLC_var v) {
+  return v.tag == KLC_TAG_OBJECT && v.u.obj == NULL;
+}
+
 KLC_int KLCNerrno() {
   #if KLC_POSIX
     return errno;
