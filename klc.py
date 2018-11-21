@@ -1667,7 +1667,7 @@ def Cee(ns):
         ifn = encode(self.name + '#init')
         ctype = ctx.cdecltype(self.type)
         ctx.hdr += f'{ctype} KLC_get_global{n}();'
-        ctx.src += f'int KLC_initialized_global{n} = 0;'
+        ctx.src += f'static int KLC_initialized_global{n} = 0;'
         ctx.src += f'{ctype} KLC_global{n} = {ctx.czero(self.type)};'
 
         ctx.src += f'{ctype} KLC_get_global{n}() ' '{'
