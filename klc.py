@@ -762,6 +762,16 @@ def ir(ns):
         )
 
     @ns
+    class Malloc(Expression):
+        # This type is not directly available
+        # someone working with the language, but
+        # this expression type is useful for implementing
+        # 'new' for user defined types.
+        fields = (
+            ('type', str),
+        )
+
+    @ns
     class MethodCall(Expression):
         fields = (
             ('owner', Expression),
@@ -1417,31 +1427,23 @@ def Cee(ns):
             for arg in self.args:
                 argtype, argtempvar = translate(arg, ctx)
                 argtriples.append((arg.token, argtype, argtempvar))
-            malloc_name = f'KLC_malloc{encode0(defn.name)}'
             fname = f'{defn.name}#new'
             fdefn = ctx.scope.get(fname, [self.token])
             if not isinstance(fdefn, ir.FunctionDefinition):
                 raise Error([self.token], f'FUBAR: shadowed function name')
 
-            if defn.extern:
-                # For extern types, constructing the type is
-                # identical to a single function call
-                return _translate_fcall(ctx, self.token, fdefn, argtriples)
-            else:
-                # For normal types, we want to malloc first, and then
-                # call the initializer
-                # TODO: Simplify normal types so that these are also
-                # just a single function call like extern types.
-                this_tempvar = ctx.mktemp(defn.name)
-                ctx.src += f'{this_tempvar} = {malloc_name}();'
-                argtriples = [
-                    (self.token, defn.name, this_tempvar)
-                ] + argtriples
-                _translate_fcall(ctx, self.token, fdefn, argtriples)
-                return defn.name, this_tempvar
+            return _translate_fcall(ctx, self.token, fdefn, argtriples)
 
         raise Error([self.token, defn.token],
                     f'{self.function} is not a function')
+
+    @translate.on(ir.Malloc)
+    def translate(self, ctx):
+        rtype = self.type
+        malloc_name = f'KLC_malloc{encode0(rtype)}'
+        this_tempvar = ctx.mktemp(rtype)
+        ctx.src += f'{this_tempvar} = {malloc_name}();'
+        return rtype, this_tempvar
 
     @translate.on(ir.MethodCall)
     def translate(self, ctx):
@@ -1567,7 +1569,8 @@ def Cee(ns):
         expected_rtype = fctx.fdef.return_type
         if expected_rtype != rtype:
             raise Error([fctx.fdef.token, self.token],
-                        f'Function was declared to return {expected_rtype} '
+                        f'Function {fctx.fdef.name} was declared to return '
+                        f'{expected_rtype} '
                         f'but tried to return {rtype} instead')
         if rtype == 'void':
             _release_for_return(ctx, ectx.src)
@@ -2772,16 +2775,43 @@ def parser(ns):
                             rt = name
                         body = None
                         expect_delim()
-                        params = declparams
                     else:
                         # For normal types, the 'new' function initializes
                         # an already allocated object.
                         # TODO: Make 'new' return the actual object
                         # like extern types.
-                        rt = 'void'
-                        body = parse_block(ctx)
-                        params = [ir.Parameter(mtoken, name, 'this')] + declparams
-                    newdef = ir.FunctionDefinition(mtoken, rt, fname, params, body)
+                        ifname = f'{name}#new_init'
+                        ibody = parse_block(ctx)
+                        iparams = [ir.Parameter(mtoken, name, 'this')] + declparams
+                        ctx.defs.append(ir.FunctionDefinition(
+                            mtoken, 'void', ifname, iparams, ibody))
+                        rt = name
+                        body = ir.Block(mtoken, [
+                            ir.VariableDefinition(
+                                mtoken,
+                                True,
+                                None,
+                                'this',
+                                ir.Malloc(mtoken, name)),
+                            ir.ExpressionStatement(
+                                mtoken,
+                                ir.FunctionCall(
+                                    mtoken,
+                                    ifname,
+                                    [ir.Name(mtoken, 'this')] + [
+                                        ir.Name(p.token, p.name)
+                                        for p in declparams
+                                    ],
+                                ),
+                            ),
+                            ir.Return(mtoken, ir.Name(mtoken, 'this')),
+                        ])
+                    newdef = ir.FunctionDefinition(
+                        mtoken,
+                        rt,
+                        fname,
+                        declparams,
+                        body)
                     ctx.defs.append(newdef)
                 elif at('NAME') and at('NAME', 1) and at_delim(2):
                     if extern:
@@ -2870,22 +2900,31 @@ def parser(ns):
             if not extern and not case_ and newdef is None:
                 ctx.defs.append(ir.FunctionDefinition(
                     token,
-                    'void',
+                    name,
                     f'{name}#new',
-                    [ir.Parameter(token, name, 'this')],
-                    ir.Block(token, [])))
+                    [],
+                    ir.Block(token, [
+                        ir.Return(token, ir.Malloc(token, name)),
+                    ])))
 
             if case_:
                 if newdef is None:
                     ctx.defs.append(ir.FunctionDefinition(
                         token,
-                        'void',
+                        name,
                         f'{name}#new',
-                        [ir.Parameter(token, name, 'this')] + [
+                        [
                             ir.Parameter(field.token, field.type, field.name)
                             for field in fields
                         ],
                         ir.Block(token, [
+                            ir.VariableDefinition(
+                                token,
+                                True,
+                                None,
+                                'this',
+                                ir.Malloc(token, name)),
+                        ] + [
                             ir.ExpressionStatement(token, ir.MethodCall(
                                 token,
                                 ir.Name(token, 'this'),
@@ -2893,6 +2932,8 @@ def parser(ns):
                                 [ir.Name(token, field.name)],
                             ))
                             for field in fields
+                        ] + [
+                            ir.Return(token, ir.Name(token, 'this')),
                         ])
                     ))
                 if 'GetFields' not in method_to_token_table:
