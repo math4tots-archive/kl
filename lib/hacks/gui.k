@@ -18,6 +18,10 @@
   (error (add 'Unsupported platform: ' PLATFORM))
 )
 
+Size getSize() {
+  return api.getSize()
+}
+
 _WithGraphicsContext graphics() {
   return api.graphics()
 }
@@ -34,6 +38,8 @@ extern class Api {
   // start main loop: this function does not return
   // starts the application
   void start(Options options)
+
+  Size getSize()
 
   // These three methods should be used together properly
   // Prefer using the 'graphics()' method rather than
@@ -73,17 +79,17 @@ class _WithGraphicsContext {
 
 class Options {
   bool resizable
-  int x
-  int y
-  int width
-  int height
+  double x
+  double y
+  double width
+  double height
   var startCallback
   var keyCallback
   var modifierKeyCallback
 
   new() {
-    this.x = this.y = 0
-    this.width = this.height = 300
+    this.x = this.y = 0.0
+    this.width = this.height = 300.0
   }
 
   Options setResizable(bool resizable) {
@@ -91,15 +97,15 @@ class Options {
     return this
   }
 
-  Options setPos(int x, int y) {
-    this.x = x
-    this.y = y
+  Options setPos(Point p) {
+    this.x = p.x
+    this.y = p.y
     return this
   }
 
-  Options setSize(int width, int height) {
-    this.width = width
-    this.height = height
+  Options setSize(Size size) {
+    this.width = size.width
+    this.height = size.height
     return this
   }
 
@@ -120,8 +126,6 @@ class Options {
 }
 
 extern class GraphicsContext {
-  double GETwidth()
-  double GETheight()
   List fillTextSizeAsList(String text)  // [width, height] of bounding rect
   void setFillColor(Color color)
   void setFont(Font font)
@@ -131,7 +135,8 @@ extern class GraphicsContext {
   void fillText(double x, double y, String text)
 
   void fillBackground() {
-    this.fillRect(0.0, 0.0, this.width, this.height)
+    final size = getSize()
+    this.fillRect(0.0, 0.0, size.width, size.height)
   }
 
   Size fillTextSize(String text) {

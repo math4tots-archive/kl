@@ -110,6 +110,9 @@ bool `double:Bool`(double x) {
   return x != 0.0
 }
 
+double intToDouble(int x)
+int doubleToInt(double x)
+
 String `function:GETname`(function f)
 String `function:Repr`(function f) {
   return '<function ' + f.name + '>'
@@ -648,6 +651,39 @@ class ListIterator {
     var value = this.list[this.i]
     this.i = this.i + 1
     return value
+  }
+}
+
+Range range(int start, int end) {
+  return Range(start, end)
+}
+
+case class Range(Iterable) {
+  int start
+  int end
+
+  RangeIterator Iterator() {
+    return RangeIterator(this)
+  }
+}
+
+class RangeIterator {
+  Range r
+  int i
+
+  new(Range r) {
+    this.r = r
+    this.i = r.start
+  }
+
+  bool HasNext() {
+    return this.i < this.r.end
+  }
+
+  int Next() {
+    final i = this.i
+    this.i = i + 1
+    return i
   }
 }
 

@@ -263,6 +263,8 @@ KLCNString* KLC_mkstr_with_buffer(size_t bytesize, char* str, int is_ascii);
 KLCNString* KLC_mkstr(const char *str);
 KLC_var KLC_mcall(const char* name, int argc, KLC_var* argv);
 KLC_bool KLC_truthy(KLC_var v);
+double KLCNintToDouble(KLC_int x);
+KLC_int KLCNdoubleToInt(double x);
 KLC_bool KLC_var_to_bool(KLC_var v);
 KLC_int KLC_var_to_int(KLC_var v);
 double KLC_var_to_double(KLC_var v);

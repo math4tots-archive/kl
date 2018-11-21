@@ -327,6 +327,16 @@ void KLCNhacksZBguiZBApiZFstart(KLCNhacksZBguiZBApi* api, Options* opts) {
   }
 }
 
+struct KLCNhacksZBguiZBSize* KLCNhacksZBguiZBApiZFgetSize(KLCNhacksZBguiZBApi* api) {
+  if (!api->appDelegate) {
+    KLC_errorf("Api.start must be called before Api.getSize()");
+  }
+  @autoreleasepool {
+    NSSize size = api->appDelegate->layer.size;
+    return KLCNhacksZBguiZBSizeZEnew(size.width, size.height);
+  }
+}
+
 KLCNhacksZBguiZBGraphicsContext* KLCNhacksZBguiZBApiZFZAgetGc(KLCNhacksZBguiZBApi* api) {
   if (!api->appDelegate) {
     KLC_errorf("Api.start must be called before Api._getGc()");
@@ -346,14 +356,6 @@ void KLCNhacksZBguiZBApiZFZAendDraw(KLCNhacksZBguiZBApi* api) {
     KLC_errorf("Api.start must be called before Api._endDraw()");
   }
   [api->appDelegate->layer unlockFocus];
-}
-
-double KLCNhacksZBguiZBGraphicsContextZFGETwidth(KLCNhacksZBguiZBGraphicsContext* gc) {
-  return gc->image.size.width;
-}
-
-double KLCNhacksZBguiZBGraphicsContextZFGETheight(KLCNhacksZBguiZBGraphicsContext* gc) {
-  return gc->image.size.height;
 }
 
 KLCNList* KLCNhacksZBguiZBGraphicsContextZFfillTextSizeAsList(

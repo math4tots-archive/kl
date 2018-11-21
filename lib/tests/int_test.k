@@ -18,4 +18,9 @@ void bitwise() {
   assert(~0 == -1)
   assert(~INT_MAX == INT_MIN)
   assert(~INT_MIN == INT_MAX)
+
+  assert(doubleToInt(intToDouble(10)) == 10)
+  assert(intToDouble(10) == 10.0)
+
+  assert(doubleToInt(15.7) == 15)
 }

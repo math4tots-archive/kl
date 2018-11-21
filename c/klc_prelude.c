@@ -457,6 +457,14 @@ KLC_bool KLC_truthy(KLC_var v) {
   return 0;
 }
 
+double KLCNintToDouble(KLC_int x) {
+  return (double) x;
+}
+
+KLC_int KLCNdoubleToInt(double x) {
+  return (KLC_int) x;
+}
+
 KLC_int KLC_var_to_int(KLC_var v) {
   /* TODO: Better error message */
   if (v.tag != KLC_TAG_INT) {
