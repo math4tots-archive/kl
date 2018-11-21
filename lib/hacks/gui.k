@@ -39,6 +39,7 @@ extern class Api {
 
 class _WithGraphicsContext {
   Api api
+  WeakReference wr
   GraphicsContext gc
 
   new(Api a) {
@@ -47,15 +48,16 @@ class _WithGraphicsContext {
 
   GraphicsContext Enter() {
     this.api._beginDraw()
-    this.gc = this.api._getGc()
-    return this.gc
+    final gc = this.api._getGc()
+    this.wr = WeakReference(gc)
+    return gc
   }
 
   void Exit() {
     this.api._endDraw()
-    // TODO: Use WeakReference.refcnt to
-    // verify that this.gc does not escape this scope
-    // panic if gc is found to have escaped
+    if (this.wr) {
+      panic('GraphicsContext reference escaped!')
+    }
   }
 }
 
