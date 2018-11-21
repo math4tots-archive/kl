@@ -72,6 +72,7 @@ class _WithGraphicsContext {
 }
 
 class Options {
+  bool resizable
   int x
   int y
   int width
@@ -83,6 +84,11 @@ class Options {
   new() {
     this.x = this.y = 0
     this.width = this.height = 300
+  }
+
+  Options setResizable(bool resizable) {
+    this.resizable = resizable
+    return this
   }
 
   Options setPos(int x, int y) {

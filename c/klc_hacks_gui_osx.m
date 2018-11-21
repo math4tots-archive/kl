@@ -181,7 +181,6 @@ static NSDictionary* getDrawTextAttributes(KLCNhacksZBguiZBGraphicsContext* gc) 
 }
 - (void)drawRect:(NSRect)dirtyRect {
   @autoreleasepool {
-    NSLog(@"Redrawing...");
     [appDelegate->layer
       drawAtPoint:dirtyRect.origin
       fromRect:dirtyRect
@@ -227,13 +226,16 @@ static NSDictionary* getDrawTextAttributes(KLCNhacksZBguiZBGraphicsContext* gc) 
 @implementation KLCOBJCAppDelegate: NSObject
 - (id)initWithContentRect:(NSRect)windowRect options:(Options*)xopts {
   if (self = [super init]) {
+    NSWindowStyleMask styleMask =
+      NSWindowStyleMaskTitled |
+      NSWindowStyleMaskClosable |
+      NSWindowStyleMaskMiniaturizable;
+    if (KLCNhacksZBguiZBOptionsZFGETresizable(xopts)) {
+      styleMask |= NSWindowStyleMaskResizable;
+    }
     window = [[NSWindow alloc]
       initWithContentRect: windowRect
-      styleMask:
-        NSWindowStyleMaskTitled |
-        NSWindowStyleMaskClosable |
-        NSWindowStyleMaskMiniaturizable |
-        NSWindowStyleMaskResizable
+      styleMask: styleMask
       backing: NSBackingStoreBuffered
       defer: NO];
     window.contentView = [[KLCOBJCView alloc] initWithAppDelegate: self];

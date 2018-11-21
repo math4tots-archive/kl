@@ -60,6 +60,7 @@ KLC_int KLCNhacksZBguiZBFontZFGETsize(KLCNhacksZBguiZBFont* font);
 KLCNTry* KLCNhacksZBguiZBgetFontZDtry(KLCNString* name, KLC_int size);
 
 /* BEGIN Function declarations for extracting data from Options */
+KLC_bool KLCNhacksZBguiZBOptionsZFGETresizable(struct KLCNhacksZBguiZBOptions* opts);
 KLC_int KLCNhacksZBguiZBOptionsZFGETx(struct KLCNhacksZBguiZBOptions* opts);
 KLC_int KLCNhacksZBguiZBOptionsZFGETy(struct KLCNhacksZBguiZBOptions* opts);
 KLC_int KLCNhacksZBguiZBOptionsZFGETwidth(struct KLCNhacksZBguiZBOptions* opts);

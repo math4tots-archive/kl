@@ -5,6 +5,7 @@ void main() {
   gui.start(gui.Options()
     .setPos(0, 0)
     .setSize(300, 400)
+    .setResizable(true)
     .onKey(def void[](gui.KeyEvent e) {
       with gui.graphics() as gg {
         print(e.chars)
