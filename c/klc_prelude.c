@@ -1200,26 +1200,26 @@ void KLCNListZFsort(KLCNList* list) {
   qsort(list->buffer, list->size, sizeof(KLC_var), compare);
 }
 
-KLC_var KLCNClosureZEnew(KLCNList* captures, KLC_function f) {
-  KLCNClosure* closure = (KLCNClosure*) malloc(sizeof(KLCNClosure));
-  KLC_init_header(&closure->header, &KLC_typeClosure);
+KLC_var KLCNZDClosureZEnew(KLCNList* captures, KLC_function f) {
+  KLCNZDClosure* closure = (KLCNZDClosure*) malloc(sizeof(KLCNZDClosure));
+  KLC_init_header(&closure->header, &KLC_typeZDClosure);
   KLC_retain((KLC_header*) captures);
   closure->captures = captures;
   closure->f = f;
   return KLC_object_to_var((KLC_header*) closure);
 }
 
-void KLC_deleteClosure(KLC_header* robj, KLC_header** dq) {
-  KLCNClosure* closure = (KLCNClosure*) robj;
+void KLC_deleteZDClosure(KLC_header* robj, KLC_header** dq) {
+  KLCNZDClosure* closure = (KLCNZDClosure*) robj;
   KLC_partial_release((KLC_header*) closure->captures, dq);
 }
 
-KLC_var KLC_untypedKLCNClosureZFCall(int argc, const KLC_var* argv) {
-  KLCNClosure* closure;
+KLC_var KLC_untypedKLCNZDClosureZFCall(int argc, const KLC_var* argv) {
+  KLCNZDClosure* closure;
   if (argc < 1) {
     KLC_errorf("method call with no receiver");
   }
-  closure = (KLCNClosure*) argv[0].u.obj;
+  closure = (KLCNZDClosure*) argv[0].u.obj;
   {
     int argc2 = closure->captures->size + argc - 1;
     KLC_var* argv2 = (KLC_var*) malloc(sizeof(KLC_var) * (argc2));

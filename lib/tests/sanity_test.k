@@ -294,7 +294,7 @@ void main() {
     }
     assert(addX(15) == 25)
     assert(addX(17) == 27)
-    assert(str(type(addX)) == '<type Closure>')
+    assert(str(type(addX)) == '<type %Closure>')
 
     // Check for leaks
     {

@@ -555,10 +555,10 @@ def ir(ns):
             super().__init__(*args, **kwargs)
             if self.type == 'void':
                 raise Error([self.token], f'Variable of type void is not allowed')
-            if self.type == 'Closure':
+            if self.type == '%Closure':
                 raise Error(
                     [self.token],
-                    f'Variable of type Closure is not allowed (use var instead)')
+                    f'Variable of type %Closure is not allowed (use var instead)')
 
     @ns
     class Parameter(BaseVariableDefinition):
@@ -942,10 +942,10 @@ def ir(ns):
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            if self.untyped_methods and self.name != 'Closure':
+            if self.untyped_methods and self.name != '%Closure':
                 raise Error(
                     [self.token],
-                    'Closure is the only type allowed to have untyped methods')
+                    '%Closure is the only type allowed to have untyped methods')
 
         @property
         def extern(self):
@@ -2761,10 +2761,10 @@ def parser(ns):
                         # For extern types, the 'new' function should return
                         # the constructed object. Further, the new function
                         # itself must be extern
-                        if name == 'Closure':
+                        if name == '%Closure':
                             # It sucks to special case so much for this one
                             # type, but I want to make sure that an actual
-                            # expression of type 'Closure' is impossible.
+                            # expression of type '%Closure' is impossible.
                             # So for just this one, I want the return type
                             # to be var
                             rt = 'var'
@@ -3513,7 +3513,7 @@ def parser(ns):
                     lambda_name,
                     capture_params + params,
                     body))
-                return ir.FunctionCall(token, 'Closure', [
+                return ir.FunctionCall(token, '%Closure', [
                     ir.ListDisplay(token, [
                         ir.Name(p.token, p.name) for p in capture_params
                     ]),

@@ -406,7 +406,7 @@ extern class File {
 
 File open(String path, String mode)
 
-extern class Closure {
+extern class `%Closure` {
   new(List captures, function f)
   extern Call
 }

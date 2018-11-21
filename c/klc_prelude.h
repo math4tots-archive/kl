@@ -101,7 +101,7 @@ typedef struct KLC_functioninfo KLC_functioninfo;
 typedef KLC_functioninfo* KLC_function;
 typedef KLC_typeinfo* KLC_type;
 typedef struct KLCNWeakReference KLCNWeakReference;
-typedef struct KLCNClosure KLCNClosure;
+typedef struct KLCNZDClosure KLCNZDClosure;
 typedef struct KLCNString KLCNString;
 typedef struct KLCNBuffer KLCNBuffer;
 typedef struct KLCNStringBuilder KLCNStringBuilder;
@@ -197,7 +197,7 @@ struct KLCNList {
   KLC_var* buffer;
 };
 
-struct KLCNClosure {
+struct KLCNZDClosure {
   KLC_header header;
   KLCNList* captures;
   KLC_function f;
@@ -238,7 +238,7 @@ extern KLC_typeinfo KLC_typeString;
 extern KLC_typeinfo KLC_typeBuffer;
 extern KLC_typeinfo KLC_typeStringBuilder;
 extern KLC_typeinfo KLC_typeList;
-extern KLC_typeinfo KLC_typeClosure;
+extern KLC_typeinfo KLC_typeZDClosure;
 extern KLC_typeinfo KLC_typeFile;
 extern KLC_typeinfo KLC_typeTry;
 extern KLC_typeinfo KLC_typeZDWith;
@@ -276,7 +276,7 @@ KLC_var KLC_function_to_var(KLC_function f);
 KLC_var KLC_type_to_var(KLC_type t);
 KLC_var KLC_object_to_var(KLC_header* obj);
 KLC_var KLC_var_call(KLC_var f, int argc, KLC_var* argv);
-KLC_var KLC_untypedKLCNClosureZFCall(int argc, const KLC_var* argv);
+KLC_var KLC_untypedKLCNZDClosureZFCall(int argc, const KLC_var* argv);
 void KLCNFileZFclose(KLCNFile* file);
 KLCNList* KLC_mklist(size_t cap);
 void KLCNListZFpush(KLCNList* list, KLC_var v);
