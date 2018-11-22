@@ -94,12 +94,12 @@ struct KLCNBufferView;
 typedef struct KLC_header KLC_header;
 typedef struct KLC_methodinfo KLC_methodinfo;
 typedef struct KLC_methodlist KLC_methodlist;
-typedef struct KLC_typeinfo KLC_typeinfo;
+typedef struct KLC_ti KLC_ti; /* ti = typeinfo */
 typedef struct KLC_var KLC_var;
 typedef KLC_var (*KLC_fp)(int, const KLC_var*); /* untyped function pointer */
 typedef struct KLC_functioninfo KLC_functioninfo;
 typedef KLC_functioninfo* KLC_function;
-typedef KLC_typeinfo* KLC_type;
+typedef KLC_ti* KLC_type;
 typedef struct KLCNWeakReference KLCNWeakReference;
 typedef struct KLCNZDClosure KLCNZDClosure;
 typedef struct KLCNString KLCNString;
@@ -117,7 +117,7 @@ struct KLC_stack_frame {
 };
 
 struct KLC_header {
-  KLC_typeinfo* type;
+  KLC_ti* type;
   size_t refcnt;
   KLC_header* next;
   KLCNWeakReference* weakref;
@@ -138,7 +138,7 @@ struct KLC_functioninfo {
   const KLC_fp body;
 };
 
-struct KLC_typeinfo {
+struct KLC_ti {
   const char* const name;
   void (*const deleter)(KLC_header*, KLC_header**);
   const KLC_methodlist* const methods;
@@ -226,22 +226,22 @@ struct KLCNZDWith {
 extern HINSTANCE KLC_hInstance;
 #endif
 
-extern KLC_typeinfo KLC_typenull;
-extern KLC_typeinfo KLC_typebool;
-extern KLC_typeinfo KLC_typeint;
-extern KLC_typeinfo KLC_typedouble;
-extern KLC_typeinfo KLC_typefunction;
-extern KLC_typeinfo KLC_typetype;
+extern KLC_ti KLC_typenull;
+extern KLC_ti KLC_typebool;
+extern KLC_ti KLC_typeint;
+extern KLC_ti KLC_typedouble;
+extern KLC_ti KLC_typefunction;
+extern KLC_ti KLC_typetype;
 
-extern KLC_typeinfo KLC_typeWeakReference;
-extern KLC_typeinfo KLC_typeString;
-extern KLC_typeinfo KLC_typeBuffer;
-extern KLC_typeinfo KLC_typeStringBuilder;
-extern KLC_typeinfo KLC_typeList;
-extern KLC_typeinfo KLC_typeZDClosure;
-extern KLC_typeinfo KLC_typeFile;
-extern KLC_typeinfo KLC_typeTry;
-extern KLC_typeinfo KLC_typeZDWith;
+extern KLC_ti KLC_typeWeakReference;
+extern KLC_ti KLC_typeString;
+extern KLC_ti KLC_typeBuffer;
+extern KLC_ti KLC_typeStringBuilder;
+extern KLC_ti KLC_typeList;
+extern KLC_ti KLC_typeZDClosure;
+extern KLC_ti KLC_typeFile;
+extern KLC_ti KLC_typeTry;
+extern KLC_ti KLC_typeZDWith;
 
 extern const KLC_var KLC_null;
 

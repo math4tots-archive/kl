@@ -1779,7 +1779,7 @@ def Cee(ns):
         ctx.hdr += delete_proto + ';'
         ctx.hdr += malloc_proto + ';'
 
-        ctx.hdr += f'extern KLC_typeinfo KLC_type{n0};'
+        ctx.hdr += f'extern KLC_ti KLC_type{n0};'
 
         _write_ctypeinfo(
             src=ctx.src,
@@ -1984,7 +1984,7 @@ def Cee(ns):
         src += f'  KLC_methodarray{cn},' if methodmap else '  NULL,'
         src += '};'
 
-        src += f'KLC_typeinfo KLC_type{cn} = ' '{'
+        src += f'KLC_ti KLC_type{cn} = ' '{'
         src += f'  "{cname}",'
         src += '  NULL,' if use_null_deleter else f'  &{del_name},'
         src += f'  &KLC_methodlist{cn},'

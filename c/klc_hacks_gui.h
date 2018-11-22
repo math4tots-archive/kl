@@ -11,10 +11,10 @@ struct KLCNhacksZBguiZBSize;
 struct KLCNhacksZBguiZBOptions;
 struct KLCNhacksZBguiZBColor;
 
-extern KLC_typeinfo KLC_typehacksZBguiZBApi;
-extern KLC_typeinfo KLC_typehacksZBguiZBGraphicsContext;
-extern KLC_typeinfo KLC_typehacksZBguiZBFont;
-extern KLC_typeinfo KLC_typehacksZBguiZBKeyEvent;
+extern KLC_ti KLC_typehacksZBguiZBApi;
+extern KLC_ti KLC_typehacksZBguiZBGraphicsContext;
+extern KLC_ti KLC_typehacksZBguiZBFont;
+extern KLC_ti KLC_typehacksZBguiZBKeyEvent;
 
 void KLC_deletehacksZBguiZBApi(KLC_header*, KLC_header**);
 void KLC_deletehacksZBguiZBGraphicsContext(KLC_header*, KLC_header**);

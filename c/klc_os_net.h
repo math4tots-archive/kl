@@ -5,7 +5,7 @@
 
 typedef struct KLCNosZBnetZBSocket KLCNosZBnetZBSocket;
 
-extern KLC_typeinfo KLC_typeosZBnetZBSocket;
+extern KLC_ti KLC_typeosZBnetZBSocket;
 
 KLCNTry* KLCNosZBnetZBtryOpenSocket(KLC_int domain, KLC_int type, KLC_int protocol);
 void KLC_deleteosZBnetZBSocket(KLC_header*, KLC_header**);
