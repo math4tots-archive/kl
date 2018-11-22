@@ -646,6 +646,40 @@ def CIR(ns):
             ('args', typeutil.List[Expression]),
         )
 
+    @ns
+    class Operation(Expression):
+        # This one should not have its constructor called directly...
+        # instead construct through mkop
+        fields = (
+            ('name', str),
+            ('args', typeutil.List[Expression]),
+        )
+
+        type_map = {
+            ('+', PrimitiveType('int'), PrimitiveType('int')):
+                PrimitiveType('int'),
+            ('+', PrimitiveType('double'), PrimitiveType('int')):
+                PrimitiveType('double'),
+            ('+', PrimitiveType('int'), PrimitiveType('double')):
+                PrimitiveType('double'),
+            ('+', PrimitiveType('double'), PrimitiveType('double')):
+                PrimitiveType('double'),
+            ('-', PrimitiveType('int'), PrimitiveType('int')):
+                PrimitiveType('int'),
+        }
+
+    @ns
+    def mkop(stack, token, name, args):
+        self = Operation(token, name, args)
+        argtypes = [arg.expression_type for arg in self.args]
+        key = (self.name,) + tuple(argtypes)
+        if key not in type(self).type_map:
+            raise Error(
+                stack + [self.token],
+                f'Operation {key} not supported')
+        self.expression_type = type(self).type_map[key]
+        return self
+
 
 @Namespace
 def lexer(ns):
@@ -1079,7 +1113,7 @@ def parser(ns):
             return CIR.ExpressionStatement(token, expr)
 
         def parse_expression(scope):
-            return parse_postfix(scope)
+            return parse_additive(scope)
 
         def parse_args(scope):
             expect('(')
@@ -1090,6 +1124,40 @@ def parser(ns):
                     expect(')')
                     break
             return args
+
+        def parse_additive(scope):
+            expr = parse_multiplicative(scope)
+            while True:
+                token = peek()
+                if consume('+'):
+                    args = [expr, parse_multiplicative(scope)]
+                    expr = CIR.mkop(stack, token, '+', args)
+                elif consume('-'):
+                    args = [expr, parse_multiplicative(scope)]
+                    expr = CIR.mkop(stack, token, '-', args)
+                else:
+                    break
+            return expr
+
+        def parse_multiplicative(scope):
+            expr = parse_unary(scope)
+            while True:
+                token = peek()
+                if consume('*'):
+                    args = [expr, parse_unary(scope)]
+                    expr = CIR.mkop(stack, token, '*', args)
+                elif consume('/'):
+                    args = [expr, parse_unary(scope)]
+                    expr = CIR.mkop(stack, token, '/', args)
+                elif consume('%'):
+                    args = [expr, parse_unary(scope)]
+                    expr = CIR.mkop(stack, token, '%', args)
+                else:
+                    break
+            return expr
+
+        def parse_unary(scope):
+            return parse_postfix(scope)
 
         def parse_postfix(scope):
             expr = parse_primary(scope)
@@ -1110,6 +1178,10 @@ def parser(ns):
             return expr
 
         def check_func_args(token, fexpr, args):
+            # check all args have 'expression_type'
+            for arg in args:
+                arg.expression_type
+
             pft = fexpr.expression_type
             with push(token):
                 if not isinstance(pft, CIR.PointerType):
@@ -1413,6 +1485,27 @@ def C(ns):
             .replace('"', '\\"')
             .replace("'", "\\'"))
         return f'"{s}"'
+
+    @translate.on(CIR.Operation)
+    def translate(self):
+        if self.name == '+':
+            left, right = map(translate, self.args)
+            return f'({left} + {right})'
+        elif self.name == '-':
+            left, right = map(translate, self.args)
+            return f'({left} - {right})'
+        elif self.name == '*':
+            left, right = map(translate, self.args)
+            return f'({left} * {right})'
+        elif self.name == '/':
+            left, right = map(translate, self.args)
+            return f'({left} / {right})'
+        elif self.name == '%':
+            left, right = map(translate, self.args)
+            return f'({left} % {right})'
+        else:
+            with push(self.token):
+                raise error(f'Unrecognized operation {self.name}')
 
 
 def main():
