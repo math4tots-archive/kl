@@ -349,29 +349,28 @@ def CIR(ns):
         if message is not None:
             raise Error(tokens, message)
 
-    @ns
-    class Id:
-        "Proxy for str -> indicates value is used as a C identifier"
-        def __init__(self, value):
-            self.value = value
+    class IdMeta:
+        def __instancecheck__(self, instance):
+            return isinstance(instance, str)
 
-        def __repr__(self):
-            return f'Id({repr(self.value)})'
+        def __call__(self, s):
+            if not isinstance(s, self):
+                raise TypeError(f'{repr(s)} is not an Id')
+            return s
 
-        def __str__(self):
-            return str(self.value)
-
-        def __eq__(self, other):
-            return type(self) is type(other) and self.value == other.value
-
-        def __hash__(self):
-            return hash((type(self), self.value))
+    # Marker for str used as identifiers
+    Id = IdMeta()
+    ns(Id, 'Id')
 
     @ns
     class ScopeValue:
         """This mixin type indicates which classes are valid
         as values for parser.Scope. The keys of parser.Scope
         are always str.
+
+        Subclasses should implement
+
+            name: Id
         """
 
     @ns
@@ -385,12 +384,18 @@ def CIR(ns):
         """
 
     @ns
+    class ScopeTypeValue(ScopeValue):
+        """If the scope returns an instance of this type,
+        it means that the name may be used like a type.
+        """
+
+    @ns
     class CType:
         def convertible_to(self, other):
             return self == other
 
     @ns
-    class StructType(CType, ScopeValue):
+    class StructType(CType, ScopeTypeValue):
         def __init__(self, token, name):
             self.token = token  # location where first encountered
             self.name = name
@@ -410,7 +415,7 @@ def CIR(ns):
             return hash((type(self), self.name))
 
     @ns
-    class PrimitiveType(CType, ScopeValue):
+    class PrimitiveType(CType, ScopeTypeValue):
         def __init__(self, name):
             self.name = name
 
@@ -1004,7 +1009,7 @@ def parser(ns):
 
         def declare_function(stub):
             if stub.name not in scope:
-                scope[stub.name.value] = stub
+                scope[stub.name] = stub
                 return
 
             oldstub = scope[stub.name]
@@ -1218,11 +1223,11 @@ def parser(ns):
             if at('NAME'):
                 id = parse_id()
                 with push(token):
-                    defn = scope[id.value]
+                    defn = scope[id]
 
                 if not isinstance(defn, CIR.ScopeVariableValue):
                     with push(token), push(defn):
-                        raise error(f'{id.value} is not a variable')
+                        raise error(f'{id} is not a variable')
 
                 return CIR.Name(token, defn, id)
 
@@ -1373,7 +1378,7 @@ def C(ns):
     @proto_for.on(CIR.FunctionDefinition)
     def proto_for(fd):
         return declare(
-            fd.type, translate(fd.name), [p.name for p in fd.parameters])
+            fd.type, fd.name, [p.name for p in fd.parameters])
 
     declare = Multimethod('declare')
 
@@ -1410,10 +1415,6 @@ def C(ns):
         return f'{st.name} {name}'
 
     translate = Multimethod('translate')
-
-    @translate.on(CIR.Id)
-    def translate(id_):
-        return id_.value
 
     @translate.on(CIR.PointerType)
     def translate(pt):
@@ -1466,7 +1467,7 @@ def C(ns):
 
     @translate.on(CIR.Name)
     def translate(self):
-        return self.name.value
+        return self.name
 
     @translate.on(CIR.IntLiteral)
     def translate(self):
