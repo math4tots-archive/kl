@@ -12,7 +12,7 @@
 
 #(if
   (eq PLATFORM 'darwin') (begin
-    (append C_SOURCES 'klc_hacks_gui_osx.m')
+    (append C_SOURCES 'klc_hacks_gui.cocoa.m')
     (append APPLE_FRAMEWORKS 'Cocoa')
   )
   (error (add 'Unsupported platform: ' PLATFORM))
