@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import itertools
 import os
+import shutil
 import typing
 
 _scriptdir = os.path.dirname(os.path.realpath(__file__))
@@ -1248,7 +1249,7 @@ def parser(ns):
                 use_quotes = True
                 name = expect('STRING').value
 
-            if not name.endswith('.kc'):
+            if not name.endswith('.k'):
                 return CIR.Include(token, use_quotes, name)
             else:
                 header_name = header_name_from_kc_path(name)
@@ -1282,15 +1283,15 @@ def parser(ns):
 
     @ns
     def header_name_from_kc_path(path):
-        assert path.endswith('.kc'), path
+        assert path.endswith('.k'), path
         name = os.path.basename(path)
-        return name[:-len('.kc')] + '.h'
+        return name[:-len('.k')] + '.h'
 
     @ns
     def source_name_from_kc_path(path):
-        assert path.endswith('.kc'), path
+        assert path.endswith('.k'), path
         name = os.path.basename(path)
-        return name[:-len('.kc')] + '.c'
+        return name[:-len('.k')] + '.c'
 
 
 @Namespace
@@ -1320,7 +1321,7 @@ def C(ns):
         if not os.path.isdir(outdir):
             os.makedirs(outdir, exist_ok=True)
         basename = os.path.basename(tu.token.source.filename)
-        assert basename.endswith('.kc'), basename
+        assert basename.endswith('.k'), basename
         header_name = parser.header_name_from_kc_path(basename)
         header_content = header_for(tu)
         with open(os.path.join(outdir, header_name), 'w') as f:
@@ -1516,6 +1517,8 @@ def main():
     scope = parser.new_global_scope()
     source = Source.from_path(args.path)
     main_translation_unit = parser.parse(source=source, scope=scope)
+    if os.path.isdir(args.out_dir):
+        shutil.rmtree(args.out_dir)
     C.write_out(main_translation_unit, outdir=args.out_dir)
     for tu in scope.cached_translation_units.values():
         C.write_out(tu, outdir=args.out_dir)

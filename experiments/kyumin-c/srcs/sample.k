@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "foo.kc"
+#include "foo.k"
 
 int printf(char* s, ...);
 
