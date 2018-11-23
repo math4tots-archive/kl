@@ -141,13 +141,11 @@ class Token(typing.NamedTuple):
 
     @property
     def colno(self):
-        cn = 0
-        i = self.i
         s = self.source.data
-        while i in range(len(s)) and s[i] != '\n':
-            i -= 1
-            cn += 1
-        return cn
+        a = self.i
+        while a > 0 and s[a - 1] != '\n':
+            a -= 1
+        return self.i - a + 1
 
     @property
     def line(self):
@@ -739,7 +737,7 @@ def lexer(ns):
 
         def skip_spaces_and_comments():
             nonlocal i
-            while s.startswith('//', i) or i < len(s) and s[i] in ' \t\r\n':
+            while s.startswith('//', i) or i < len(s) and s[i] in ' \t\r':
                 if s.startswith('//', i):
                     while i < len(s) and s[i] != '\n':
                         i += 1
@@ -762,6 +760,8 @@ def lexer(ns):
             is_delim = False
 
             if i >= len(s):
+                if not last_was_delim:
+                    yield mt(i, '\n', 'EOF')
                 yield mt(i, 'EOF', 'EOF')
                 break
 
@@ -954,6 +954,7 @@ def parser(ns):
         stack = scope.stack
         tokens = lexer.lex(source)
         i = 0
+        indent_stack = []
 
         @contextlib.contextmanager
         def push(token: Token):
@@ -966,7 +967,20 @@ def parser(ns):
         def error(message: str):
             return Error(stack, message)
 
+        def should_skip_newlines():
+            return indent_stack and indent_stack[-1]
+
+        @contextlib.contextmanager
+        def skipping_newlines(skipping):
+            indent_stack.append(skipping)
+            yield
+            indent_stack.pop()
+
         def peek():
+            nonlocal i
+            if should_skip_newlines():
+                while i < len(tokens) and tokens[i].type == '\n':
+                    i += 1
             return tokens[i]
 
         def gettok():
@@ -1080,7 +1094,7 @@ def parser(ns):
                 token, type, qualified_name, params, vararg)
             declare_function(name, stub)
 
-            if consume(';'):
+            if consume('\n'):
                 # If this is where it ends, this was just a declaration
                 # and not a definition
                 return
@@ -1110,27 +1124,30 @@ def parser(ns):
             params = []
             vararg = False
             expect('(')
-            while not consume(')'):
-                if consume('...'):
-                    vararg = True
-                    expect(')')
-                    break
-                token = peek()
-                type = parse_type()
-                name = parse_id()
-                params.append(CIR.Parameter(token, type, name))
-                if not consume(','):
-                    expect(')')
-                    break
-            return params, vararg
+            with skipping_newlines(True):
+                while not consume(')'):
+                    if consume('...'):
+                        vararg = True
+                        expect(')')
+                        break
+                    token = peek()
+                    type = parse_type()
+                    name = parse_id()
+                    params.append(CIR.Parameter(token, type, name))
+                    if not consume(','):
+                        expect(')')
+                        break
+                return params, vararg
 
         def parse_block(parent_scope):
             scope = Scope(parent_scope)
             token = peek()
             statements = []
             expect('{')
+            consume_all('\n')
             while not consume('}'):
                 statements.append(parse_statement(scope))
+            consume_all('\n')
             return CIR.Block(token, statements)
 
         def parse_statement(scope):
@@ -1138,7 +1155,7 @@ def parser(ns):
             if at('{'):
                 return parse_block(scope)
             if consume('return'):
-                if consume(';'):
+                if consume('\n'):
                     expr = None
                 else:
                     expr = parse_expression(scope)
@@ -1162,10 +1179,10 @@ def parser(ns):
                     with push(token):
                         raise error('You cannot return a void expression')
 
-                expect(';')
+                expect('\n')
                 return CIR.Return(token, expr)
             expr = parse_expression(scope)
-            expect(';')
+            expect('\n')
             return CIR.ExpressionStatement(token, expr)
 
         def parse_expression(scope):
@@ -1173,13 +1190,14 @@ def parser(ns):
 
         def parse_args(scope):
             expect('(')
-            args = []
-            while not consume(')'):
-                args.append(parse_expression(scope))
-                if not consume(','):
-                    expect(')')
-                    break
-            return args
+            with skipping_newlines(True):
+                args = []
+                while not consume(')'):
+                    args.append(parse_expression(scope))
+                    if not consume(','):
+                        expect(')')
+                        break
+                return args
 
         def parse_additive(scope):
             expr = parse_multiplicative(scope)
@@ -1266,6 +1284,11 @@ def parser(ns):
 
         def parse_primary(scope):
             token = peek()
+            if consume('('):
+                with skipping_newlines(True):
+                    expr = parse_expression()
+                    expect(')')
+                    return expr
             if consume('INT'):
                 return CIR.IntLiteral(token, token.value)
             if consume('FLOAT'):
@@ -1360,17 +1383,17 @@ def parser(ns):
             includes = []
             defs = []
             while True:
-                consume_all(';')
+                consume_all('\n')
                 if at('#'):
                     includes.append(parse_include())
                 elif at('import') or at('from'):
                     parse_import(includes)
                 else:
                     break
-            consume_all(';')
+            consume_all('\n')
             while not at('EOF'):
                 parse_global(defs)
-                consume_all(';')
+                consume_all('\n')
             return CIR.TranslationUnit(
                 token, scope.module_name, includes, defs)
 

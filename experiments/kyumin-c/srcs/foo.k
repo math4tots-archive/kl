@@ -1,8 +1,8 @@
 
 int foo() {
-  return 157;
+  return 157
 }
 
 extern int bar() {
-  return 8818;
+  return 8818
 }
