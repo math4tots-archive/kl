@@ -419,6 +419,17 @@ def CIR(ns):
             return hash((type(self), self.name))
 
     @ns
+    class VarType(CType, ScopeTypeValue):
+        def __repr__(self):
+            return 'VarType()'
+
+        def __eq__(self, other):
+            return type(self) is type(other)
+
+        def __hash__(self):
+            return hash(type(self))
+
+    @ns
     class PrimitiveType(CType, ScopeTypeValue):
         def __init__(self, name):
             self.name = name
@@ -759,7 +770,7 @@ def lexer(ns):
       'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
       'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
-      'except', 'case','switch'
+      'except', 'case','switch', 'var',
     } | set(CIR.C_KEYWORDS)
     ns(KEYWORDS, 'KEYWORDS')
 
@@ -1080,13 +1091,16 @@ def parser(ns):
         def at_type():
             token = peek()
             return (
+                token.type == 'var' or
                 token.type in CIR.PRIMITIVE_TYPE_SPECIFIERS or
                 token.type == 'NAME' and token.name in scope.struct_names
             )
 
         def parse_type():
             token = peek()
-            if token.type in CIR.PRIMITIVE_TYPE_SPECIFIERS:
+            if consume('var'):
+                t = CIR.VarType()
+            elif token.type in CIR.PRIMITIVE_TYPE_SPECIFIERS:
                 parts = [gettok().type]
                 while peek().type in CIR.PRIMITIVE_TYPE_SPECIFIERS:
                     parts.append(gettok().type)
@@ -1624,6 +1638,7 @@ def C(ns):
         out += f'#ifndef {header_macro}'
         out += f'#define {header_macro}'
 
+        out += f'#include "kcrt.h"'
         for inc in tu.includes:
             if inc.use_quotes:
                 out += f'#include "{inc.value}"'
@@ -1708,6 +1723,10 @@ def C(ns):
     @declare.on(CIR.PrimitiveType)
     def declare(pt, name: str):
         return f'{pt.name} {name}'
+
+    @declare.on(CIR.VarType)
+    def declare(vt, name: str):
+        return f'KLCvar {name}'
 
     @declare.on(CIR.StructType)
     def declare(st, name: str):

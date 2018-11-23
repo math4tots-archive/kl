@@ -14,6 +14,9 @@ int add1(int const x) {
   return x + 1
 }
 
+void g(var x) {
+}
+
 extern int main() {
   printf(@"Hello world!\n")
   printf(@"foo() = %d\n", foo())
