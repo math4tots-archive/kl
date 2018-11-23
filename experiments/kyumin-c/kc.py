@@ -277,6 +277,7 @@ def CIR(ns):
         'unsigned',
         'float',
         'double',
+        'size_t',
     )
     ns(PRIMITIVE_TYPE_SPECIFIERS, 'PRIMITIVE_TYPE_SPECIFIERS')
 
@@ -1096,7 +1097,7 @@ def parser(ns):
             elif consume('NAME'):
                 with push(token):
                     t = scope[token.value]
-                    if not isinstance(t, CIR.StructType):
+                    if not isinstance(t, CIR.ScopeTypeValue):
                         with push(t.token):
                             raise error(f'{token.name} is not a type name')
             else:

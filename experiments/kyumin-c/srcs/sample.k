@@ -2,6 +2,7 @@
 from foo import foo
 from foo import bar
 from foo import Foo
+from builtins import String
 
 extern int printf(char* s, ...)
 
