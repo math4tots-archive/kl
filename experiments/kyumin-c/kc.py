@@ -566,6 +566,7 @@ def CIR(ns):
     @ns
     class StructDefinition(GlobalDefinition):
         fields = (
+            ('extern', bool),
             ('name', Id),
             ('fields', typeutil.List[StructField]),
         )
@@ -874,6 +875,16 @@ def parser(ns):
             if self.root is self:
                 self._module_scope_cache = dict()
                 self._translation_unit_cache = dict()
+                self._function_stub_map = dict()
+                self._struct_type_map = dict()
+
+        @property
+        def function_stub_map(self) -> typing.Dict[str, 'FunctionStub']:
+            return self.root._function_stub_map
+
+        @property
+        def struct_type_map(self) -> typing.Dict[str, 'StructType']:
+            return self.root._struct_type_map
 
         @property
         def module_scope_cache(self):
@@ -1027,8 +1038,8 @@ def parser(ns):
                     t = scope[name]
                 assert isinstance(t, CIR.PrimitiveType), t
             elif consume('NAME'):
-                with push(peek()):
-                    t = scope[token.name]
+                with push(token):
+                    t = scope[token.value]
                     if not isinstance(t, CIR.StructType):
                         with push(t.token):
                             raise error(f'{token.name} is not a type name')
@@ -1049,9 +1060,10 @@ def parser(ns):
             # E.g. forward declarations update the scope, but
             # doesn't actually result in a GlobalDefinition.
             token = peek()
-            extern = consume('extern')
-            if at('struct'):
+            extern = bool(consume('extern'))
+            if consume('struct'):
                 parse_struct(out=out, token=token, extern=extern)
+                return
             elif at_type():
                 type = parse_type()
                 name = parse_id()
@@ -1074,30 +1086,116 @@ def parser(ns):
                 return
             with push(token):
                 raise error(
-                    f'Expected struct, function or variable definition')
+                    f'Expected struct, function or variable definition '
+                    f'but got {token}')
 
-        def declare_function(name, stub):
-            if name not in scope:
-                scope[name] = stub
+        def parse_struct(out, token, extern):
+            name = parse_id()
+            qualified_name = name if extern else qualify_name(name)
+            if qualified_name not in scope.struct_type_map:
+                scope.struct_type_map[qualified_name] = (
+                    CIR.StructType(token, qualified_name)
+                )
+            struct_type = scope.struct_type_map[qualified_name]
+
+            if name not in scope or scope[name] is not struct_type:
+                scope[name] = struct_type
+
+            if consume('\n'):
+                # if there's newline here, it's just a declaration
                 return
 
-            oldstub = scope[name]
-            if type(oldstub) != CIR.FunctionStub or not oldstub.matches(stub):
-                with push(stub.token), push(oldstub.token):
+            if struct_type.token_at_definition is not None:
+                with push(token), push(struct_type.token_at_definition):
                     raise error(
-                        f'Declarations for {stub.name} does not match')
+                        f'Duplicate definition for struct '
+                        f'{qualified_name}')
+
+            struct_type.token_at_definition = token
+            assert struct_type.fields_by_name is None
+
+            fields = []
+            fields_by_name = dict()
+
+            expect('{')
+            consume_all('\n')
+            while not consume('}'):
+                field_token = peek()
+                extern_field = consume('extern')
+                if extern and extern_field:
+                    with push(field_token):
+                        raise error(
+                            f'In an extern struct, '
+                            f'all fields are already extern')
+                field_type = parse_type()
+                if isinstance(field_type, CIR.StructType):
+                    if field_type.token_at_definition is None:
+                        with push(field_token):
+                            raise error(
+                                f'Structs cannot have fields '
+                                f'with incomplete type')
+                field_name = parse_id()
+                qualified_field_name = (
+                    field_name if extern or extern_field else
+                    qualify_name(field_name)
+                )
+                field = CIR.StructField(
+                    field_token,
+                    field_type,
+                    qualified_field_name,
+                )
+                fields.append(field)
+                fields_by_name[field_name] = field
+                expect('\n')
+                consume_all('\n')
+
+            struct_type.fields_by_name = fields_by_name
+
+            out.append(CIR.StructDefinition(
+                token, extern, qualified_name, fields))
+
+        def declare_function(name, function_stub_args):
+            stub = CIR.FunctionStub(*function_stub_args)
+
+            qualified_name = stub.name
+
+            if qualified_name not in scope.function_stub_map:
+                scope.function_stub_map[qualified_name] = stub
+            else:
+                oldstub = scope.function_stub_map[qualified_name]
+                if not oldstub.matches(stub):
+                    with push(stub.token), push(oldstub.token):
+                        raise error(
+                            f'Declarations for {stub.name} does not match')
+
+                # Always use the first function stub.
+                # Now that we know this new one matches, there's no
+                # need to keep the new stub around.
+                stub = oldstub
+
+            if name not in scope or scope[name] is not stub:
+                scope[name] = stub
+
+            return stub
 
         def parse_function(out, token, extern, type, name):
             params, vararg = parse_params()
             qualified_name = name if extern else qualify_name(name)
-            stub = CIR.FunctionStub(
-                token, type, qualified_name, params, vararg)
-            declare_function(name, stub)
+            stub = declare_function(
+                name, [token, type, qualified_name, params, vararg])
 
             if consume('\n'):
                 # If this is where it ends, this was just a declaration
                 # and not a definition
                 return
+
+            if stub.token_at_definition is not None:
+                with push(token), push(stub.token_at_definition):
+                    raise error(
+                        f'Duplicate definition for '
+                        f'function {qualified_name}')
+
+            stub.token_at_definition = token
 
             function_scope = Scope(scope)
             function_scope.current_function = stub
@@ -1109,7 +1207,7 @@ def parser(ns):
             if (type != CIR.PrimitiveType('void') and
                     not analyzer.returns(body)):
                 with push(token):
-                    raise error('Function may not return')
+                    raise error('Control reaches end of non-void function')
 
             out.append(CIR.FunctionDefinition(
                 token,
@@ -1363,7 +1461,8 @@ def parser(ns):
             if use_from:
                 expect('import')
                 exported_name = parse_id()
-                exported_def = module_scope[exported_name]
+                with push(token):
+                    exported_def = module_scope[exported_name]
             else:
                 # To support importing module names, we need some kind
                 # of ModuleType etc.
@@ -1467,9 +1566,27 @@ def C(ns):
             else:
                 out += f'#include <{inc.value}>'
 
+        for sd in tu.definitions:
+            # Forward declare structs.
+            # Even extern structs, it doesn't hurt to declare them.
+            if isinstance(sd, CIR.StructDefinition):
+                out += f'typedef struct {sd.name} {sd.name};'
+
         for defn in tu.definitions:
             if isinstance(defn, CIR.FunctionDefinition):
                 out += f'{proto_for(defn)};'
+
+        for sd in tu.definitions:
+            # We actually define the structs here.
+            # Any extern structs, we assume are already defined
+            # elsewhere.
+            if isinstance(sd, CIR.StructDefinition) and not sd.extern:
+                out += f'struct {sd.name}' '{'
+                outf = out.spawn(1)
+                out += '};'
+
+                for field in sd.fields:
+                    outf += declare(field.type, field.name) + ';'
 
         out += f'#endif/*{header_macro}*/'
 
@@ -1540,7 +1657,13 @@ def C(ns):
 
     @translate.on(CIR.StructType)
     def translate(st):
+        assert False
         return st.name
+
+    @translate.on(CIR.StructDefinition)
+    def translate(sd, out):
+        # All the generation for structs are done in the header
+        pass
 
     @translate.on(CIR.Parameter)
     def translate(param):
