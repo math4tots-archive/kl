@@ -861,7 +861,6 @@ def parser(ns):
             self.parent = parent
             self.table = dict()
             self.stack = stack
-            self.included = set() if parent is None else parent.included
             self.current_function: FunctionStub = (
                 None if parent is None else parent.current_function
             )
@@ -1305,22 +1304,7 @@ def parser(ns):
                 use_quotes = True
                 name = expect('STRING').value
 
-            if not name.endswith('.k'):
-                return CIR.Include(token, use_quotes, name)
-            else:
-                header_name = header_name_from_kc_path(name)
-                path = os.path.abspath(os.path.join(
-                    os.path.dirname(source.filename),
-                    name,
-                ))
-                if not path in scope.included:
-                    scope.included.add(path)
-                    new_source = Source.from_path(path)
-                    with push(token):
-                        tu = parser.parse(new_source, scope)
-                    assert path not in scope.translation_unit_cache, path
-                    scope.translation_unit_cache[path] = tu
-                return CIR.Include(token, use_quotes, header_name)
+            return CIR.Include(token, use_quotes, name)
 
         def parse_import(includes):
             token = peek()
