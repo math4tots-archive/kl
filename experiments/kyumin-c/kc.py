@@ -645,7 +645,7 @@ def CIR(ns):
         )
 
     @ns
-    class StringLiteral(Expression):
+    class CStringLiteral(Expression):
         expression_type = PointerType(PrimitiveType('char'))
 
         fields = (
@@ -1401,10 +1401,12 @@ def parser(ns):
                         raise error(f'{id} is not a variable')
 
                 return CIR.Name(token, defn)
-
-            elif consume('STRING'):
-                value = token.value
-                return CIR.StringLiteral(token, value)
+            if consume('@'):
+                if at('STRING'):
+                    value = expect('STRING').value
+                    return CIR.CStringLiteral(token, value)
+                else:
+                    expect('STRING')
 
             with push(token):
                 raise error(f'Expected expression but got {peek()}')
@@ -1714,7 +1716,7 @@ def C(ns):
     def translate(self):
         return str(self.value)
 
-    @translate.on(CIR.StringLiteral)
+    @translate.on(CIR.CStringLiteral)
     def translate(self):
         s = (self.value
             .replace('\\', '\\\\')
