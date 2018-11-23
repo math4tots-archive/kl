@@ -442,6 +442,23 @@ def CIR(ns):
             )
 
     @ns
+    class ConstType(CType):
+        def __init__(self, base):
+            self.base = base
+
+        def __repr__(self):
+            return f'ConstType({self.base})'
+
+        def __eq__(self, other):
+            return type(self) is type(other) and self.base == other.base
+
+        def __hash__(self):
+            return hash((type(self), self.base))
+
+        def convertible_to(self, other):
+            return self == other or self.base.convertible_to(other)
+
+    @ns
     class PointerType(CType):
         def __init__(self, base):
             self.base = base
@@ -572,11 +589,15 @@ def CIR(ns):
         )
 
     @ns
-    class Parameter(N):
+    class Parameter(N, ScopeVariableValue):
         fields = (
             ('type', CType),
             ('name', Id),
         )
+
+        @property
+        def name_type(self):
+            return self.type
 
     @ns
     class FunctionDefinition(GlobalDefinition):
@@ -630,7 +651,7 @@ def CIR(ns):
 
     @ns
     class IntLiteral(Expression):
-        expression_type = PrimitiveType('int')
+        expression_type = ConstType(PrimitiveType('int'))
 
         fields = (
             ('value', int),
@@ -669,17 +690,43 @@ def CIR(ns):
             ('args', typeutil.List[Expression]),
         )
 
-        type_map = {
-            ('+', PrimitiveType('int'), PrimitiveType('int')):
-                PrimitiveType('int'),
-            ('+', PrimitiveType('double'), PrimitiveType('int')):
-                PrimitiveType('double'),
-            ('+', PrimitiveType('int'), PrimitiveType('double')):
-                PrimitiveType('double'),
-            ('+', PrimitiveType('double'), PrimitiveType('double')):
-                PrimitiveType('double'),
-            ('-', PrimitiveType('int'), PrimitiveType('int')):
-                PrimitiveType('int'),
+        _type_list_cache = dict()
+
+        type_table = {
+            '+': [
+                [
+                    tuple(map(PrimitiveType, [
+                        'int', 'int',
+                    ])),
+                    PrimitiveType('int'),
+                ],
+                [
+                    tuple(map(PrimitiveType, [
+                        'double', 'int',
+                    ])),
+                    PrimitiveType('double'),
+                ],
+                [
+                    tuple(map(PrimitiveType, [
+                        'int', 'double',
+                    ])),
+                    PrimitiveType('double'),
+                ],
+                [
+                    tuple(map(PrimitiveType, [
+                        'double', 'double',
+                    ])),
+                    PrimitiveType('double'),
+                ],
+            ],
+            '-': [
+                [
+                    tuple(map(PrimitiveType, [
+                        'int', 'int',
+                    ])),
+                    PrimitiveType('int'),
+                ],
+            ],
         }
 
     @ns
@@ -687,11 +734,20 @@ def CIR(ns):
         self = Operation(token, name, args)
         argtypes = [arg.expression_type for arg in self.args]
         key = (self.name,) + tuple(argtypes)
-        if key not in type(self).type_map:
-            raise Error(
-                stack + [self.token],
-                f'Operation {key} not supported')
-        self.expression_type = type(self).type_map[key]
+
+        # Check types, and determine the type of the expression
+        if key not in type(self)._type_list_cache:
+            for expargtypes, rtype in type(self).type_table[self.name]:
+                if len(expargtypes) == len(args) and all(
+                        arg.expression_type.convertible_to(expargtype)
+                        for expargtype, arg in zip(expargtypes, args)):
+                    type(self)._type_list_cache[key] = rtype
+                    break
+            else:
+                with push(token):
+                    raise error(f'Unsupported operation {key}')
+        self.expression_type = type(self)._type_list_cache[key]
+
         return self
 
 
@@ -1046,8 +1102,13 @@ def parser(ns):
             else:
                 with push(token):
                     raise error(f'Expected type but got {token}')
-            while consume('*'):
-                t = CIR.PointerType(t)
+            while True:
+                if consume('*'):
+                    t = CIR.PointerType(t)
+                elif consume('const'):
+                    t = CIR.ConstType(t)
+                else:
+                    break
             return t
 
         def qualify_name(name):
@@ -1200,7 +1261,7 @@ def parser(ns):
             function_scope = Scope(scope)
             function_scope.current_function = stub
             for param in params:
-                function_scope[param.name] = name
+                function_scope[param.name] = param
 
             body = parse_block(function_scope)
 
@@ -1376,7 +1437,7 @@ def parser(ns):
                 if not arg.expression_type.convertible_to(param):
                     with push(arg.token):
                         raise error(
-                            f'Expected argument of type {param.type} '
+                            f'Expected argument of type {param} '
                             f'but got {arg.expression_type}')
             return ft.return_type
 
@@ -1397,7 +1458,7 @@ def parser(ns):
                     defn = scope[id]
 
                 if not isinstance(defn, CIR.ScopeVariableValue):
-                    with push(token), push(defn):
+                    with push(token), push(defn.token):
                         raise error(f'{id} is not a variable')
 
                 return CIR.Name(token, defn)
@@ -1634,6 +1695,10 @@ def C(ns):
             ['...'] if ft.vararg else []
         ))
         return declare(ft.return_type, name + f'({params})')
+
+    @declare.on(CIR.ConstType)
+    def declare(ct, name: str):
+        return declare(ct.base, 'const ' + name)
 
     @declare.on(CIR.PointerType)
     def declare(pt, name: str):
