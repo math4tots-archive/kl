@@ -9,6 +9,11 @@ import typing
 
 _scriptdir = os.path.dirname(os.path.realpath(__file__))
 
+UNIVERSAL_PREFIX = 'KLC'
+ENCODED_NAME_PREFIX = UNIVERSAL_PREFIX + 'N'
+
+MAIN_MODULE_NAME = 'main'
+
 
 class Namespace:
     def __init__(self, f):
@@ -548,6 +553,7 @@ def CIR(ns):
     @ns
     class TranslationUnit(N):
         fields = (
+            ('name', str),
             ('includes', typeutil.List[Include]),
             ('definitions', typeutil.List[GlobalDefinition]),
         )
@@ -613,12 +619,15 @@ def CIR(ns):
     class Name(Expression):
         fields = (
             ('definition', ScopeVariableValue),  # where name is defined,
-            ('name', Id),
         )
 
         @property
         def expression_type(self):
             return self.definition.name_type
+
+        @property
+        def name(self):
+            return self.definition.name
 
     @ns
     class IntLiteral(Expression):
@@ -848,16 +857,32 @@ def parser(ns):
             if stack is None:
                 stack = parent.stack
 
+            self.root = self if parent is None else parent.root
             self.parent = parent
             self.table = dict()
             self.stack = stack
             self.included = set() if parent is None else parent.included
-            self.cached_translation_units = (
-                dict() if parent is None else parent.cached_translation_units
-            )
             self.current_function: FunctionStub = (
                 None if parent is None else parent.current_function
             )
+            self.module_name: str = (
+                None if parent is None else parent.module_name
+            )
+            self.source_root = (
+                None if parent is None else parent.source_root
+            )
+
+            if self.root is self:
+                self._module_scope_cache = dict()
+                self._translation_unit_cache = dict()
+
+        @property
+        def module_scope_cache(self):
+            return self.root._module_scope_cache
+
+        @property
+        def translation_unit_cache(self):
+            return self.root._translation_unit_cache
 
         def __getitem__(self, key: str) -> CIR.ScopeValue:
             if key in self.table:
@@ -880,6 +905,12 @@ def parser(ns):
                 self.parent is not None and key in self.parent
             )
 
+        @contextlib.contextmanager
+        def namespace(self, module_name):
+            scope = Scope(self)
+            scope.module_name = module_name
+            yield scope
+
         @property
         def struct_names(self):
             return StructNamesContainer(self)
@@ -897,8 +928,30 @@ def parser(ns):
             scope[name] = CIR.PrimitiveType(name)
         return scope
 
+    encode_map = {
+        '_': '_U',  # U for Underscore
+        '.': '_D',  # D for Dot
+        '#': '_H',  # H for Hashtag
+    }
+
+    def encode_char(c):
+        if c.isalnum() or c.isdigit():
+            return c
+        elif c in encode_map:
+            return encode_map[c]
+        raise TypeError(f'Invalid name character {c}')
+
+    def encode_name(name):
+        return ENCODED_NAME_PREFIX + ''.join(map(encode_char, name))
+
     @ns
     def parse(source: Source, scope: Scope):
+        assert scope.module_name, (
+            'Scopes passed to parser.parse must have a module name'
+        )
+        assert scope.parent is scope.root, (
+            'Scopes passed to parser.parse must have exactly one ancestor'
+        )
         stack = scope.stack
         tokens = lexer.lex(source)
         i = 0
@@ -973,6 +1026,9 @@ def parser(ns):
                 t = CIR.PointerType(t)
             return t
 
+        def qualify_name(name):
+            return encode_name(scope.module_name + '.' + name)
+
         def parse_global(out):
             # this function accepts an 'out' argument because
             # parsing a global definition doesn't always result in
@@ -1007,12 +1063,12 @@ def parser(ns):
                 raise error(
                     f'Expected struct, function or variable definition')
 
-        def declare_function(stub):
-            if stub.name not in scope:
-                scope[stub.name] = stub
+        def declare_function(name, stub):
+            if name not in scope:
+                scope[name] = stub
                 return
 
-            oldstub = scope[stub.name]
+            oldstub = scope[name]
             if type(oldstub) != CIR.FunctionStub or not oldstub.matches(stub):
                 with push(stub.token), push(oldstub.token):
                     raise error(
@@ -1020,15 +1076,10 @@ def parser(ns):
 
         def parse_function(out, token, extern, type, name):
             params, vararg = parse_params()
-            stub = CIR.FunctionStub(token, type, name, params, vararg)
-            declare_function(stub)
-
-            if extern:
-                with push(token):
-                    # All functions are going to be 'extern' by
-                    # normal C standards.
-                    raise error(
-                        'Semantics for "extern" functions not defined yet')
+            qualified_name = name if extern else qualify_name(name)
+            stub = CIR.FunctionStub(
+                token, type, qualified_name, params, vararg)
+            declare_function(name, stub)
 
             if consume(';'):
                 # If this is where it ends, this was just a declaration
@@ -1050,7 +1101,7 @@ def parser(ns):
             out.append(CIR.FunctionDefinition(
                 token,
                 type,
-                name,
+                qualified_name,
                 params,
                 vararg,
                 body,
@@ -1229,7 +1280,7 @@ def parser(ns):
                     with push(token), push(defn):
                         raise error(f'{id} is not a variable')
 
-                return CIR.Name(token, defn, id)
+                return CIR.Name(token, defn)
 
             elif consume('STRING'):
                 value = token.value
@@ -1267,36 +1318,94 @@ def parser(ns):
                     new_source = Source.from_path(path)
                     with push(token):
                         tu = parser.parse(new_source, scope)
-                    assert path not in scope.cached_translation_units, path
-                    scope.cached_translation_units[path] = tu
+                    assert path not in scope.translation_unit_cache, path
+                    scope.translation_unit_cache[path] = tu
                 return CIR.Include(token, use_quotes, header_name)
+
+        def parse_import(includes):
+            token = peek()
+            use_from = bool(consume('from'))
+            if not use_from:
+                expect('import')
+
+            module_parts = [parse_id()]
+            while consume('.'):
+                module_parts.append(parse_id())
+            module_name = '.'.join(module_parts)
+            incname = header_name_from_module_name(module_name)
+
+            if not any(inc.value == incname for inc in includes):
+                includes.append(CIR.Include(token, True, incname))
+
+            if module_name not in scope.module_scope_cache:
+                assert module_name not in scope.translation_unit_cache, (
+                    module_name
+                )
+                relpath = os.path.join(*module_parts) + '.k'
+                path = os.path.join(scope.source_root, relpath)
+                new_source = Source.from_path(path)
+                module_scope = Scope(scope.parent)
+                module_scope.module_name = module_name
+                with push(token):
+                    tu = parser.parse(new_source, module_scope)
+                scope.translation_unit_cache[module_name] = tu
+                scope.module_scope_cache[module_name] = module_scope
+            else:
+                module_scope = scope.module_scope_cache[module_name]
+
+            if use_from:
+                expect('import')
+                exported_name = parse_id()
+                exported_def = module_scope[exported_name]
+            else:
+                # To support importing module names, we need some kind
+                # of ModuleType etc.
+                assert False, 'TODO'
+
+            if consume('as'):
+                alias = parse_id()
+            elif use_from:
+                alias = exported_name
+            else:
+                alias = module_parts[-1]
+
+            scope[alias] = exported_def
 
         def parse_translation_unit():
             token = peek()
             includes = []
             defs = []
-            consume_all(';')
-            while at('#'):
-                includes.append(parse_include())
+            while True:
                 consume_all(';')
+                if at('#'):
+                    includes.append(parse_include())
+                elif at('import') or at('from'):
+                    parse_import(includes)
+                else:
+                    break
+            consume_all(';')
             while not at('EOF'):
                 parse_global(defs)
                 consume_all(';')
-            return CIR.TranslationUnit(token, includes, defs)
+            return CIR.TranslationUnit(
+                token, scope.module_name, includes, defs)
 
         return parse_translation_unit()
 
-    @ns
-    def header_name_from_kc_path(path):
-        assert path.endswith('.k'), path
-        name = os.path.basename(path)
-        return name[:-len('.k')] + '.h'
+    def is_valid_module_name(module_name):
+        return all(c.isalnum() or c in '._' for c in module_name) and (
+            module_name.lower() == module_name
+        )
 
     @ns
-    def source_name_from_kc_path(path):
-        assert path.endswith('.k'), path
-        name = os.path.basename(path)
-        return name[:-len('.k')] + '.c'
+    def header_name_from_module_name(module_name):
+        assert is_valid_module_name(module_name), module_name
+        return f'{module_name}.k.h'
+
+    @ns
+    def source_name_from_module_name(module_name):
+        assert is_valid_module_name(module_name), module_name
+        return f'{module_name}.k.c'
 
 
 @Namespace
@@ -1325,13 +1434,13 @@ def C(ns):
     def write_out(tu: CIR.TranslationUnit, outdir):
         if not os.path.isdir(outdir):
             os.makedirs(outdir, exist_ok=True)
-        basename = os.path.basename(tu.token.source.filename)
-        assert basename.endswith('.k'), basename
-        header_name = parser.header_name_from_kc_path(basename)
+
+        header_name = parser.header_name_from_module_name(tu.name)
         header_content = header_for(tu)
         with open(os.path.join(outdir, header_name), 'w') as f:
             f.write(header_content)
-        source_name = parser.source_name_from_kc_path(basename)
+
+        source_name = parser.source_name_from_module_name(tu.name)
         source_content = source_for(tu)
         with open(os.path.join(outdir, source_name), 'w') as f:
             f.write(source_content)
@@ -1339,8 +1448,7 @@ def C(ns):
     @ns
     def header_for(tu: CIR.TranslationUnit):
         out = FractalStringBuilder()
-        basename = os.path.basename(tu.token.source.filename)
-        header_name = parser.header_name_from_kc_path(basename)
+        header_name = parser.header_name_from_module_name(tu.name)
         header_macro = header_name.replace('.', '_').replace('/', '_')
 
         out += f'#ifndef {header_macro}'
@@ -1363,8 +1471,7 @@ def C(ns):
     @ns
     def source_for(tu: CIR.TranslationUnit):
         out = FractalStringBuilder()
-        basename = os.path.basename(tu.token.source.filename)
-        header_name = parser.header_name_from_kc_path(basename)
+        header_name = parser.header_name_from_module_name(tu.name)
 
         out += f'#include "{header_name}"'
 
@@ -1514,14 +1621,17 @@ def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument('path')
     argparser.add_argument('--out-dir', default='out')
+    argparser.add_argument('--src-root', default='srcs')
     args = argparser.parse_args()
-    scope = parser.new_global_scope()
+    global_scope = parser.new_global_scope()
+    global_scope.source_root = os.path.abspath(args.src_root)
     source = Source.from_path(args.path)
-    main_translation_unit = parser.parse(source=source, scope=scope)
+    with global_scope.namespace(MAIN_MODULE_NAME) as scope:
+        main_translation_unit = parser.parse(source=source, scope=scope)
     if os.path.isdir(args.out_dir):
         shutil.rmtree(args.out_dir)
     C.write_out(main_translation_unit, outdir=args.out_dir)
-    for tu in scope.cached_translation_units.values():
+    for tu in scope.translation_unit_cache.values():
         C.write_out(tu, outdir=args.out_dir)
 
 if __name__ == '__main__':
