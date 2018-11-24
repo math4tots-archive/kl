@@ -965,16 +965,11 @@ def parser(ns):
             if self.root is self:
                 self._module_scope_cache = dict()
                 self._translation_unit_cache = dict()
-                self._function_stub_map = dict()
-                self._struct_type_map = dict()
+                self._stub_map = dict()
 
         @property
-        def function_stub_map(self) -> typing.Dict[str, 'FunctionStub']:
-            return self.root._function_stub_map
-
-        @property
-        def struct_type_map(self) -> typing.Dict[str, 'StructType']:
-            return self.root._struct_type_map
+        def stub_map(self):
+            return self.root._stub_map
 
         @property
         def module_scope_cache(self):
@@ -1194,11 +1189,11 @@ def parser(ns):
         def parse_struct(out, token, extern):
             name = parse_id()
             qualified_name = name if extern else qualify_name(name)
-            if qualified_name not in scope.struct_type_map:
-                scope.struct_type_map[qualified_name] = (
+            if qualified_name not in scope.stub_map:
+                scope.stub_map[qualified_name] = (
                     CIR.StructType(token, qualified_name)
                 )
-            struct_type = scope.struct_type_map[qualified_name]
+            struct_type = scope.stub_map[qualified_name]
 
             if name not in scope or scope[name] is not struct_type:
                 scope[name] = struct_type
@@ -1259,11 +1254,11 @@ def parser(ns):
         def parse_class(out, token, extern):
             name = parse_id()
             qualified_name = name if extern else qualify_name(name)
-            if qualified_name not in scope.class_stub_map:
-                scope.class_stub_map[qualified_name] = (
+            if qualified_name not in scope.stub_map:
+                scope.stub_map[qualified_name] = (
                     CIR.ClassStub(token, qualified_name),
                 )
-            stub = scope.class_stub_map[qualified_name]
+            stub = scope.stub_map[qualified_name]
 
             if name not in scope or scope[name] is not stub:
                 scope[name] = stub
@@ -1287,10 +1282,10 @@ def parser(ns):
 
             qualified_name = stub.name
 
-            if qualified_name not in scope.function_stub_map:
-                scope.function_stub_map[qualified_name] = stub
+            if qualified_name not in scope.stub_map:
+                scope.stub_map[qualified_name] = stub
             else:
-                oldstub = scope.function_stub_map[qualified_name]
+                oldstub = scope.stub_map[qualified_name]
                 if not oldstub.matches(stub):
                     with push(stub.token), push(oldstub.token):
                         raise error(

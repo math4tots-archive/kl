@@ -10,7 +10,7 @@
 #define KLC_TAG_INT 2
 #define KLC_TAG_FLOAT 3
 
-#if defined(LLONG_MAX)
+#if 0 /* Always use just long for now */
 typedef long long KLCint;
 #define KLC_INT_FMT "%lld"
 #define KLC_INT_MAX LLONG_MAX
