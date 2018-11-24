@@ -24,7 +24,8 @@ int h() {
   return x
 }
 
-class SomeClass
+class SomeClass {
+}
 
 extern int main() {
   printf(@"Hello world!\n")

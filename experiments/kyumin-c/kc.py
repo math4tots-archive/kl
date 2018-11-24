@@ -410,14 +410,12 @@ def CIR(ns):
 
     @ns
     class StructType(CType, ScopeTypeValue):
+        token_at_definition = None
+        fields_by_name = None  # dict: name -> StructField
+
         def __init__(self, token, name):
             self.token = token  # location where first encountered
             self.name = name
-
-            # to be filled in at definition
-            # (as opposed to declaration)
-            self.token_at_definition = None
-            self.fields_by_name = None  # dict: name -> StructField
 
         def __repr__(self):
             return f'StructType({self.name})'
@@ -529,6 +527,9 @@ def CIR(ns):
 
     @ns
     class ClassStub(ScopeVariableValue):
+        token_at_definition = None
+        fields_by_name = None
+
         def __init__(self, tokne, name):
             self.name = name
 
@@ -537,8 +538,16 @@ def CIR(ns):
 
     @ns
     class FunctionStub(ScopeVariableValue):
-        def __init__(self, token, return_type, name, parameters, vararg):
+        def __init__(
+                self,
+                token,
+                extern,
+                return_type,
+                name,
+                parameters,
+                vararg):
             self.token = token
+            self.extern = extern
             self.return_type = return_type
             self.name = name
             self.parameters = parameters
@@ -561,6 +570,7 @@ def CIR(ns):
         @property
         def signature(self):
             return (
+                self.extern,
                 self.return_type,
                 self.name,
                 tuple(p.type for p in self.parameters),
@@ -621,6 +631,12 @@ def CIR(ns):
         )
 
     @ns
+    class ClassDefinition(GlobalDefinition):
+        fields = (
+            ('name', Id),
+        )
+
+    @ns
     class StructDefinition(GlobalDefinition):
         fields = (
             ('extern', bool),
@@ -642,6 +658,7 @@ def CIR(ns):
     @ns
     class FunctionDefinition(GlobalDefinition):
         fields = (
+            ('extern', bool),
             ('return_type', CType),
             ('name', Id),
             ('parameters', typeutil.List[Parameter]),
@@ -653,6 +670,7 @@ def CIR(ns):
         def stub(self):
             return FunctionStub(
                 self.token,
+                self.extern,
                 self.return_type,
                 self.name,
                 self.parameters,
@@ -1049,22 +1067,6 @@ def parser(ns):
             scope[name] = CIR.PrimitiveType(name)
         return scope
 
-    encode_map = {
-        '_': '_U',  # U for Underscore
-        '.': '_D',  # D for Dot
-        '#': '_H',  # H for Hashtag
-    }
-
-    def encode_char(c):
-        if c.isalnum() or c.isdigit():
-            return c
-        elif c in encode_map:
-            return encode_map[c]
-        raise TypeError(f'Invalid name character {c}')
-
-    def encode_name(name):
-        return ENCODED_NAME_PREFIX + ''.join(map(encode_char, name))
-
     @ns
     def parse(source: Source, scope: Scope):
         assert scope.module_name, (
@@ -1170,7 +1172,7 @@ def parser(ns):
             return t
 
         def qualify_name(name):
-            return encode_name(scope.module_name + '.' + name)
+            return scope.module_name + '.' + name
 
         def parse_global(out):
             # this function accepts an 'out' argument because
@@ -1293,7 +1295,14 @@ def parser(ns):
             stub.token_at_definition = token
             assert stub.fields_by_name is None
 
-            assert False, 'TODO'
+            fields = []
+            fields_by_name = dict()
+
+            expect('{')
+            consume_all('\n')
+            expect('}')
+
+            out.append(CIR.ClassDefinition(token, qualified_name))
 
         def declare_function(name, function_stub_args):
             stub = scope.add_stub(CIR.FunctionStub(*function_stub_args))
@@ -1307,7 +1316,7 @@ def parser(ns):
             params, vararg = parse_params()
             qualified_name = name if extern else qualify_name(name)
             stub = declare_function(
-                name, [token, type, qualified_name, params, vararg])
+                name, [token, extern, type, qualified_name, params, vararg])
 
             if consume('\n'):
                 # If this is where it ends, this was just a declaration
@@ -1346,6 +1355,7 @@ def parser(ns):
 
             out.append(CIR.FunctionDefinition(
                 token,
+                extern,
                 type,
                 qualified_name,
                 params,
@@ -1720,6 +1730,23 @@ def analyzer(ns):
 @Namespace
 def C(ns):
 
+    encode_map = {
+        '_': '_U',  # U for Underscore
+        '.': '_D',  # D for Dot
+        '#': '_H',  # H for Hashtag
+    }
+
+    def encode_char(c):
+        if c.isalnum() or c.isdigit():
+            return c
+        elif c in encode_map:
+            return encode_map[c]
+        raise TypeError(f'Invalid name character {c}')
+
+    @ns
+    def encode(name):
+        return ENCODED_NAME_PREFIX + ''.join(map(encode_char, name))
+
     @ns
     def write_out(tu: CIR.TranslationUnit, outdir):
         if not os.path.isdir(outdir):
@@ -1754,8 +1781,9 @@ def C(ns):
         for sd in tu.definitions:
             # Forward declare structs.
             # Even extern structs, it doesn't hurt to declare them.
-            if isinstance(sd, CIR.StructDefinition):
-                out += f'typedef struct {sd.name} {sd.name};'
+            if isinstance(sd, (CIR.StructDefinition, CIR.ClassDefinition)):
+                name = encode(sd.name)
+                out += f'typedef struct {name} {name};'
 
         for defn in tu.definitions:
             if isinstance(defn, CIR.FunctionDefinition):
@@ -1766,12 +1794,13 @@ def C(ns):
             # Any extern structs, we assume are already defined
             # elsewhere.
             if isinstance(sd, CIR.StructDefinition) and not sd.extern:
-                out += f'struct {sd.name}' '{'
+                name = encode(sd.name)
+                out += f'struct {name}' '{'
                 outf = out.spawn(1)
                 out += '};'
 
                 for field in sd.fields:
-                    outf += declare(field.type, field.name) + ';'
+                    outf += declare(field.type, encode(field.name)) + ';'
 
         out += f'#endif/*{header_macro}*/'
 
@@ -1794,7 +1823,9 @@ def C(ns):
     @proto_for.on(CIR.FunctionDefinition)
     def proto_for(fd):
         return declare(
-            fd.type, fd.name, [p.name for p in fd.parameters])
+            fd.type,
+            fd.name if fd.extern else encode(fd.name),
+            [p.name for p in fd.parameters])
 
     declare = Multimethod('declare')
 
@@ -1811,7 +1842,7 @@ def C(ns):
             argnames = [''] * len(ft.parameters)
 
         params = ', '.join([
-            declare(pt, argname)
+            declare(pt, encode(argname))
             for argname, pt in zip(argnames, ft.parameters)
         ] + (
             ['...'] if ft.vararg else []
@@ -1836,7 +1867,7 @@ def C(ns):
 
     @declare.on(CIR.StructType)
     def declare(st, name: str):
-        return f'{st.name} {name}'
+        return f'{encode(st.name)} {name}'
 
     translate = Multimethod('translate')
 
@@ -1858,9 +1889,17 @@ def C(ns):
         # All the generation for structs are done in the header
         pass
 
+    @translate.on(CIR.ClassDefinition)
+    def translate(cd, out):
+        out += f'struct {encode(cd.name)} ' '{'
+        inner = out.spawn(1)
+        out += '};'
+
+        inner += f'KLCheader header;'
+
     @translate.on(CIR.Parameter)
     def translate(param):
-        return f'{translate(param.type)} {translate(param.name)}'
+        return declare(param.type, encode(param.name))
 
     @translate.on(CIR.FunctionDefinition)
     def translate(self, out):
@@ -1896,7 +1935,7 @@ def C(ns):
 
     @translate.on(CIR.LocalVariableDefinition)
     def translate(self, out):
-        decl = declare(self.type, self.name)
+        decl = declare(self.type, encode(self.name))
 
         # We special case const variables, because these have to
         # be declared in a certain way. Also, during the parse,
@@ -2001,15 +2040,15 @@ def C(ns):
 
     @recall_name.on(CIR.FunctionStub)
     def recall_name(self):
-        return self.name
+        return self.name if self.extern else encode(self.name)
 
     @recall_name.on(CIR.LocalVariableDefinition)
     def recall_name(self):
-        return self.name
+        return encode(self.name)
 
     @recall_name.on(CIR.Parameter)
     def recall_name(self):
-        return self.name
+        return encode(self.name)
 
 
 def main():
