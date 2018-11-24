@@ -428,6 +428,9 @@ def CIR(ns):
         def __hash__(self):
             return hash((type(self), self.name))
 
+        def matches(self, other):
+            return type(self) is type(other) and self.name == other.name
+
     @ns
     class VarType(CType, ScopeTypeValue):
         def __repr__(self):
@@ -525,6 +528,14 @@ def CIR(ns):
             return hash((type(self), self.return_type, self.parameters))
 
     @ns
+    class ClassStub(ScopeVariableValue):
+        def __init__(self, tokne, name):
+            self.name = name
+
+        def matches(self, other):
+            return type(self) is type(other) and self.name == other.name
+
+    @ns
     class FunctionStub(ScopeVariableValue):
         def __init__(self, token, return_type, name, parameters, vararg):
             self.token = token
@@ -556,7 +567,10 @@ def CIR(ns):
                 self.vararg)
 
         def matches(self, other: 'FunctionStub'):
-            return self.signature == other.signature
+            return (
+                type(self) is type(other) and
+                self.signature == other.signature
+            )
 
     @ns
     class N(Node):
@@ -971,6 +985,17 @@ def parser(ns):
         def stub_map(self):
             return self.root._stub_map
 
+        def add_stub(self, stub):
+            if stub.name in self.stub_map:
+                oldstub = self.stub_map[stub.name]
+                if not stub.matches(oldstub):
+                    with push(stub.token), push(oldstub.token):
+                        raise error('Mismatched declaration')
+                return oldstub
+            else:
+                self.stub_map[stub.name] = stub
+                return stub
+
         @property
         def module_scope_cache(self):
             return self.root._module_scope_cache
@@ -1189,11 +1214,8 @@ def parser(ns):
         def parse_struct(out, token, extern):
             name = parse_id()
             qualified_name = name if extern else qualify_name(name)
-            if qualified_name not in scope.stub_map:
-                scope.stub_map[qualified_name] = (
-                    CIR.StructType(token, qualified_name)
-                )
-            struct_type = scope.stub_map[qualified_name]
+            struct_type = scope.add_stub(
+                CIR.StructType(token, qualified_name))
 
             if name not in scope or scope[name] is not struct_type:
                 scope[name] = struct_type
@@ -1254,11 +1276,7 @@ def parser(ns):
         def parse_class(out, token, extern):
             name = parse_id()
             qualified_name = name if extern else qualify_name(name)
-            if qualified_name not in scope.stub_map:
-                scope.stub_map[qualified_name] = (
-                    CIR.ClassStub(token, qualified_name),
-                )
-            stub = scope.stub_map[qualified_name]
+            stub = scope.add_stub(CIR.ClassStub(token, qualified_name))
 
             if name not in scope or scope[name] is not stub:
                 scope[name] = stub
@@ -1278,23 +1296,7 @@ def parser(ns):
             assert False, 'TODO'
 
         def declare_function(name, function_stub_args):
-            stub = CIR.FunctionStub(*function_stub_args)
-
-            qualified_name = stub.name
-
-            if qualified_name not in scope.stub_map:
-                scope.stub_map[qualified_name] = stub
-            else:
-                oldstub = scope.stub_map[qualified_name]
-                if not oldstub.matches(stub):
-                    with push(stub.token), push(oldstub.token):
-                        raise error(
-                            f'Declarations for {stub.name} does not match')
-
-                # Always use the first function stub.
-                # Now that we know this new one matches, there's no
-                # need to keep the new stub around.
-                stub = oldstub
+            stub = scope.add_stub(CIR.FunctionStub(*function_stub_args))
 
             if name not in scope or scope[name] is not stub:
                 scope[name] = stub
