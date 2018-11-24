@@ -5,7 +5,7 @@ int list(List xs) {
   // From openjdk Java's Arrays.hashCode(int[])
 
   int result = 1
-  for (var element: xs) {
+  for element in xs {
     result = 31 * result + hash(element)
   }
   return result

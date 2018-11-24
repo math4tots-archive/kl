@@ -2223,7 +2223,7 @@ def parser(ns):
                 [token],
                 f'Only special methods may start with an upper case letter')
 
-    def peek_local_symbols(tokens):
+    def get_local_symbol_map(tokens, local_prefix):
         """Figure out what classes, traits, functions and variables
         are declared in this file.
         The parser needs to know this information ahead of time
@@ -2236,6 +2236,10 @@ def parser(ns):
 
         def at(type, j=0):
             return peek(j).type == type
+
+        def consume(type):
+            if at(type):
+                return gettok()
 
         def at_seq(types, j=0):
             return all(at(t, i) for i, t in enumerate(types, j))
@@ -2283,15 +2287,28 @@ def parser(ns):
                 raise Error([peek()], f'Expected {type} but got {peek()}')
             return gettok()
 
-        symbols = set()
+        symbols = dict()
 
         while not at('EOF'):
-            if at_function() or at_vardef():
+            if consume('from'):
+                parts = [expect('NAME').value]
+                while consume('.'):
+                    parts.append(expect('NAME').value)
+                module_name = '.'.join(parts)
+                expect('import')
+                exported_name = expect('NAME').value
+                alias = (
+                    expect('NAME').value if consume('as') else exported_name
+                )
+                symbols[alias] = f'{module_name}.{exported_name}'
+            elif local_prefix and (at_function() or at_vardef()):
                 expect('NAME')
-                symbols.add(expect('NAME').value)
-            elif at_class() or at_trait():
+                name = expect('NAME').value
+                symbols[name] = f'{local_prefix}.{name}'
+            elif local_prefix and (at_class() or at_trait()):
                 gettok()
-                symbols.add(expect('NAME').value)
+                name = expect('NAME').value
+                symbols[name] = f'{local_prefix}.{name}'
             elif at('(') or at('[') or at('{'):
                 skip_to_matching()
             else:
@@ -2366,9 +2383,7 @@ def parser(ns):
         stack = env['@stack']
         intgen = env['@intgen']
         module_map = dict()
-        local_symbols = (
-            set() if local_prefix is None else peek_local_symbols(tokens)
-        )
+        local_symbols = get_local_symbol_map(tokens, local_prefix)
 
         def mktempvar():
             i = env['@ntempvar'][0]
@@ -2446,7 +2461,7 @@ def parser(ns):
                 defs=defs,
                 macro_scope=env['@macro_scope'],
                 inside_try=False)
-            while at('import'):
+            while at('import') or at('from'):
                 parse_import(ctx)
             replace_tokens_with_update()
             consume_delim()
@@ -2479,17 +2494,34 @@ def parser(ns):
                 parse_global_variable_definition(ctx)
                 return
 
-            raise Error([peek()], f'Expected class, function or variable definition')
+            raise Error(
+                [peek()],
+                f'Expected class, function or variable definition')
 
         def parse_import(ctx):
-            token = expect('import')
+            token = peek()
+            if consume('from'):
+                using_from = True
+            else:
+                expect('import')
+                using_from = False
             parts = [expect('NAME').value]
             while consume('.'):
                 parts.append(expect('NAME').value)
-            alias = expect('NAME').value if consume('as') else parts[-1]
+            if using_from:
+                expect('import')
+                exported_name = expect('NAME').value
+            alias = (
+                expect('NAME').value if consume('as') else
+                exported_name if using_from else
+                parts[-1]
+            )
             expect_delim()
             name = '.'.join(parts)
-            module_map[alias] = name
+
+            if not using_from:
+                module_map[alias] = name
+
             upath = os.path.abspath(os.path.realpath(
                 os.path.join(_scriptdir, 'lib', name.replace('.', os.sep) + '.k')
             ))
@@ -2683,7 +2715,7 @@ def parser(ns):
         def expect_maybe_exported_name():
             name = expect('NAME').value
             if name in local_symbols:
-                name = f'{local_prefix}.{name}'
+                return local_symbols[name]
             return name
 
         def expect_type():
@@ -2772,7 +2804,7 @@ def parser(ns):
             if local_prefix is None:
                 return name
             assert name in local_symbols, (name, local_symbols)
-            return f'{local_prefix}.{name}'
+            return local_symbols[name]
 
         def parse_class_definition(ctx):
             token = peek()
