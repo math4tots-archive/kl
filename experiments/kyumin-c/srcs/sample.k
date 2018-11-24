@@ -36,5 +36,6 @@ extern int main() {
   printf(@"add1(14) = %d\n", add1(14))
   printf(@"h() = %d\n", h())
   g()
+  SomeClass
   return 0
 }

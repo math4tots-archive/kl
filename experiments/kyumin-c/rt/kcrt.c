@@ -12,9 +12,8 @@ struct KLCXClass {
   KLCheader header;
   char* name;
   KLCXDeleter* deleter;
-  size_t method_array_size;
-  size_t method_array_cap;
-  KLCXMethodEntry* method_array_buffer;
+  size_t nmethods;
+  KLCXMethodEntry* methods;
 };
 
 const KLCvar KLCnull = {KLC_TAG_POINTER, {NULL}};
@@ -49,9 +48,9 @@ const char* KLCXGetClassName(KLCXClass* cls) {
 
 KLCXMethod* KLCXGetMethodForClass(KLCXClass* cls, const char* name) {
   size_t i;
-  for (i = 0; i < cls->method_array_size; i++) {
-    if (strcmp(cls->method_array_buffer[i].name, name) == 0) {
-      return cls->method_array_buffer[i].method;
+  for (i = 0; i < cls->nmethods; i++) {
+    if (strcmp(cls->methods[i].name, name) == 0) {
+      return cls->methods[i].method;
     }
   }
   return NULL;
@@ -64,13 +63,17 @@ KLCvar KLCXCallMethod(KLCvar owner, const char* name, int argc, ...) {
 }
 
 static void initClass(KLCXClass* cls) {
-  cls->method_array_size = cls->method_array_cap = 0;
-  cls->method_array_buffer = NULL;
+  cls->nmethods = 0;
+  cls->methods = NULL;
 }
 
 static void classDeleter(KLCheader* obj, KLCheader** dq) {
   KLCXClass* cls = (KLCXClass*) obj;
-  free(cls->method_array_buffer);
+  size_t i;
+  for (i = 0; i < cls->nmethods; i++) {
+    free(cls->methods[i].name);
+  }
+  free(cls->methods);
 }
 
 KLCXClass* KLCXGetClassClass() {
@@ -98,7 +101,26 @@ KLCXDeleter* KLCXGetDeleter(KLCXClass* cls) {
   return cls->deleter;
 }
 
-KLCvar KLCXAddMethod(KLCXClass*, const char*, KLCXMethod*);
+void KLCXAddMethod(KLCXClass* cls, const char* name, KLCXMethod* method) {
+  size_t i;
+  for (i = 0; i < cls->nmethods; i++) {
+    if (strcmp(cls->methods[i].name, name)) {
+      cls->methods[i].method = method;
+      return;
+    }
+  }
+  cls->nmethods++;
+  cls->methods = realloc(cls->methods, sizeof(KLCXMethodEntry) * (cls->nmethods));
+  cls->methods[cls->nmethods - 1].name = KLCXCopyString(name);
+  cls->methods[cls->nmethods - 1].method = method;
+}
+
+KLCvar KLCXObjectToVar(KLCheader* obj) {
+  KLCvar ret;
+  ret.tag = KLC_TAG_POINTER;
+  ret.u.p = obj;
+  return ret;
+}
 
 /* Reference counting utilities */
 KLCvar KLCXPush(KLCXReleasePool *pool, KLCvar v) {

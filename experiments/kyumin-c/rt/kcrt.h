@@ -69,7 +69,8 @@ KLCvar KLCXCallMethod(KLCvar, const char*, int, ...);
 KLCXClass* KLCXGetClassClass();
 KLCXClass* KLCXNewClass(const char*, KLCXDeleter*);
 KLCXDeleter* KLCXGetDeleter(KLCXClass*);
-KLCvar KLCXAddMethod(KLCXClass*, const char*, KLCXMethod*);
+void KLCXAddMethod(KLCXClass*, const char*, KLCXMethod*);
+KLCvar KLCXObjectToVar(KLCheader*);
 
 /* Reference counting utilities */
 KLCvar KLCXPush(KLCXReleasePool*, KLCvar);

@@ -1744,8 +1744,8 @@ def C(ns):
         raise TypeError(f'Invalid name character {c}')
 
     @ns
-    def encode(name):
-        return ENCODED_NAME_PREFIX + ''.join(map(encode_char, name))
+    def encode(name, prefix=ENCODED_NAME_PREFIX):
+        return prefix + ''.join(map(encode_char, name))
 
     @ns
     def write_out(tu: CIR.TranslationUnit, outdir):
@@ -1781,13 +1781,15 @@ def C(ns):
         for sd in tu.definitions:
             # Forward declare structs.
             # Even extern structs, it doesn't hurt to declare them.
-            if isinstance(sd, (CIR.StructDefinition, CIR.ClassDefinition)):
+            if isinstance(sd, CIR.StructDefinition):
                 name = encode(sd.name)
                 out += f'typedef struct {name} {name};'
 
         for defn in tu.definitions:
             if isinstance(defn, CIR.FunctionDefinition):
                 out += f'{proto_for(defn)};'
+            elif isinstance(defn, CIR.ClassDefinition):
+                out += f'KLCvar {encode(defn.name)}();'
 
         for sd in tu.definitions:
             # We actually define the structs here.
@@ -1879,11 +1881,6 @@ def C(ns):
     def translate(pt):
         return pt.name
 
-    @translate.on(CIR.StructType)
-    def translate(st):
-        assert False
-        return st.name
-
     @translate.on(CIR.StructDefinition)
     def translate(sd, out):
         # All the generation for structs are done in the header
@@ -1891,11 +1888,26 @@ def C(ns):
 
     @translate.on(CIR.ClassDefinition)
     def translate(cd, out):
-        out += f'struct {encode(cd.name)} ' '{'
+        struct_name = encode(cd.name, prefix='KLCC')
+        var_name = encode(cd.name, prefix='KLCV')
+
+        out += f'struct {struct_name} ' '{'
         inner = out.spawn(1)
         out += '};'
-
         inner += f'KLCheader header;'
+
+        encoded_name = encode(cd.name)
+
+        out += f'static KLCXClass* {var_name} = NULL;'
+
+        out += f'KLCvar {encode(cd.name)}()'
+        out += '{'
+        out += f'  if (!{var_name})' '{'
+        inner = out.spawn(2)
+        inner += f'{var_name} = KLCXNewClass("{cd.name}", NULL);'
+        out += '  }'
+        out += f'  return KLCXObjectToVar((KLCheader*) {var_name});'
+        out += '}'
 
     @translate.on(CIR.Parameter)
     def translate(param):
@@ -2041,6 +2053,10 @@ def C(ns):
     @recall_name.on(CIR.FunctionStub)
     def recall_name(self):
         return self.name if self.extern else encode(self.name)
+
+    @recall_name.on(CIR.ClassStub)
+    def recall_name(self):
+        return encode(self.name) + '()'
 
     @recall_name.on(CIR.LocalVariableDefinition)
     def recall_name(self):
