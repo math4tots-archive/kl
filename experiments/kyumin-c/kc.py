@@ -1163,6 +1163,9 @@ def parser(ns):
             if consume('struct'):
                 parse_struct(out=out, token=token, extern=extern)
                 return
+            elif consume('class'):
+                parse_class(out=out, token=token, extern=extern)
+                return
             elif at_type():
                 type = parse_type()
                 name = parse_id()
@@ -1185,8 +1188,8 @@ def parser(ns):
                 return
             with push(token):
                 raise error(
-                    f'Expected struct, function or variable definition '
-                    f'but got {token}')
+                    f'Expected struct, class, function or '
+                    f' variable definition but got {token}')
 
         def parse_struct(out, token, extern):
             name = parse_id()
@@ -1252,6 +1255,32 @@ def parser(ns):
 
             out.append(CIR.StructDefinition(
                 token, extern, qualified_name, fields))
+
+        def parse_class(out, token, extern):
+            name = parse_id()
+            qualified_name = name if extern else qualify_name(name)
+            if qualified_name not in scope.class_stub_map:
+                scope.class_stub_map[qualified_name] = (
+                    CIR.ClassStub(token, qualified_name),
+                )
+            stub = scope.class_stub_map[qualified_name]
+
+            if name not in scope or scope[name] is not stub:
+                scope[name] = stub
+
+            if consume('\n'):
+                return
+
+            if stub.token_at_definition is not None:
+                with push(token), push(stub.token_at_definition):
+                    raise error(
+                        f'Duplicate definition for class '
+                        f'{qualified_name}')
+
+            stub.token_at_definition = token
+            assert stub.fields_by_name is None
+
+            assert False, 'TODO'
 
         def declare_function(name, function_stub_args):
             stub = CIR.FunctionStub(*function_stub_args)

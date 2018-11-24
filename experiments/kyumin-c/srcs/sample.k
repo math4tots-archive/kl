@@ -24,6 +24,8 @@ int h() {
   return x
 }
 
+class SomeClass
+
 extern int main() {
   printf(@"Hello world!\n")
   printf(@"foo() = %d\n", foo())
