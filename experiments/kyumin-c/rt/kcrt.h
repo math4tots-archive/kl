@@ -31,13 +31,14 @@ typedef double KLCfloat;
 typedef struct KLCvar KLCvar;
 typedef struct KLCheader KLCheader;
 typedef struct KLCXClass KLCXClass;
-typedef struct KLCXAutoReleasePool KLCXAutoReleasePool;
+typedef struct KLCXReleasePool KLCXReleasePool;
 typedef KLCvar KLCXMethod(KLCvar, int, KLCvar*);
+typedef void KLCXDeleter(KLCheader*, KLCheader**);
 
 struct KLCvar {
   int tag;
   union {
-    KLCheader* p;
+    KLCheader* p; /* This must come first, for 'null' initializing vars */
     KLCint i;
     KLCfloat f;
   } u;
@@ -45,24 +46,39 @@ struct KLCvar {
 
 struct KLCheader {
   size_t refcnt;
+  KLCheader* next;
   KLCXClass* cls;
 };
 
-struct KLCXAutoReleasePool {
+struct KLCXReleasePool {
   size_t size, cap;
   KLCvar* buffer;
 };
 
+extern const KLCvar KLCnull;
+
+/* General C utilities */
+char* KLCXCopyString(const char*);
+
 /* OOP utilities */
+void KLCXinit(KLCheader*, KLCXClass*);
 KLCXClass* KLCXGetClass(KLCvar);
 const char* KLCXGetClassName(KLCXClass*);
 KLCXMethod* KLCXGetMethodForClass(KLCXClass*, const char*);
 KLCvar KLCXCallMethod(KLCvar, const char*, int, ...);
-KLCXClass* KLCXNewClass(const char*);
+KLCXClass* KLCXGetClassClass();
+KLCXClass* KLCXNewClass(const char*, KLCXDeleter*);
+KLCXDeleter* KLCXGetDeleter(KLCXClass*);
 KLCvar KLCXAddMethod(KLCXClass*, const char*, KLCXMethod*);
 
 /* Reference counting utilities */
-KLCvar KLCXPush(KLCXAutoReleasePool*, KLCvar);
-void KLCXResize(KLCXAutoReleasePool*, size_t);
+KLCvar KLCXPush(KLCXReleasePool*, KLCvar);
+void KLCXResize(KLCXReleasePool*, size_t);
+void KLCXDrainPool(KLCXReleasePool*);
+void KLCXRetain(KLCvar);
+void KLCXReleasePointer(KLCheader*);
+void KLCXRelease(KLCvar);
+void KLCXPartialRelease(KLCvar, KLCheader**);
+void KLCXPartialReleasePointer(KLCheader*, KLCheader**);
 
 #endif/*KCRT_H*/

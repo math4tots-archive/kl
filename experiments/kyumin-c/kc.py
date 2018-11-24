@@ -42,9 +42,14 @@ class Namespace:
 
 
 class FractalStringBuilder(object):
-    def __init__(self, depth=0):
+    def __init__(self, depth=0, parent=None):
         self.parts = []
         self.depth = depth
+        self.parent = parent
+        self.root = self if parent is None else parent.root
+
+        if self.root is self:
+            self.next_tempvar_id = 0
 
     def __str__(self):
         parts = []
@@ -72,9 +77,14 @@ class FractalStringBuilder(object):
 
     def spawn(self, depth_diff=0):
         child = FractalStringBuilder(self.depth + depth_diff)
+        child.root = self
         self.parts.append(child)
         return child
 
+    def new_tempvar_name(self):
+        name = f'{UNIVERSAL_PREFIX}T{self.root.next_tempvar_id}'
+        self.root.next_tempvar_id += 1
+        return name
 
 class Multimethod:
     # TODO: support inheritance
@@ -640,6 +650,18 @@ def CIR(ns):
             return self.stub.type
 
     @ns
+    class LocalVariableDefinition(Statement, ScopeVariableValue):
+        fields = (
+            ('type', CType),
+            ('name', Id),
+            ('expression', typeutil.Optional[Expression]),
+        )
+
+        @property
+        def name_type(self):
+            return self.type
+
+    @ns
     class Return(Statement):
         fields = (
             ('expression', typeutil.Optional[Expression]),
@@ -660,10 +682,6 @@ def CIR(ns):
         @property
         def expression_type(self):
             return self.definition.name_type
-
-        @property
-        def name(self):
-            return self.definition.name
 
     @ns
     class IntLiteral(Expression):
@@ -975,6 +993,7 @@ def parser(ns):
                 raise Error(self.stack, f'Name {key} is not declared')
 
         def __setitem__(self, key: str, value: CIR.ScopeValue):
+            assert isinstance(value, CIR.ScopeValue), value
             if key in self.table:
                 raise Error(
                     self.stack + [self.table[key].token, value.token],
@@ -1002,7 +1021,7 @@ def parser(ns):
             self.scope = scope
 
         def __contains__(self, name):
-            return isinstance(scope[name], CIR.StructType)
+            return isinstance(self.scope[name], CIR.StructType)
     @ns
     def new_global_scope():
         scope = Scope(None, [])
@@ -1097,7 +1116,7 @@ def parser(ns):
             return (
                 token.type == 'var' or
                 token.type in CIR.PRIMITIVE_TYPE_SPECIFIERS or
-                token.type == 'NAME' and token.name in scope.struct_names
+                token.type == 'NAME' and token.value in scope.struct_names
             )
 
         def parse_type():
@@ -1289,6 +1308,16 @@ def parser(ns):
                 with push(token):
                     raise error('Control reaches end of non-void function')
 
+            # Make sure that even void functions always have
+            # an explicit return.
+            # This makes sure that the release pool always gets
+            # cleaned up.
+            if (type == CIR.PrimitiveType('void') and
+                    not analyzer.returns(body)):
+                body.statements.append(CIR.Return(token, None))
+
+            assert analyzer.returns(body)
+
             out.append(CIR.FunctionDefinition(
                 token,
                 type,
@@ -1323,8 +1352,26 @@ def parser(ns):
             statements = []
             expect('{')
             consume_all('\n')
+
+            # We need to validate that const variable definitions
+            # are not mixed with non-variable definitions, otherwise
+            # there's no good way to translate to C89 compatible code.
+            only_decls = True
+
             while not consume('}'):
-                statements.append(parse_statement(scope))
+                stmt = parse_statement(scope)
+                if (not only_decls and
+                        isinstance(stmt, CIR.LocalVariableDefinition) and
+                        isinstance(stmt.type, CIR.ConstType)):
+                    with push(stmt.token):
+                        raise error(
+                            f'const variable definitions cannot be '
+                            f'mixed with non-declarations')
+                if (only_decls and
+                        not isinstance(stmt, CIR.LocalVariableDefinition)):
+                    only_decls = False
+                statements.append(stmt)
+
             consume_all('\n')
             return CIR.Block(token, statements)
 
@@ -1332,6 +1379,31 @@ def parser(ns):
             token = peek()
             if at('{'):
                 return parse_block(scope)
+            if at_type():
+                type = parse_type()
+                name = parse_id()
+                expr = parse_expression(scope) if consume('=') else None
+                expect('\n')
+                if (expr is not None and
+                        not expr.expression_type.convertible_to(type)):
+                    with push(token):
+                        raise error(
+                            f'Tried to set value of type '
+                            f'{expr.expression_type} to variable of '
+                            f'type {type}')
+                if isinstance(type, CIR.ConstType) and expr is None:
+                    with push(token):
+                        raise error(
+                            f'const variable definitions must assign '
+                            f'an expression')
+                defn = CIR.LocalVariableDefinition(
+                    token,
+                    type,
+                    name,
+                    expr,
+                )
+                scope[name] = defn
+                return defn
             if consume('return'):
                 if consume('\n'):
                     expr = None
@@ -1606,6 +1678,10 @@ def analyzer(ns):
     def returns(self):
         return any(map(returns, self.statements))
 
+    @returns.on(CIR.LocalVariableDefinition)
+    def returns(self):
+        return False
+
     @returns.on(CIR.Return)
     def returns(self):
         return True
@@ -1763,23 +1839,76 @@ def C(ns):
     @translate.on(CIR.FunctionDefinition)
     def translate(self, out):
         out += proto_for(self)
-        translate(self.body, out)
+        declare_release_pool = True
+
+        translate(
+            self.body,
+            out,
+            declare_release_pool,
+        )
 
     @translate.on(CIR.Block)
-    def translate(self, out):
+    def translate(self, out, declare_release_pool=False):
+        tempvar = out.new_tempvar_name()
+
         out += '{'
         inner = out.spawn(1)
         out += '}'
 
+        if declare_release_pool:
+            inner += 'KLCXReleasePool KLCXrelease_pool = {0, 0, NULL};'
+
+        inner += f'size_t {tempvar} = KLCXrelease_pool.size;'
+
+        # TODO: This is HACK. Factor this properly.
+        inner.decls = inner.spawn()
+
         for stmt in self.statements:
             translate(stmt, inner)
+
+        inner += f'KLCXResize(&KLCXrelease_pool, {tempvar});'
+
+    @translate.on(CIR.LocalVariableDefinition)
+    def translate(self, out):
+        decl = declare(self.type, self.name)
+
+        # We special case const variables, because these have to
+        # be declared in a certain way. Also, during the parse,
+        # we take care to check that they aren't mixed in with
+        # non-variable-declaration expressions.
+        if isinstance(self.type, CIR.ConstType):
+            out += f'{decl} = {translate(self.expression)};'
+            return
+
+        if self.type == CIR.VarType():
+            out.decls += f'{decl} = KLCnull;'
+        elif isinstance(self.type, CIR.PointerType):
+            out.decls += f'{decl} = NULL;'
+        elif self.type in CIR.INTEGRAL_TYPES:
+            out.decls += f'{decl} = 0;'
+        else:
+            # TODO: Zero initialize structs as well.
+            out.decls += f'{decl};'
+
+        if self.expression:
+            out += f'{self.name} = {translate(self.expression)};'
 
     @translate.on(CIR.Return)
     def translate(self, out):
         if self.expression is None:
+            out += 'KLCXDrainPool(&KLCXrelease_pool);'
             out += 'return;'
         else:
-            out += f'return {translate(self.expression)};'
+            tempvar = out.new_tempvar_name()
+            out += '{'
+            inner = out.spawn(1)
+            inner += (
+                f'{declare(self.expression.expression_type, tempvar)} = '
+                f'{translate(self.expression)};'
+            )
+            inner += f'KLCXDrainPool(&KLCXrelease_pool);'
+            inner += f'return {tempvar};'
+            out += '}'
 
     @translate.on(CIR.ExpressionStatement)
     def translate(self, out):
@@ -1791,11 +1920,14 @@ def C(ns):
         if not isinstance(self.f, CIR.Name):
             f = f'({f})'
         args = ', '.join(map(translate, self.args))
-        return f'{f}({args})'
+        ret = f'{f}({args})'
+        if self.expression_type == CIR.VarType():
+            ret = f'KLCXPush(&KLCXrelease_pool, {ret})'
+        return ret
 
     @translate.on(CIR.Name)
     def translate(self):
-        return self.name
+        return recall_name(self.definition)
 
     @translate.on(CIR.IntLiteral)
     def translate(self):
@@ -1836,6 +1968,22 @@ def C(ns):
         else:
             with push(self.token):
                 raise error(f'Unrecognized operation {self.name}')
+
+    # Given the declaration of a name, returns what that should
+    # look like when used in translated C.
+    recall_name = Multimethod('recall_name')
+
+    @recall_name.on(CIR.FunctionStub)
+    def recall_name(self):
+        return self.name
+
+    @recall_name.on(CIR.LocalVariableDefinition)
+    def recall_name(self):
+        return self.name
+
+    @recall_name.on(CIR.Parameter)
+    def recall_name(self):
+        return self.name
 
 
 def main():

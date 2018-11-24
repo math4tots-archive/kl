@@ -14,7 +14,14 @@ int add1(int const x) {
   return x + 1
 }
 
-void g(var x) {
+var g() {
+  var x
+  return x
+}
+
+int h() {
+  int const x = 10
+  return x
 }
 
 extern int main() {
@@ -24,5 +31,7 @@ extern int main() {
   printf(@"foo() - 10 = %d\n", foo() - 10)
   printf(@"bar() - 10 = %d\n", bar() - 10)
   printf(@"add1(14) = %d\n", add1(14))
+  printf(@"h() = %d\n", h())
+  g()
   return 0
 }
