@@ -485,7 +485,11 @@ def CIR(ns):
             return hash((type(self), self.base))
 
         def convertible_to(self, other):
-            return self == other or other == PointerType(PrimitiveType('void'))
+            return (
+                isinstance(other, PointerType) and
+                    self.base.convertible_to(other.base) or
+                other == PointerType(PrimitiveType('void'))
+            )
 
     @ns
     class FunctionType(CType):
@@ -679,7 +683,7 @@ def CIR(ns):
 
     @ns
     class CStringLiteral(Expression):
-        expression_type = PointerType(PrimitiveType('char'))
+        expression_type = PointerType(ConstType(PrimitiveType('char')))
 
         fields = (
             ('value', str),

@@ -4,7 +4,7 @@ from foo import bar
 from foo import Foo
 from builtins import String
 
-extern int printf(char* s, ...)
+extern int printf(char const* s, ...)
 
 int f(Foo foo) {
   return 123
