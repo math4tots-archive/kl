@@ -41,51 +41,6 @@ class Namespace:
         return f'<namespace {object.__getattribute__(self, "name")}>'
 
 
-class FractalStringBuilder(object):
-    def __init__(self, depth=0, parent=None):
-        self.parts = []
-        self.depth = depth
-        self.parent = parent
-        self.root = self if parent is None else parent.root
-
-        if self.root is self:
-            self.next_tempvar_id = 0
-
-    def __str__(self):
-        parts = []
-        self._dump(parts)
-        return ''.join(parts)
-
-    def _dump(self, parts):
-        for part in self.parts:
-            if isinstance(part, FractalStringBuilder):
-                part._dump(parts)
-            else:
-                parts.append(str(part))
-
-    def __iadd__(self, line):
-        if '\n' in line:
-            raise TypeError()
-        # Ignore empty lines
-        if line:
-            self('  ' * self.depth + line + '\n')
-        return self
-
-    def __call__(self, s):
-        self.parts.append(s)
-        return self
-
-    def spawn(self, depth_diff=0):
-        child = FractalStringBuilder(self.depth + depth_diff)
-        child.root = self
-        self.parts.append(child)
-        return child
-
-    def new_tempvar_name(self):
-        name = f'{UNIVERSAL_PREFIX}T{self.root.next_tempvar_id}'
-        self.root.next_tempvar_id += 1
-        return name
-
 class Multimethod:
     # TODO: support inheritance
     def __init__(self, name, n=1):
@@ -1737,6 +1692,53 @@ def analyzer(ns):
 
 @Namespace
 def C(ns):
+    class FractalStringBuilder(object):
+        """String builder with additional features
+        useful for generating C code.
+        """
+        def __init__(self, depth=0, parent=None):
+            self.parts = []
+            self.depth = depth
+            self.parent = parent
+            self.root = self if parent is None else parent.root
+            self.decls = None if parent is None else parent.decls
+
+            if self.root is self:
+                self.next_tempvar_id = 0
+
+        def __str__(self):
+            parts = []
+            self._dump(parts)
+            return ''.join(parts)
+
+        def _dump(self, parts):
+            for part in self.parts:
+                if isinstance(part, FractalStringBuilder):
+                    part._dump(parts)
+                else:
+                    parts.append(str(part))
+
+        def __iadd__(self, line):
+            if '\n' in line:
+                raise TypeError()
+            # Ignore empty lines
+            if line:
+                self('  ' * self.depth + line + '\n')
+            return self
+
+        def __call__(self, s):
+            self.parts.append(s)
+            return self
+
+        def spawn(self, depth_diff=0):
+            child = FractalStringBuilder(self.depth + depth_diff, self)
+            self.parts.append(child)
+            return child
+
+        def new_tempvar_name(self):
+            name = f'{UNIVERSAL_PREFIX}T{self.root.next_tempvar_id}'
+            self.root.next_tempvar_id += 1
+            return name
 
     encode_map = {
         '_': '_U',  # U for Underscore
