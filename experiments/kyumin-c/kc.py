@@ -464,6 +464,11 @@ def CIR(ns):
                 }
             )
 
+
+    INTEGRAL_TYPES = tuple(
+        PrimitiveType(t) for t in PRIMITIVE_TYPE_NAMES if t != 'void')
+    ns(INTEGRAL_TYPES, 'INTEGRAL_TYPES')
+
     @ns
     class ConstType(CType):
         def __init__(self, base):
@@ -688,6 +693,10 @@ def CIR(ns):
             ('name', Id),
             ('expression', typeutil.Optional[Expression]),
         )
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            assert not isinstance(self.type, ConstType), self
 
         @property
         def name_type(self):
@@ -1427,11 +1436,10 @@ def parser(ns):
                             f'Tried to set value of type '
                             f'{expr.expression_type} to variable of '
                             f'type {type}')
-                if isinstance(type, CIR.ConstType) and expr is None:
+                if isinstance(type, CIR.ConstType):
                     with push(token):
                         raise error(
-                            f'const variable definitions must assign '
-                            f'an expression')
+                            f'Declaring const variables is not supported')
                 defn = CIR.LocalVariableDefinition(
                     token,
                     type,
@@ -1949,14 +1957,6 @@ def C(ns):
     def translate(self, out):
         decl = declare(self.type, encode(self.name))
 
-        # We special case const variables, because these have to
-        # be declared in a certain way. Also, during the parse,
-        # we take care to check that they aren't mixed in with
-        # non-variable-declaration expressions.
-        if isinstance(self.type, CIR.ConstType):
-            out += f'{decl} = {translate(self.expression)};'
-            return
-
         if self.type == CIR.VarType():
             out.decls += f'{decl} = KLCnull;'
         elif isinstance(self.type, CIR.PointerType):
@@ -1968,7 +1968,7 @@ def C(ns):
             out.decls += f'{decl};'
 
         if self.expression:
-            out += f'{self.name} = {translate(self.expression)};'
+            out += f'{encode(self.name)} = {translate(self.expression)};'
 
     @translate.on(CIR.Return)
     def translate(self, out):
