@@ -140,6 +140,28 @@ class Fubar(BaseError):
     pass
 
 
+class Promise:
+    def __init__(self, callback):
+        self._callback = callback
+        self._resolved = False
+        self._result = None
+
+    def resolve(self):
+        if not self._resolved:
+            self._result = self._callback()
+        return self._result
+
+    def __repr__(self):
+        return f'Promise({repr(self.resolve())})'
+
+    @classmethod
+    def value(cls, value):
+        @Promise
+        def promise():
+            return value
+        return promise
+
+
 class Node(object):
     def __init__(self, token, *args):
         self.token = token
@@ -400,6 +422,23 @@ def IR(ns):
         pass
 
     @ns
+    class Declaration(Node):
+        pass
+
+    @ns
+    class GlobalDeclaration(Declaration):
+        fields = (
+            ('module_name', str),
+            ('short_name', str),
+        )
+
+    @ns
+    class LocalDeclaration(Declaration):
+        fields = (
+            ('name', str),
+        )
+
+    @ns
     class ImportBase(Node, BaseVariableDefinition):
         pass
 
@@ -425,7 +464,8 @@ def IR(ns):
     @ns
     class GlobalVariableDefinition(Node, BaseVariableDefinition):
         fields = (
-            ('name', str),
+            ('module_name', str),
+            ('short_name', str),
             ('expression', typeutil.Optional[Expression]),
         )
 
@@ -450,37 +490,48 @@ def IR(ns):
         )
 
     @ns
-    class MethodCall(Expression):
+    def methodCall(token, owner, name, args):
+        return Call(token, GetAttr(token, owner, name), args)
+
+    @ns
+    class Call(Expression):
         fields = (
             ('f', Expression),
-            ('name', str),
             ('args', typeutil.List[Expression]),
         )
 
     @ns
-    class LocalSet(Expression):
+    class GetAttr(Expression):
+        fields = (
+            ('owner', Expression),
+            ('name', str),
+        )
+
+    @ns
+    class SetAttr(Expression):
+        fields = (
+            ('owner', Expression),
+            ('name', str),
+            ('expr', Expression),
+        )
+
+    @ns
+    class SetLocal(Expression):
         fields = (
             ('name', str),
             ('expression', Expression),
         )
 
     @ns
-    class LocalGet(Expression):
+    class GetLocal(Expression):
         fields = (
             ('name', str),
         )
 
     @ns
-    class GlobalSet(Expression):
+    class GetModule(Expression):
         fields = (
-            ('name', str),  # qualified name
-            ('expression', Expression),
-        )
-
-    @ns
-    class GlobalGet(Expression):
-        fields = (
-            ('name', str),  # qualified name
+            ('module_name', str),
         )
 
     @ns
@@ -489,7 +540,7 @@ def IR(ns):
             ('name', str),
             ('params', typeutil.List[Param]),
             ('body', Expression),
-            ('vars', typeutil.List[LocalSet]),
+            ('vars', typeutil.List[LocalDeclaration]),
         )
 
     @ns
@@ -530,7 +581,7 @@ def parser(ns):
         def __init__(self, parent):
             self.parent = parent
             self.table = dict()
-            self.stack = []
+            self.stack = [] if parent is None else parent.stack
 
         def error(self, message):
             raise Error(self.stack, message)
@@ -543,7 +594,7 @@ def parser(ns):
             finally:
                 self.stack.pop()
 
-        def __getitem__(self, key: str) -> IR.BaseVariableDefinition:
+        def __getitem__(self, key: str) -> IR.Declaration:
             if key in self.table:
                 return self.table[key]
             elif self.parent is not None:
@@ -551,14 +602,23 @@ def parser(ns):
             else:
                 raise self.error(f'{repr(key)} not defined')
 
-        def __setitem__(self, key: str, value: IR.BaseVariableDefinition):
+        def __setitem__(self, key: str, value: IR.Declaration):
+            assert isinstance(value, IR.Declaration), value
             if key in self.table:
-                with self.push(value.token):
+                with self.push(value.token), self.push(self.table[key].token):
                     raise self.error(f'Duplicate definition of {repr(key)}')
             self.table[key] = value
 
         def __contains__(self, key: str) -> bool:
             return key in self.table or self.parent and key in self.parent
+
+        def pull(self, key: str) -> IR.Declaration:
+            if key not in self.table:
+                if self.parent and key in self.parent:
+                    self.table[key] = self.parent.pull(key)
+                else:
+                    raise self.error(f'{repr(key)} not defined')
+            return self.table[key]
 
     BUILTIN_NAMES = {
         'print',
@@ -568,10 +628,10 @@ def parser(ns):
         scope = Scope(None)
 
         for builtin_name in BUILTIN_NAMES:
-            scope[builtin_name] = IR.GlobalVariableDefinition(
+            scope[builtin_name] = IR.GlobalDeclaration(
+                builtin_token,
                 'builtin',
                 builtin_name,
-                None,
             )
 
         return scope
@@ -629,16 +689,17 @@ def parser(ns):
         def expect_id():
             return expect('NAME').value
 
-        def expect_block(scope):
+        def parse_block(scope):
             token = peek()
             expect('{')
-            exprs = []
+            exprps = []
             with skipping_newlines(False):
                 consume_all('\n')
                 while not consume('}'):
-                    exprs.append(expect_expression(scope))
+                    exprps.append(parse_expression(scope))
                     consume_all('\n')
-            return IR.Block(token, exprs)
+            return Promise(lambda:
+                IR.Block(token, [p.resolve() for p in exprps]))
 
         def expect_params(scope):
             params = []
@@ -653,134 +714,186 @@ def parser(ns):
                         break
             return params
 
-        def expect_lambda(scope, token, name, params):
-            fscope = Scope(scope)
-            for param in params:
-                fscope[param.name] = param
-            body = expect_block(fscope)
-            fvars = [
-                defn for defn in fscope.table.values()
-                if isinstance(defn, IR.LocalSet)
-            ]
-            return IR.Lambda(token, name, params, body, fvars)
+        def parse_expression(scope):
+            return parse_postfix(scope)
 
-        def expect_expression(scope):
-            return expect_postfix(scope)
-
-        def expect_args(scope):
+        def parse_args(scope):
             expect('(')
-            args = []
+            argps = []
             with skipping_newlines(True):
                 while not consume(')'):
-                    args.append(expect_expression(scope))
+                    argps.append(parse_expression(scope))
                     if not consume(','):
                         expect(')')
                         break
-            return args
+            return Promise(lambda: [argp.resolve() for argp in argps])
 
-        def expect_postfix(scope):
-            expr = expect_primary(scope)
+        def pcall(f, *mixed_args):
+            """Utility for calling functions when some arguments are still
+            Promises.
+            Semantically, this is kind of dirty mixing Promises and
+            non-Promises like this, but in practice, at least for use
+            cases here, I never actually want Promise types in the IR
+            so this is ok.
+            """
+            @Promise
+            def promise():
+                return f(*[
+                    arg.resolve() if isinstance(arg, Promise) else arg
+                    for arg in mixed_args
+                ])
+            return promise
+
+        def parse_postfix(scope):
+            exprp = parse_primary(scope)
             while True:
                 token = peek()
                 if at('('):
-                    args = expect_args(scope)
-                    expr = IR.MethodCall(token, expr, '__call', args)
+                    argsp = parse_args(scope)
+                    exprp = pcall(IR.Call, token, exprp, argsp)
                 elif consume('.'):
                     name = expect_id()
-                    if at('('):
-                        args = expect_args(scope)
-                        expr = IR.MethodCall(token, expr, name, args)
-                    elif consume('='):
-                        valexpr = parse_expression()
-                        expr = IR.MethodCall(
-                            token, expr, f'__SET{name}', [valexpr])
+                    if consume('='):
+                        vexpr = parse_expression()
+                        exprp = pcall(IR.SetAttr, token, exprp, name, vexpr)
                     else:
-                        expr = IR.MethodCall(token, expr, f'__GET{name}', [])
+                        exprp = pcall(IR.GetAttr, token, expr, name)
                 else:
                     break
-            return expr
+            return exprp
 
-        def expect_primary(scope):
+        def parse_primary(scope):
             token = peek()
             if consume('('):
                 with skipping_newlines(True):
-                    expr = expect_expression(scope)
+                    exprp = parse_expression(scope)
                     expect(')')
-                    return expr
+                    return exprp
             if consume('$'):
-                return expect_block(scope)
+                return parse_block(scope)
             if consume('INT'):
-                return IR.IntLiteral(token, token.value)
+                return Promise.value(IR.IntLiteral(token, token.value))
             if consume('FLOAT'):
-                return IR.FloatLiteral(token, token.value)
+                return Promise.value(IR.FloatLiteral(token, token.value))
             if consume('STRING'):
-                return IR.StringLiteral(token, token.value)
+                return Promise.value(IR.StringLiteral(token, token.value))
             if consume('NAME'):
                 name = token.value
                 if consume('='):
-                    expr = expect_expression(scope)
-                    if name in scope:
-                        defn = scope[name]
-                        if isinstance(defn, IR.GlobalVariableDefinition):
-                            return IR.GlobalSet(token, defn.name, expr)
-                        elif isinstance(defn, IR.LocalSet):
-                            return IR.LocalSet(token, defn.name, expr)
-                        elif isinstance(defn, IR.ImportFrom):
-                            return IR.GlobalSet(token, defn.name, expr)
+                    exprp = parse_expression(scope)
+                    if name not in scope:
+                        scope[name] = IR.LocalDeclaration(token, name)
+                    @Promise
+                    def promise():
+                        with scope.push(token):
+                            defn = scope[name]
+                        if isinstance(defn, IR.GlobalDeclaration):
+                            return IR.SetAttr(
+                                token,
+                                IR.GetModule(token, defn.module_name),
+                                defn.short_name,
+                                exprp.resolve(),
+                            )
+                        elif isinstance(defn, IR.LocalDeclaration):
+                            return IR.SetLocal(
+                                token,
+                                defn.name,
+                                exprp.resolve(),
+                            )
+                        elif isinstance(defn, IR.ModuleDeclaration):
+                            with scope.push(token):
+                                raise scope.error(
+                                    f'{name} ({defn.module_name}) '
+                                    f'is a module!')
                         else:
                             with scope.push(token):
-                                raise error(f'FUBAR: {name}, {defn}')
-                    else:
-                        scope[name] = ret = IR.LocalSet(token, name, expr)
-                        return ret
+                                raise scope.fubar(repr(defn))
+                    return promise
                 else:
-                    defn = scope[name]
-                    if isinstance(defn, IR.GlobalVariableDefinition):
-                        return IR.GlobalGet(token, defn.name)
-                    elif isinstance(defn, IR.LocalSet):
-                        return IR.LocalGet(token, defn.name)
-                    elif isinstance(defn, IR.ImportFrom):
-                        return IR.GlobalGet(token, defn.name)
-                    else:
+                    @Promise
+                    def promise():
                         with scope.push(token):
-                            raise error(f'FUBAR: {name}, {defn}')
+                            defn = scope[name]
+                        if isinstance(defn, IR.GlobalDeclaration):
+                            return IR.GetAttr(
+                                token,
+                                IR.GetModule(token, defn.module_name),
+                                defn.short_name,
+                            )
+                        elif isinstance(defn, IR.LocalDeclaration):
+                            return IR.GetLocal(token, defn.name)
+                        elif isinstance(defn, IR.ModuleDeclaration):
+                            return IR.GetModule(token, defn.name)
+                        else:
+                            with scope.push(token):
+                                raise scope.fubar(repr(defn))
+                    return promise
 
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
 
-        def expect_global(scope):
-            token = peek()
-            extern = bool(consume('extern'))
-            if consume('var'):
-                short_name = expect_id()
-                qualified_name = qualify(short_name)
-                expr = (
-                    None if extern else
-                    expect_expression(scope) if consume('=') else
-                    NullLiteral(token)
-                )
-                defn = IR.GlobalVariableDefinition(
+        def parse_global_def(scope):
+            token = expect('def')
+            short_name = expect_id()
+            params = expect_params(scope)
+            scope[short_name] = IR.GlobalDeclaration(
+                token,
+                module_name,
+                short_name,
+            )
+            bodyp = parse_lambda_from_body(scope, token, short_name, params)
+            return Promise(lambda:
+                IR.GlobalVariableDefinition(
                     token,
-                    qualified_name,
-                    expr,
+                    module_name,
+                    short_name,
+                    bodyp.resolve(),
+                ))
+
+        def parse_lambda_from_body(scope, token, name, params):
+            fscope = Scope(scope)
+            for param in params:
+                fscope[param.name] = (
+                    IR.LocalDeclaration(param.token, param.name)
                 )
+            bodyp = parse_block(fscope)
+            fvars = [
+                defn for defn in fscope.table.values()
+                if isinstance(defn, IR.LocalDeclaration)
+            ]
+            return Promise(lambda:
+                IR.Lambda(token, name, params, bodyp.resolve(), fvars)
+            )
+
+        def parse_global_var(scope):
+            token = expect('var')
+            short_name = expect_id()
+            scope[short_name] = IR.GlobalDeclaration(
+                token,
+                module_name,
+                short_name,
+            )
+            exprp = (
+                parse_expression(scope) if consume('=') else
+                Promise.value(NullLiteral(token))
+            )
+            expect('\n')
+            return Promise(lambda:
+                IR.GlobalVariableDefinition(
+                    token,
+                    module_name,
+                    short_name,
+                    exprp.resolve(),
+                ))
+
+        def parse_global(scope):
+            if at('def'):
+                return parse_global_def(scope)
             else:
-                if extern:
-                    expect('var')
-                expect('def')
-                short_name = expect_id()
-                qualified_name = qualify(short_name)
-                params = expect_params(scope)
-                defn = IR.GlobalVariableDefinition(
-                    token,
-                    qualified_name,
-                    expect_lambda(scope, token, qualified_name, params),
-                )
-            scope[short_name] = defn
-            return defn
+                return parse_global_var(scope)
 
         imports = []
-        defns = []
+        defn_promises = []
 
         token = peek()
         consume_all('\n')
@@ -789,20 +902,23 @@ def parser(ns):
             consume_all('\n')
 
         while not at('EOF'):
-            defns.append(expect_global(global_scope))
+            defn_promises.append(parse_global(global_scope))
             consume_all('\n')
+
+        defns = [p.resolve() for p in defn_promises]
 
         return IR.Module(token, module_name, imports, defns)
 
 
 def main():
     aparser = argparse.ArgumentParser()
-    aparser.add_argument('filename')
+    aparser.add_argument('filenames', nargs='+')
     aparser.add_argument('--search-dir', default='srcs')
     aparser.add_argument('--out-dir', default='out')
     args = aparser.parse_args()
-    source = Source.from_name_and_path('main', args.filename)
-    print(parser.parse(source))
+    for filename in args.filenames:
+        source = Source.from_name_and_path('main', filename)
+        print(parser.parse(source))
 
 
 if __name__ == '__main__':
