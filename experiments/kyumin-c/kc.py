@@ -166,7 +166,7 @@ class Node(object):
 
     @classmethod
     def _map_helper(cls, f, value):
-        if isinstance(value, (type(None), int, float, bool, str, CIR.CType)):
+        if isinstance(value, (type(None), int, float, bool, str, IR.CType)):
             return value
         if isinstance(value, list):
             return [cls._map_helper(x) for x in value]
@@ -229,8 +229,8 @@ def typeutil(ns):
 
 
 @Namespace
-def CIR(ns):
-    "C Intermediate Representation"
+def IR(ns):
+    "Intermediate Representation"
 
     # These are the keywords that a primitive type can be composed of
     PRIMITIVE_TYPE_SPECIFIERS = (
@@ -789,7 +789,7 @@ def lexer(ns):
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
       'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
       'except', 'case','switch', 'var',
-    } | set(CIR.C_KEYWORDS)
+    } | set(IR.C_KEYWORDS)
     ns(KEYWORDS, 'KEYWORDS')
 
     SYMBOLS = tuple(reversed(sorted([
@@ -986,7 +986,7 @@ def parser(ns):
         def translation_unit_cache(self):
             return self.root._translation_unit_cache
 
-        def __getitem__(self, key: str) -> CIR.ScopeValue:
+        def __getitem__(self, key: str) -> IR.ScopeValue:
             if key in self.table:
                 return self.table[key]
             elif self.parent is not None:
@@ -994,8 +994,8 @@ def parser(ns):
             else:
                 raise Error(self.stack, f'Name {key} is not declared')
 
-        def __setitem__(self, key: str, value: CIR.ScopeValue):
-            assert isinstance(value, CIR.ScopeValue), value
+        def __setitem__(self, key: str, value: IR.ScopeValue):
+            assert isinstance(value, IR.ScopeValue), value
             if key in self.table:
                 raise Error(
                     self.stack + [self.table[key].token, value.token],
@@ -1023,12 +1023,12 @@ def parser(ns):
             self.scope = scope
 
         def __contains__(self, name):
-            return isinstance(self.scope[name], CIR.StructType)
+            return isinstance(self.scope[name], IR.StructType)
     @ns
     def new_global_scope():
         scope = Scope(None, [])
-        for name in CIR.PRIMITIVE_TYPE_NAMES:
-            scope[name] = CIR.PrimitiveType(name)
+        for name in IR.PRIMITIVE_TYPE_NAMES:
+            scope[name] = IR.PrimitiveType(name)
         return scope
 
     @ns
@@ -1095,32 +1095,32 @@ def parser(ns):
             return gettok()
 
         def parse_id():
-            return CIR.Id(expect('NAME').value)
+            return IR.Id(expect('NAME').value)
 
         def at_type():
             token = peek()
             return (
                 token.type == 'var' or
-                token.type in CIR.PRIMITIVE_TYPE_SPECIFIERS or
+                token.type in IR.PRIMITIVE_TYPE_SPECIFIERS or
                 token.type == 'NAME' and token.value in scope.struct_names
             )
 
         def parse_type():
             token = peek()
             if consume('var'):
-                t = CIR.VarType()
-            elif token.type in CIR.PRIMITIVE_TYPE_SPECIFIERS:
+                t = IR.VarType()
+            elif token.type in IR.PRIMITIVE_TYPE_SPECIFIERS:
                 parts = [gettok().type]
-                while peek().type in CIR.PRIMITIVE_TYPE_SPECIFIERS:
+                while peek().type in IR.PRIMITIVE_TYPE_SPECIFIERS:
                     parts.append(gettok().type)
                 name = ' '.join(parts)
                 with push(token):
                     t = scope[name]
-                assert isinstance(t, CIR.PrimitiveType), t
+                assert isinstance(t, IR.PrimitiveType), t
             elif consume('NAME'):
                 with push(token):
                     t = scope[token.value]
-                    if not isinstance(t, CIR.ScopeTypeValue):
+                    if not isinstance(t, IR.ScopeTypeValue):
                         with push(t.token):
                             raise error(f'{token.name} is not a type name')
             else:
@@ -1128,9 +1128,9 @@ def parser(ns):
                     raise error(f'Expected type but got {token}')
             while True:
                 if consume('*'):
-                    t = CIR.PointerType(t)
+                    t = IR.PointerType(t)
                 elif consume('const'):
-                    t = CIR.ConstType(t)
+                    t = IR.ConstType(t)
                 else:
                     break
             return t
@@ -1181,7 +1181,7 @@ def parser(ns):
             name = parse_id()
             qualified_name = name if extern else qualify_name(name)
             struct_type = scope.add_stub(
-                CIR.StructType(token, qualified_name))
+                IR.StructType(token, qualified_name))
 
             if name not in scope or scope[name] is not struct_type:
                 scope[name] = struct_type
@@ -1213,7 +1213,7 @@ def parser(ns):
                             f'In an extern struct, '
                             f'all fields are already extern')
                 field_type = parse_type()
-                if isinstance(field_type, CIR.StructType):
+                if isinstance(field_type, IR.StructType):
                     if field_type.token_at_definition is None:
                         with push(field_token):
                             raise error(
@@ -1224,7 +1224,7 @@ def parser(ns):
                     field_name if extern or extern_field else
                     qualify_name(field_name)
                 )
-                field = CIR.StructField(
+                field = IR.StructField(
                     field_token,
                     field_type,
                     qualified_field_name,
@@ -1236,13 +1236,13 @@ def parser(ns):
 
             struct_type.fields_by_name = fields_by_name
 
-            out.append(CIR.StructDefinition(
+            out.append(IR.StructDefinition(
                 token, extern, qualified_name, fields))
 
         def parse_class(out, token, extern):
             name = parse_id()
             qualified_name = name if extern else qualify_name(name)
-            stub = scope.add_stub(CIR.ClassStub(token, qualified_name))
+            stub = scope.add_stub(IR.ClassStub(token, qualified_name))
 
             if name not in scope or scope[name] is not stub:
                 scope[name] = stub
@@ -1266,10 +1266,10 @@ def parser(ns):
             consume_all('\n')
             expect('}')
 
-            out.append(CIR.ClassDefinition(token, qualified_name))
+            out.append(IR.ClassDefinition(token, qualified_name))
 
         def declare_function(name, function_stub_args):
-            stub = scope.add_stub(CIR.FunctionStub(*function_stub_args))
+            stub = scope.add_stub(IR.FunctionStub(*function_stub_args))
 
             if name not in scope or scope[name] is not stub:
                 scope[name] = stub
@@ -1302,7 +1302,7 @@ def parser(ns):
 
             body = parse_block(function_scope)
 
-            if (type != CIR.PrimitiveType('void') and
+            if (type != IR.PrimitiveType('void') and
                     not analyzer.returns(body)):
                 with push(token):
                     raise error('Control reaches end of non-void function')
@@ -1311,13 +1311,13 @@ def parser(ns):
             # an explicit return.
             # This makes sure that the release pool always gets
             # cleaned up.
-            if (type == CIR.PrimitiveType('void') and
+            if (type == IR.PrimitiveType('void') and
                     not analyzer.returns(body)):
-                body.statements.append(CIR.Return(token, None))
+                body.statements.append(IR.Return(token, None))
 
             assert analyzer.returns(body)
 
-            out.append(CIR.FunctionDefinition(
+            out.append(IR.FunctionDefinition(
                 token,
                 extern,
                 type,
@@ -1340,7 +1340,7 @@ def parser(ns):
                     token = peek()
                     type = parse_type()
                     name = parse_id()
-                    params.append(CIR.Parameter(token, type, name))
+                    params.append(IR.Parameter(token, type, name))
                     if not consume(','):
                         expect(')')
                         break
@@ -1361,19 +1361,19 @@ def parser(ns):
             while not consume('}'):
                 stmt = parse_statement(scope)
                 if (not only_decls and
-                        isinstance(stmt, CIR.LocalVariableDefinition) and
-                        isinstance(stmt.type, CIR.ConstType)):
+                        isinstance(stmt, IR.LocalVariableDefinition) and
+                        isinstance(stmt.type, IR.ConstType)):
                     with push(stmt.token):
                         raise error(
                             f'const variable definitions cannot be '
                             f'mixed with non-declarations')
                 if (only_decls and
-                        not isinstance(stmt, CIR.LocalVariableDefinition)):
+                        not isinstance(stmt, IR.LocalVariableDefinition)):
                     only_decls = False
                 statements.append(stmt)
 
             consume_all('\n')
-            return CIR.Block(token, statements)
+            return IR.Block(token, statements)
 
         def parse_statement(scope):
             token = peek()
@@ -1391,11 +1391,11 @@ def parser(ns):
                             f'Tried to set value of type '
                             f'{expr.expression_type} to variable of '
                             f'type {type}')
-                if isinstance(type, CIR.ConstType):
+                if isinstance(type, IR.ConstType):
                     with push(token):
                         raise error(
                             f'Declaring const variables is not supported')
-                defn = CIR.LocalVariableDefinition(
+                defn = IR.LocalVariableDefinition(
                     token,
                     type,
                     name,
@@ -1410,7 +1410,7 @@ def parser(ns):
                     expr = parse_expression(scope)
 
                 tp = (
-                    CIR.PrimitiveType('void')
+                    IR.PrimitiveType('void')
                         if expr is None else expr.expression_type
                 )
                 cf = scope.current_function
@@ -1424,15 +1424,15 @@ def parser(ns):
                             f'Tried to return {tp}, but expected '
                             f'{cf.return_type}')
 
-                if expr is not None and tp == CIR.PrimitiveType('void'):
+                if expr is not None and tp == IR.PrimitiveType('void'):
                     with push(token):
                         raise error('You cannot return a void expression')
 
                 expect('\n')
-                return CIR.Return(token, expr)
+                return IR.Return(token, expr)
             expr = parse_expression(scope)
             expect('\n')
-            return CIR.ExpressionStatement(token, expr)
+            return IR.ExpressionStatement(token, expr)
 
         def parse_expression(scope):
             return parse_additive(scope)
@@ -1454,10 +1454,10 @@ def parser(ns):
                 token = peek()
                 if consume('+'):
                     args = [expr, parse_multiplicative(scope)]
-                    expr = CIR.mkop(stack, token, '+', args)
+                    expr = IR.mkop(stack, token, '+', args)
                 elif consume('-'):
                     args = [expr, parse_multiplicative(scope)]
-                    expr = CIR.mkop(stack, token, '-', args)
+                    expr = IR.mkop(stack, token, '-', args)
                 else:
                     break
             return expr
@@ -1468,13 +1468,13 @@ def parser(ns):
                 token = peek()
                 if consume('*'):
                     args = [expr, parse_unary(scope)]
-                    expr = CIR.mkop(stack, token, '*', args)
+                    expr = IR.mkop(stack, token, '*', args)
                 elif consume('/'):
                     args = [expr, parse_unary(scope)]
-                    expr = CIR.mkop(stack, token, '/', args)
+                    expr = IR.mkop(stack, token, '/', args)
                 elif consume('%'):
                     args = [expr, parse_unary(scope)]
-                    expr = CIR.mkop(stack, token, '%', args)
+                    expr = IR.mkop(stack, token, '%', args)
                 else:
                     break
             return expr
@@ -1490,7 +1490,7 @@ def parser(ns):
                     args = parse_args(scope)
                     et = expr.expression_type
                     return_type = check_func_args(token, expr, args)
-                    expr = CIR.FunctionCall(
+                    expr = IR.FunctionCall(
                         token,
                         return_type,
                         expr,
@@ -1507,10 +1507,10 @@ def parser(ns):
 
             pft = fexpr.expression_type
             with push(token):
-                if not isinstance(pft, CIR.PointerType):
+                if not isinstance(pft, IR.PointerType):
                     raise error('Not a function')
                 ft = pft.base
-                if not isinstance(ft, CIR.FunctionType):
+                if not isinstance(ft, IR.FunctionType):
                     raise error('Not a function')
 
                 if ft.vararg:
@@ -1539,23 +1539,23 @@ def parser(ns):
                     expect(')')
                     return expr
             if consume('INT'):
-                return CIR.IntLiteral(token, token.value)
+                return IR.IntLiteral(token, token.value)
             if consume('FLOAT'):
-                return CIR.DoubleLiteral(token, token.value)
+                return IR.DoubleLiteral(token, token.value)
             if at('NAME'):
                 id = parse_id()
                 with push(token):
                     defn = scope[id]
 
-                if not isinstance(defn, CIR.ScopeVariableValue):
+                if not isinstance(defn, IR.ScopeVariableValue):
                     with push(token), push(defn.token):
                         raise error(f'{id} is not a variable')
 
-                return CIR.Name(token, defn)
+                return IR.Name(token, defn)
             if consume('@'):
                 if at('STRING'):
                     value = expect('STRING').value
-                    return CIR.CStringLiteral(token, value)
+                    return IR.CStringLiteral(token, value)
                 else:
                     expect('STRING')
 
@@ -1578,7 +1578,7 @@ def parser(ns):
                 use_quotes = True
                 name = expect('STRING').value
 
-            return CIR.Include(token, use_quotes, name)
+            return IR.Include(token, use_quotes, name)
 
         def parse_import(includes):
             token = peek()
@@ -1593,7 +1593,7 @@ def parser(ns):
             incname = header_name_from_module_name(module_name)
 
             if not any(inc.value == incname for inc in includes):
-                includes.append(CIR.Include(token, True, incname))
+                includes.append(IR.Include(token, True, incname))
 
             if module_name not in scope.module_scope_cache:
                 assert module_name not in scope.translation_unit_cache, (
@@ -1646,7 +1646,7 @@ def parser(ns):
             while not at('EOF'):
                 parse_global(defs)
                 consume_all('\n')
-            return CIR.TranslationUnit(
+            return IR.TranslationUnit(
                 token, scope.module_name, includes, defs)
 
         return parse_translation_unit()
@@ -1673,19 +1673,19 @@ def analyzer(ns):
     returns = Multimethod('returns')
     ns(returns, 'returns')
 
-    @returns.on(CIR.Block)
+    @returns.on(IR.Block)
     def returns(self):
         return any(map(returns, self.statements))
 
-    @returns.on(CIR.LocalVariableDefinition)
+    @returns.on(IR.LocalVariableDefinition)
     def returns(self):
         return False
 
-    @returns.on(CIR.Return)
+    @returns.on(IR.Return)
     def returns(self):
         return True
 
-    @returns.on(CIR.ExpressionStatement)
+    @returns.on(IR.ExpressionStatement)
     def returns(self):
         return False
 
@@ -1758,7 +1758,7 @@ def C(ns):
         return prefix + ''.join(map(encode_char, name))
 
     @ns
-    def write_out(tu: CIR.TranslationUnit, outdir):
+    def write_out(tu: IR.TranslationUnit, outdir):
         if not os.path.isdir(outdir):
             os.makedirs(outdir, exist_ok=True)
 
@@ -1773,7 +1773,7 @@ def C(ns):
             f.write(source_content)
 
     @ns
-    def header_for(tu: CIR.TranslationUnit):
+    def header_for(tu: IR.TranslationUnit):
         out = FractalStringBuilder()
         header_name = parser.header_name_from_module_name(tu.name)
         header_macro = header_name.replace('.', '_').replace('/', '_')
@@ -1791,21 +1791,21 @@ def C(ns):
         for sd in tu.definitions:
             # Forward declare structs.
             # Even extern structs, it doesn't hurt to declare them.
-            if isinstance(sd, CIR.StructDefinition):
+            if isinstance(sd, IR.StructDefinition):
                 name = encode(sd.name)
                 out += f'typedef struct {name} {name};'
 
         for defn in tu.definitions:
-            if isinstance(defn, CIR.FunctionDefinition):
+            if isinstance(defn, IR.FunctionDefinition):
                 out += f'{proto_for(defn)};'
-            elif isinstance(defn, CIR.ClassDefinition):
+            elif isinstance(defn, IR.ClassDefinition):
                 out += f'KLCvar {encode(defn.name)}();'
 
         for sd in tu.definitions:
             # We actually define the structs here.
             # Any extern structs, we assume are already defined
             # elsewhere.
-            if isinstance(sd, CIR.StructDefinition) and not sd.extern:
+            if isinstance(sd, IR.StructDefinition) and not sd.extern:
                 name = encode(sd.name)
                 out += f'struct {name}' '{'
                 outf = out.spawn(1)
@@ -1819,7 +1819,7 @@ def C(ns):
         return str(out)
 
     @ns
-    def source_for(tu: CIR.TranslationUnit):
+    def source_for(tu: IR.TranslationUnit):
         out = FractalStringBuilder()
         header_name = parser.header_name_from_module_name(tu.name)
 
@@ -1832,7 +1832,7 @@ def C(ns):
 
     proto_for = Multimethod('proto_for')
 
-    @proto_for.on(CIR.FunctionDefinition)
+    @proto_for.on(IR.FunctionDefinition)
     def proto_for(fd):
         return declare(
             fd.type,
@@ -1841,7 +1841,7 @@ def C(ns):
 
     declare = Multimethod('declare')
 
-    @declare.on(CIR.FunctionType)
+    @declare.on(IR.FunctionType)
     def declare(ft, name: str, argnames=None):
         # The argument list can't bind tighter than anything in the front
         # that's already there. However, if name represents a pointer
@@ -1861,42 +1861,42 @@ def C(ns):
         ))
         return declare(ft.return_type, name + f'({params})')
 
-    @declare.on(CIR.ConstType)
+    @declare.on(IR.ConstType)
     def declare(ct, name: str):
         return declare(ct.base, 'const ' + name)
 
-    @declare.on(CIR.PointerType)
+    @declare.on(IR.PointerType)
     def declare(pt, name: str):
         return declare(pt.base, '*' + name)
 
-    @declare.on(CIR.PrimitiveType)
+    @declare.on(IR.PrimitiveType)
     def declare(pt, name: str):
         return f'{pt.name} {name}'
 
-    @declare.on(CIR.VarType)
+    @declare.on(IR.VarType)
     def declare(vt, name: str):
         return f'KLCvar {name}'
 
-    @declare.on(CIR.StructType)
+    @declare.on(IR.StructType)
     def declare(st, name: str):
         return f'{encode(st.name)} {name}'
 
     translate = Multimethod('translate')
 
-    @translate.on(CIR.PointerType)
+    @translate.on(IR.PointerType)
     def translate(pt):
         return f'{translate(pt.base)}*'
 
-    @translate.on(CIR.PrimitiveType)
+    @translate.on(IR.PrimitiveType)
     def translate(pt):
         return pt.name
 
-    @translate.on(CIR.StructDefinition)
+    @translate.on(IR.StructDefinition)
     def translate(sd, out):
         # All the generation for structs are done in the header
         pass
 
-    @translate.on(CIR.ClassDefinition)
+    @translate.on(IR.ClassDefinition)
     def translate(cd, out):
         struct_name = encode(cd.name, prefix='KLCC')
         var_name = encode(cd.name, prefix='KLCV')
@@ -1919,11 +1919,11 @@ def C(ns):
         out += f'  return KLCXObjectToVar((KLCheader*) {var_name});'
         out += '}'
 
-    @translate.on(CIR.Parameter)
+    @translate.on(IR.Parameter)
     def translate(param):
         return declare(param.type, encode(param.name))
 
-    @translate.on(CIR.FunctionDefinition)
+    @translate.on(IR.FunctionDefinition)
     def translate(self, out):
         out += proto_for(self)
         declare_release_pool = True
@@ -1934,7 +1934,7 @@ def C(ns):
             declare_release_pool,
         )
 
-    @translate.on(CIR.Block)
+    @translate.on(IR.Block)
     def translate(self, out, declare_release_pool=False):
         tempvar = out.new_tempvar_name()
 
@@ -1955,15 +1955,15 @@ def C(ns):
 
         inner += f'KLCXResize(&KLCXrelease_pool, {tempvar});'
 
-    @translate.on(CIR.LocalVariableDefinition)
+    @translate.on(IR.LocalVariableDefinition)
     def translate(self, out):
         decl = declare(self.type, encode(self.name))
 
-        if self.type == CIR.VarType():
+        if self.type == IR.VarType():
             out.decls += f'{decl} = KLCnull;'
-        elif isinstance(self.type, CIR.PointerType):
+        elif isinstance(self.type, IR.PointerType):
             out.decls += f'{decl} = NULL;'
-        elif self.type in CIR.INTEGRAL_TYPES:
+        elif self.type in IR.INTEGRAL_TYPES:
             out.decls += f'{decl} = 0;'
         else:
             # TODO: Zero initialize structs as well.
@@ -1972,7 +1972,7 @@ def C(ns):
         if self.expression:
             out += f'{encode(self.name)} = {translate(self.expression)};'
 
-    @translate.on(CIR.Return)
+    @translate.on(IR.Return)
     def translate(self, out):
         if self.expression is None:
             out += 'KLCXDrainPool(&KLCXrelease_pool);'
@@ -1989,34 +1989,34 @@ def C(ns):
             inner += f'return {tempvar};'
             out += '}'
 
-    @translate.on(CIR.ExpressionStatement)
+    @translate.on(IR.ExpressionStatement)
     def translate(self, out):
         out += translate(self.expression) + ';'
 
-    @translate.on(CIR.FunctionCall)
+    @translate.on(IR.FunctionCall)
     def translate(self):
         f = translate(self.f)
-        if not isinstance(self.f, CIR.Name):
+        if not isinstance(self.f, IR.Name):
             f = f'({f})'
         args = ', '.join(map(translate, self.args))
         ret = f'{f}({args})'
-        if self.expression_type == CIR.VarType():
+        if self.expression_type == IR.VarType():
             ret = f'KLCXPush(&KLCXrelease_pool, {ret})'
         return ret
 
-    @translate.on(CIR.Name)
+    @translate.on(IR.Name)
     def translate(self):
         return recall_name(self.definition)
 
-    @translate.on(CIR.IntLiteral)
+    @translate.on(IR.IntLiteral)
     def translate(self):
         return str(self.value)
 
-    @translate.on(CIR.DoubleLiteral)
+    @translate.on(IR.DoubleLiteral)
     def translate(self):
         return str(self.value)
 
-    @translate.on(CIR.CStringLiteral)
+    @translate.on(IR.CStringLiteral)
     def translate(self):
         s = (self.value
             .replace('\\', '\\\\')
@@ -2027,7 +2027,7 @@ def C(ns):
             .replace("'", "\\'"))
         return f'"{s}"'
 
-    @translate.on(CIR.Operation)
+    @translate.on(IR.Operation)
     def translate(self):
         if self.name == '+':
             left, right = map(translate, self.args)
@@ -2052,19 +2052,19 @@ def C(ns):
     # look like when used in translated C.
     recall_name = Multimethod('recall_name')
 
-    @recall_name.on(CIR.FunctionStub)
+    @recall_name.on(IR.FunctionStub)
     def recall_name(self):
         return self.name if self.extern else encode(self.name)
 
-    @recall_name.on(CIR.ClassStub)
+    @recall_name.on(IR.ClassStub)
     def recall_name(self):
         return encode(self.name) + '()'
 
-    @recall_name.on(CIR.LocalVariableDefinition)
+    @recall_name.on(IR.LocalVariableDefinition)
     def recall_name(self):
         return encode(self.name)
 
-    @recall_name.on(CIR.Parameter)
+    @recall_name.on(IR.Parameter)
     def recall_name(self):
         return encode(self.name)
 
