@@ -1,3 +1,4 @@
+import bar
 
 def main() {
   print('hello world!')

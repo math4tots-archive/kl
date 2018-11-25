@@ -411,19 +411,18 @@ def lexer(ns):
 def IR(ns):
 
     @ns
-    class BaseVariableDefinition:
-        """
-        abstract attributes:
-            name: str  # qualified name
-        """
-
-    @ns
     class Expression(Node):
         pass
 
     @ns
     class Declaration(Node):
         pass
+
+    @ns
+    class ImportDeclaration(Declaration):
+        fields = (
+            ('module_name', str),
+        )
 
     @ns
     class GlobalDeclaration(Declaration):
@@ -439,30 +438,14 @@ def IR(ns):
         )
 
     @ns
-    class ImportBase(Node, BaseVariableDefinition):
-        pass
-
-    @ns
-    class Import(ImportBase):
+    class Import(Node):
         fields = (
             ('module_name', str),
             ('alias', str),
         )
 
     @ns
-    class ImportFrom(ImportBase):
-        fields = (
-            ('module_name', str),
-            ('exported_name', str),
-            ('alias', str),
-        )
-
-        @property
-        def name(self):
-            return f'{self.module_name}.{self.exported_name}'
-
-    @ns
-    class GlobalVariableDefinition(Node, BaseVariableDefinition):
+    class GlobalVariableDefinition(Node):
         fields = (
             ('module_name', str),
             ('short_name', str),
@@ -473,7 +456,7 @@ def IR(ns):
     class Module(Node):
         fields = (
             ('name', str),
-            ('imports', typeutil.List[ImportBase]),
+            ('imports', typeutil.List[Import]),
             ('definitions', typeutil.List[GlobalVariableDefinition]),
         )
 
@@ -892,12 +875,23 @@ def parser(ns):
             else:
                 return parse_global_var(scope)
 
+        def expect_import(scope):
+            token = expect('import')
+            parts = [expect_id()]
+            while consume('.'):
+                parts.append(expect_id())
+            module_name = '.'.join(parts)
+            alias = expect_id() if consume('as') else parts[-1]
+            scope[alias] = IR.ImportDeclaration(token, module_name)
+            return IR.Import(token, module_name, alias)
+
+
         imports = []
         defn_promises = []
 
         token = peek()
         consume_all('\n')
-        while at('from') or at('import'):
+        while at('import'):
             imports.append(expect_import(global_scope))
             consume_all('\n')
 
