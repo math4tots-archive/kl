@@ -360,8 +360,7 @@ def IR(ns):
 
     @ns
     class CType:
-        def convertible_to(self, other):
-            return self == other
+        pass
 
     @ns
     class StructType(CType, ScopeTypeValue):
@@ -409,16 +408,6 @@ def IR(ns):
         def __hash__(self):
             return hash((type(self), self.name))
 
-        def convertible_to(self, other):
-            return self == other or (
-                type(self) is type(other) and
-                (self.name, other.name) in {
-                    ('int', 'long'),
-                    ('int', 'double'),
-                    ('float', 'double'),
-                }
-            )
-
 
     INTEGRAL_TYPES = tuple(
         PrimitiveType(t) for t in PRIMITIVE_TYPE_NAMES if t != 'void')
@@ -438,9 +427,6 @@ def IR(ns):
         def __hash__(self):
             return hash((type(self), self.base))
 
-        def convertible_to(self, other):
-            return self == other or self.base.convertible_to(other)
-
     @ns
     class PointerType(CType):
         def __init__(self, base):
@@ -454,13 +440,6 @@ def IR(ns):
 
         def __hash__(self):
             return hash((type(self), self.base))
-
-        def convertible_to(self, other):
-            return (
-                isinstance(other, PointerType) and
-                    self.base.convertible_to(other.base) or
-                other == PointerType(PrimitiveType('void'))
-            )
 
     @ns
     class FunctionType(CType):
@@ -484,6 +463,57 @@ def IR(ns):
 
         def __hash__(self):
             return hash((type(self), self.return_type, self.parameters))
+
+    # convertible(a, b) asks is a implicitly convertible to b
+    convertible = Multimethod('convertible', 2)
+    ns(convertible, 'convertible')
+
+    @convertible.on(CType, ConstType)
+    def convertible(a, b):
+        return convertible(a, b.base)
+
+    @convertible.on(ConstType, CType)
+    def convertible(a, b):
+        return convertible(a.base, b)
+
+    @convertible.on(PointerType, PointerType)
+    def convertible(a, b):
+        return (
+            a == b or
+            a.base == b.base or
+            b == PointerType(PrimitiveType('void')) or
+            not isinstance(a.base, ConstType) and convertible(a.base, b.base)
+        )
+
+    @convertible.on(PointerType, CType)
+    def convertible(a, b):
+        return False
+
+    @convertible.on(CType, PointerType)
+    def convertible(a, b):
+        return False
+
+    @convertible.on(StructType, CType)
+    def convertible(a, b):
+        return a == b
+
+    @convertible.on(CType, StructType)
+    def convertible(a, b):
+        return a == b
+
+    @convertible.on(PrimitiveType, PrimitiveType)
+    def convertible(a, b):
+        return a == b or (
+            (a.name, b.name) in (
+                ('int', 'long'),
+                ('int', 'double'),
+                ('float', 'double'),
+            )
+        )
+
+    @convertible.on(VarType, VarType)
+    def convertible(a, b):
+        return True
 
     @ns
     class ClassStub(ScopeVariableValue):
@@ -681,7 +711,7 @@ def IR(ns):
 
     @ns
     class IntLiteral(Expression):
-        expression_type = ConstType(PrimitiveType('int'))
+        expression_type = PrimitiveType('int')
 
         fields = (
             ('value', int),
@@ -769,13 +799,12 @@ def IR(ns):
         if key not in type(self)._type_list_cache:
             for expargtypes, rtype in type(self).type_table[self.name]:
                 if len(expargtypes) == len(args) and all(
-                        arg.expression_type.convertible_to(expargtype)
+                        convertible(arg.expression_type, expargtype)
                         for expargtype, arg in zip(expargtypes, args)):
                     type(self)._type_list_cache[key] = rtype
                     break
             else:
-                with push(token):
-                    raise error(f'Unsupported operation {key}')
+                raise Error([token], f'Unsupported operation {key}')
         self.expression_type = type(self)._type_list_cache[key]
 
         return self
@@ -1385,7 +1414,7 @@ def parser(ns):
                 expr = parse_expression(scope) if consume('=') else None
                 expect('\n')
                 if (expr is not None and
-                        not expr.expression_type.convertible_to(type)):
+                        not IR.convertible(expr.expression_type, type)):
                     with push(token):
                         raise error(
                             f'Tried to set value of type '
@@ -1418,7 +1447,7 @@ def parser(ns):
                     with push(token):
                         raise error('Tried to return outside function')
 
-                if not tp.convertible_to(cf.return_type):
+                if not IR.convertible(tp, cf.return_type):
                     with push(token), push(cf.token):
                         raise error(
                             f'Tried to return {tp}, but expected '
@@ -1524,7 +1553,7 @@ def parser(ns):
                             f'Expected {len(ft.parameters)} '
                             f'but got {len(args)}')
             for param, arg in zip(ft.parameters, args):
-                if not arg.expression_type.convertible_to(param):
+                if not IR.convertible(arg.expression_type, param):
                     with push(arg.token):
                         raise error(
                             f'Expected argument of type {param} '
@@ -1738,6 +1767,22 @@ def C(ns):
         def new_tempvar_name(self):
             name = f'{UNIVERSAL_PREFIX}T{self.root.next_tempvar_id}'
             self.root.next_tempvar_id += 1
+            return name
+
+        def declare_var(self, type, name=None):
+            name = self.new_tempvar_name() if name is None else name
+            decl = declare(type, name)
+
+            if type == IR.VarType():
+                self.decls += f'{decl} = KLCnull;'
+            elif isinstance(type, IR.PointerType):
+                self.decls += f'{decl} = NULL;'
+            elif type in IR.INTEGRAL_TYPES:
+                self.decls += f'{decl} = 0;'
+            else:
+                # TODO: Zero initialize structs as well.
+                self.decls += f'{decl};'
+
             return name
 
     encode_map = {
@@ -1957,20 +2002,10 @@ def C(ns):
 
     @translate.on(IR.LocalVariableDefinition)
     def translate(self, out):
-        decl = declare(self.type, encode(self.name))
-
-        if self.type == IR.VarType():
-            out.decls += f'{decl} = KLCnull;'
-        elif isinstance(self.type, IR.PointerType):
-            out.decls += f'{decl} = NULL;'
-        elif self.type in IR.INTEGRAL_TYPES:
-            out.decls += f'{decl} = 0;'
-        else:
-            # TODO: Zero initialize structs as well.
-            out.decls += f'{decl};'
+        cname = out.declare_var(self.type, encode(self.name))
 
         if self.expression:
-            out += f'{encode(self.name)} = {translate(self.expression)};'
+            out += f'{cname} = {translate(self.expression)};'
 
     @translate.on(IR.Return)
     def translate(self, out):
@@ -1978,16 +2013,10 @@ def C(ns):
             out += 'KLCXDrainPool(&KLCXrelease_pool);'
             out += 'return;'
         else:
-            tempvar = out.new_tempvar_name()
-            out += '{'
-            inner = out.spawn(1)
-            inner += (
-                f'{declare(self.expression.expression_type, tempvar)} = '
-                f'{translate(self.expression)};'
-            )
-            inner += f'KLCXDrainPool(&KLCXrelease_pool);'
-            inner += f'return {tempvar};'
-            out += '}'
+            cname = out.declare_var(self.expression.expression_type)
+            out += f'{cname} = {translate(self.expression)};'
+            out += f'KLCXDrainPool(&KLCXrelease_pool);'
+            out += f'return {cname};'
 
     @translate.on(IR.ExpressionStatement)
     def translate(self, out):
