@@ -5,7 +5,7 @@
 #include <limits.h>
 #include <stddef.h>
 
-#define KLC_TAG_POINTER 0
+#define KLC_TAG_POINTER 0 /* Needed so that KLCvar calloc is KLCnull */
 #define KLC_TAG_BOOL 1
 #define KLC_TAG_INT 2
 #define KLC_TAG_FLOAT 3
@@ -32,7 +32,8 @@ typedef struct KLCvar KLCvar;
 typedef struct KLCheader KLCheader;
 typedef struct KLCXClass KLCXClass;
 typedef struct KLCXReleasePool KLCXReleasePool;
-typedef KLCvar KLCXMethod(KLCvar, int, KLCvar*);
+typedef KLCvar KLCXMethod(int, KLCvar*);
+typedef KLCheader* KLCXAllocator();
 typedef void KLCXDeleter(KLCheader*, KLCheader**);
 
 struct KLCvar {
@@ -65,9 +66,9 @@ void KLCXinit(KLCheader*, KLCXClass*);
 KLCXClass* KLCXGetClass(KLCvar);
 const char* KLCXGetClassName(KLCXClass*);
 KLCXMethod* KLCXGetMethodForClass(KLCXClass*, const char*);
-KLCvar KLCXCallMethod(KLCvar, const char*, int, ...);
+KLCvar KLCXCallMethod(const char*, int, ...);
 KLCXClass* KLCXGetClassClass();
-KLCXClass* KLCXNewClass(const char*, KLCXDeleter*);
+KLCXClass* KLCXNewClass(const char*, KLCXAllocator*, KLCXDeleter*);
 KLCXDeleter* KLCXGetDeleter(KLCXClass*);
 void KLCXAddMethod(KLCXClass*, const char*, KLCXMethod*);
 KLCvar KLCXObjectToVar(KLCheader*);

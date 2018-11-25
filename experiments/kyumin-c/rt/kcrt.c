@@ -11,6 +11,7 @@ typedef struct {
 struct KLCXClass {
   KLCheader header;
   char* name;
+  KLCXAllocator* allocator;
   KLCXDeleter* deleter;
   size_t nmethods;
   KLCXMethodEntry* methods;
@@ -56,7 +57,7 @@ KLCXMethod* KLCXGetMethodForClass(KLCXClass* cls, const char* name) {
   return NULL;
 }
 
-KLCvar KLCXCallMethod(KLCvar owner, const char* name, int argc, ...) {
+KLCvar KLCXCallMethod(const char* name, int argc, ...) {
   KLCvar v;
   assert(0); /* TODO */
   return v;
@@ -88,10 +89,12 @@ KLCXClass* KLCXGetClassClass() {
   return classClass;
 }
 
-KLCXClass* KLCXNewClass(const char* name, KLCXDeleter* deleter) {
+KLCXClass* KLCXNewClass(
+    const char* name, KLCXAllocator* allocator, KLCXDeleter* deleter) {
   KLCXClass* cls = malloc(sizeof(KLCXClass));
   KLCXinit((KLCheader*) cls, KLCXGetClassClass());
   cls->name = KLCXCopyString(name);
+  cls->allocator = allocator;
   cls->deleter = deleter;
   initClass(cls);
   return cls;

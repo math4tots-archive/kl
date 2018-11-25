@@ -1904,7 +1904,7 @@ def C(ns):
         out += '{'
         out += f'  if (!{var_name})' '{'
         inner = out.spawn(2)
-        inner += f'{var_name} = KLCXNewClass("{cd.name}", NULL);'
+        inner += f'{var_name} = KLCXNewClass("{cd.name}", NULL, NULL);'
         out += '  }'
         out += f'  return KLCXObjectToVar((KLCheader*) {var_name});'
         out += '}'
