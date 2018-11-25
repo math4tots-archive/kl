@@ -464,6 +464,9 @@ def IR(ns):
         def __hash__(self):
             return hash((type(self), self.return_type, self.parameters))
 
+    VOID = PrimitiveType('void')
+    ns(VOID, 'VOID')
+
     # convertible(a, b) asks is a implicitly convertible to b
     convertible = Multimethod('convertible', 2)
     ns(convertible, 'convertible')
@@ -481,7 +484,7 @@ def IR(ns):
         return (
             a == b or
             a.base == b.base or
-            b == PointerType(PrimitiveType('void')) or
+            b == PointerType(VOID) or
             not isinstance(a.base, ConstType) and convertible(a.base, b.base)
         )
 
@@ -1331,8 +1334,7 @@ def parser(ns):
 
             body = parse_block(function_scope)
 
-            if (type != IR.PrimitiveType('void') and
-                    not analyzer.returns(body)):
+            if type != IR.VOID and not analyzer.returns(body):
                 with push(token):
                     raise error('Control reaches end of non-void function')
 
@@ -1340,7 +1342,7 @@ def parser(ns):
             # an explicit return.
             # This makes sure that the release pool always gets
             # cleaned up.
-            if (type == IR.PrimitiveType('void') and
+            if (type == IR.VOID and
                     not analyzer.returns(body)):
                 body.statements.append(IR.Return(token, None))
 
@@ -1439,7 +1441,7 @@ def parser(ns):
                     expr = parse_expression(scope)
 
                 tp = (
-                    IR.PrimitiveType('void')
+                    IR.VOID
                         if expr is None else expr.expression_type
                 )
                 cf = scope.current_function
@@ -1453,7 +1455,7 @@ def parser(ns):
                             f'Tried to return {tp}, but expected '
                             f'{cf.return_type}')
 
-                if expr is not None and tp == IR.PrimitiveType('void'):
+                if expr is not None and tp == IR.VOID:
                     with push(token):
                         raise error('You cannot return a void expression')
 
