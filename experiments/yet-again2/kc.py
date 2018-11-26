@@ -274,7 +274,7 @@ def lexer(ns):
     KEYWORDS = {
       'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
       'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
-      'struct', 'const',
+      'struct', 'const', 'throw',
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
       'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
       'except', 'case','switch', 'var',
@@ -554,6 +554,7 @@ def IR(ns):
         @property
         def type(self):
             return FunctionType(
+                self.extern,
                 self.rtype,
                 [p.type for p in self.params],
                 self.vararg,
@@ -619,14 +620,15 @@ def IR(ns):
 
     @ns
     class FunctionType(Type, ProxyMixin):
-        def __init__(self, rtype, paramtypes, vararg):
+        def __init__(self, extern, rtype, paramtypes, vararg):
+            self.extern = extern
             self.rtype = rtype
             self.paramtypes = tuple(paramtypes)
             self.vararg = vararg
 
         @property
         def _proxy(self):
-            return (self.rtype, self.paramtypes, self.vararg)
+            return (self.extern, self.rtype, self.paramtypes, self.vararg)
 
         def check_args(self, scope, token, args):
             if self.vararg:
@@ -675,6 +677,12 @@ def IR(ns):
 
     VOID = PRIMITIVE_TYPE_MAP['void']
     ns(VOID, 'VOID')
+
+    VOIDP = PointerType(VOID)
+    ns(VOIDP, 'VOIDP')
+
+    EXCEPTION_POINTER = VOIDP
+    ns(EXCEPTION_POINTER, 'EXCEPTION_POINTER')
 
     convertible = Multimethod('convertible', 2)
     ns(convertible, 'convertible')
@@ -745,6 +753,8 @@ def IR(ns):
     @ns
     class FunctionCall(Expression):
         fields = (
+            ('from_extern', bool),  # iff we are calling form extern func
+            ('to_extern', bool),    # iff are are calling an extern function
             ('type', Type),
             ('f', Expression),
             ('args', typeutil.List[Expression]),
@@ -769,6 +779,14 @@ def IR(ns):
     @ns
     class StringLiteral(Expression):
         type = PointerType(ConstType(PRIMITIVE_TYPE_MAP['char']))
+
+        fields = (
+            ('value', str),
+        )
+
+    @ns
+    class ThrowStringLiteral(Expression):
+        type = VOID
 
         fields = (
             ('value', str),
@@ -1103,7 +1121,14 @@ def parser(ns):
                     with scope.push(token):
                         raise scope.error(f'{f.type} is not a function')
                 f.type.check_args(scope, token, args)
-                return IR.FunctionCall(token, f.type.rtype, f, args)
+                return IR.FunctionCall(
+                    token,
+                    scope['@func'].extern,
+                    f.type.extern,
+                    f.type.rtype,
+                    f,
+                    args,
+                )
             return promise
 
         def parse_postfix(scope):
@@ -1130,6 +1155,16 @@ def parser(ns):
                     raise scope.fubar(f'{decl}')
             return promise
 
+        def pthrowstrlit(scope, token, value):
+            @Promise
+            def promise():
+                if scope['@func'].extern:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'You cannot throw from an extern function')
+                return IR.ThrowStringLiteral(token, value)
+            return promise
+
         def parse_primary(scope):
             token = peek()
             if consume('('):
@@ -1145,6 +1180,10 @@ def parser(ns):
                 return Promise.value(IR.DoubleLiteral(token, token.value))
             if consume('STRING'):
                 return Promise.value(IR.StringLiteral(token, token.value))
+            if consume('throw'):
+                # For now, only allow string literals
+                value = expect('STRING').value
+                return pthrowstrlit(scope, token, value)
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
 
@@ -1184,7 +1223,7 @@ def parser(ns):
                     ))
                 else:
                     params, vararg = expect_params(scope)
-                    bodyp = None if consume('\n') else parse_block(scope)
+                    has_body = not consume('\n')
                     scope[name] = decl = IR.FunctionDeclaration(
                         token,
                         extern,
@@ -1193,8 +1232,11 @@ def parser(ns):
                         name,
                         params,
                         vararg,
-                        bodyp is not None
+                        has_body
                     )
+                    fscope = Scope(scope)
+                    fscope['@func'] = decl
+                    bodyp = parse_block(fscope) if has_body else None
                     return promfunc(scope, token, decl, bodyp)
 
         module_token = peek()
@@ -1238,6 +1280,8 @@ def parser(ns):
 def C(ns):
 
     ENCODED_NAME_PREFIX = 'KLCN'
+
+    OUT_VAR_NAME = 'KLCoutptr'
 
     encode_map = {
         '_': '_U',  # U for Underscore
@@ -1336,6 +1380,7 @@ def C(ns):
 
     def translate_header(module: IR.Module) -> str:
         sb = FractalStringBuilder(0)
+        sb += f'#include "kcrt.h"'
         for inc in module.includes:
             if inc.use_quotes:
                 sb += f'#include "{inc.value}"'
@@ -1410,6 +1455,32 @@ def C(ns):
 
     @declare.on(IR.FunctionType)
     def declare(self, name, pnames=None):
+        # NOTE: For noraml (non-extern) functions,
+        # the function signature is different from
+        # the normal C signature you might expect.
+        # In such cases, we always return void*
+        # (indicate error), and use the first argument
+        # for return type.
+        if self.extern:
+            return declare_raw_c_functype(self, name, pnames)
+        else:
+            rtype = IR.EXCEPTION_POINTER
+            pnames = None if pnames is None else (
+                [OUT_VAR_NAME] + list(pnames)
+            )
+            paramtypes = [IR.PointerType(self.rtype)] + list(self.paramtypes)
+            return declare_raw_c_functype(
+                IR.FunctionType(
+                    extern=self.extern,
+                    rtype=rtype,
+                    paramtypes=paramtypes,
+                    vararg=self.vararg,
+                ),
+                name=name,
+                pnames=pnames,
+            )
+
+    def declare_raw_c_functype(self, name, pnames=None):
         if pnames is None:
             pnames = [''] * len(self.paramtypes)
 
@@ -1444,8 +1515,13 @@ def C(ns):
             out = ctx.out.spawn(1)
             with ctx.using_declout(declout), ctx.using_out(out):
                 retvar = E(self.body, ctx)
-            if decl.rtype != IR.VOID:
-                ctx.out += f'  return {retvar};'
+            if decl.extern:
+                if decl.rtype != IR.VOID:
+                    ctx.out += f'  return {retvar};'
+            else:
+                if decl.rtype != IR.VOID:
+                    ctx.out += f'  *{OUT_VAR_NAME} = {retvar};'
+                ctx.out += f'  return NULL;'
             ctx.out += '}'
 
 
@@ -1503,28 +1579,61 @@ def C(ns):
     def E(self, ctx):
         return str(self.value)
 
-    @E.on(IR.StringLiteral)
-    def E(self, ctx):
-        escaped = (
-            self.value
+    def escape_str(s):
+        return (
+            s
                 .replace('\\', '\\\\')
                 .replace('\t', '\\t')
                 .replace('\n', '\\n')
                 .replace('\r', '\\r')
                 .replace('"', '\\"')
-                .replace("'", "\\'"))
-        return f'"{escaped}"'
+                .replace("'", "\\'")
+        )
+
+    @E.on(IR.StringLiteral)
+    def E(self, ctx):
+        return f'"{escape_str(self.value)}"'
 
     @E.on(IR.FunctionCall)
     def E(self, ctx):
         fvar = E(self.f, ctx)
         argvars = ', '.join(E(arg, ctx) for arg in self.args)
-        if self.type == IR.VOID:
-            ctx.out += f'{fvar}({argvars});'
+
+        if self.to_extern:
+            if self.type == IR.VOID:
+                ctx.out += f'{fvar}({argvars});'
+                return
+            else:
+                retvar = ctx.declare(self.type)
+                ctx.out += f'{retvar} = {fvar}({argvars});'
+                return retvar
         else:
-            retvar = ctx.declare(self.type)
-            ctx.out += f'{retvar} = {fvar}({argvars});'
+            if self.type == IR.VOID:
+                retvar = None
+                retvarp = 'NULL'
+            else:
+                retvar = ctx.declare(self.type)
+                retvarp = f'&{retvar}'
+
+            margvars = (
+                f'{retvarp}, {argvars}' if self.args else retvarp
+            )
+
+            statvar = ctx.declare(IR.EXCEPTION_POINTER)
+            ctx.out += f'{statvar} = {fvar}({margvars});'
+            ctx.out += f'if ({statvar}) ' '{'
+            excout = ctx.out.spawn(1)
+            if self.from_extern:
+                excout += f'KLC_panic_with_error({statvar});'
+            else:
+                excout += f'return {statvar};'
+            ctx.out += '}'
             return retvar
+
+    @E.on(IR.ThrowStringLiteral)
+    def E(self, ctx):
+        escaped = escape_str(self.value)
+        ctx.out += f'return KLC_new_error_with_message("{escaped}");'
 
     @E.on(IR.FunctionName)
     def E(self, ctx):
