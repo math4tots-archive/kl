@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import itertools
 import os
+import re
 import shutil
 import typing
 
@@ -112,6 +113,8 @@ class Source(typing.NamedTuple):
     name: str
     filename: str
     data: str
+
+    module_name_pattern = re.compile(r'^[a-z_]+(?:\.[a-z_]+)*$')
 
     @classmethod
     def from_name_and_path(cls, name, path):
@@ -630,9 +633,9 @@ def IR(ns):
         def _proxy(self):
             return (self.extern, self.rtype, self.paramtypes, self.vararg)
 
-        def check_args(self, scope, token, args):
+        def convert_args(self, scope, token, args):
             if self.vararg:
-                if len(self.paramtypes) < len(args):
+                if len(self.paramtypes) > len(args):
                     with scope.push(token):
                         raise scope.error(
                             f'Expected at least {len(self.paramtypes)} '
@@ -645,12 +648,13 @@ def IR(ns):
                             f'Expected {len(self.paramtypes)} '
                             f'args but got {len(args)}'
                         )
+            converted_args = []
             for i, (pt, arg) in enumerate(zip(self.paramtypes, args), 1):
-                if not convertible(arg.type, pt):
-                    with scope.push(arg.token):
-                        raise scope.error(
-                            f'Expected arg {i} to be {pt} but got '
-                            f'{arg.type}')
+                converted_args.append(scope.convert(arg, pt))
+            converted_args.extend(args[len(self.paramtypes):])
+            for arg in converted_args:
+                arg.type  # validate that this field is set for all args
+            return converted_args
 
     @ns
     class ConstType(Type, ProxyMixin):
@@ -666,8 +670,15 @@ def IR(ns):
         defn = None
         fields = (
             ('module_name', str),
-            ('name', str),
+            ('short_name', str),
         )
+
+        @property
+        def extern(self):
+            # Unfortunately, the 'extern' status of
+            # a struct is not available at 'declaration' time.
+            assert self.defn is not None, self
+            return self.defn.extern
 
     PRIMITIVE_TYPE_MAP = {
         t: PrimitiveTypeDeclaration(builtin_token, t)
@@ -751,6 +762,37 @@ def IR(ns):
             return self.decl.type
 
     @ns
+    class StructField(Node):
+        fields = (
+            ('extern', bool),
+            ('type', Type),
+            ('name', str),
+        )
+
+    @ns
+    class GetStructField(Expression):
+        fields = (
+            ('field_defn', StructField),
+            ('expr', Expression),
+        )
+
+        @property
+        def type(self):
+            return self.field_defn.type
+
+    @ns
+    class SetStructField(Expression):
+        fields = (
+            ('field_defn', StructField),
+            ('expr', Expression),
+            ('valexpr', Expression),
+        )
+
+        @property
+        def type(self):
+            return self.field_defn.type
+
+    @ns
     class FunctionCall(Expression):
         fields = (
             ('from_extern', bool),  # iff we are calling form extern func
@@ -805,6 +847,14 @@ def IR(ns):
             ('module_name', str),
             ('exported_name', str),
             ('alias', str),
+        )
+
+    @ns
+    class StructDefinition(GlobalDefinition):
+        fields = (
+            ('extern', bool),
+            ('decl', StructDeclaration),
+            ('fields', typeutil.Optional[typeutil.List[StructField]]),
         )
 
     @ns
@@ -892,8 +942,17 @@ def parser(ns):
                     raise self.error(f'{repr(key)} not defined')
             return self.table[key]
 
+        def check_module_name(self, module_name: str):
+            if not Source.module_name_pattern.match(module_name):
+                raise self.error(
+                    f'Module names may only contain components with '
+                    f'lower case letters, digits and underscores separated '
+                    f'by dots ({repr(module_name)} is not a valid '
+                    f'module name)')
+
         def _load(self, module_name) -> ('Scope', Promise):
             if module_name not in self.cache:
+                self.check_module_name(module_name)
                 path = os.path.join(
                     self.search_dir,
                     module_name.replace('.', os.path.sep) + '.k',
@@ -919,6 +978,17 @@ def parser(ns):
 
         def load_promise_for(self, module_name):
             return self._load(module_name)[1]
+
+        def convert(self, expr, type):
+            """
+            Returns a version of expr that's ensured to be of type 'type'.
+            If this conversion is not allowed, raises an error.
+            """
+            if not IR.convertible(expr.type, type):
+                with self.push(expr.token):
+                    raise self.error(
+                        f'{expr.type} is not convertible to {type}')
+            return expr
 
     @ns
     def parse(
@@ -1116,11 +1186,11 @@ def parser(ns):
             @Promise
             def promise():
                 f = fp.resolve()
-                args = argsp.resolve()
+                raw_args = argsp.resolve()
                 if not isinstance(f.type, IR.FunctionType):
                     with scope.push(token):
                         raise scope.error(f'{f.type} is not a function')
-                f.type.check_args(scope, token, args)
+                args = f.type.convert_args(scope, token, raw_args)
                 return IR.FunctionCall(
                     token,
                     scope['@func'].extern,
@@ -1131,6 +1201,45 @@ def parser(ns):
                 )
             return promise
 
+        def get_field_defn(scope, token, type, field_name):
+            if not isinstance(type, IR.StructDeclaration):
+                with scope.push(token):
+                    raise scope.error(f'{type} is not a struct type')
+            defn = type.defn
+            fields = [f for f in defn.fields if f.name == field_name]
+            if not fields:
+                with scope.push(token):
+                    raise scope.error(
+                        f'{field_name} is not a member of {type}')
+            field, = fields
+            return field
+
+        def pgetfield(scope, token, exprp, fname):
+            @Promise
+            def promise():
+                expr = exprp.resolve()
+                defn = get_field_defn(scope, token, expr.type, fname)
+                return IR.GetStructField(
+                    token,
+                    defn,
+                    expr,
+                )
+            return promise
+
+        def psetfield(scope, token, exprp, fname, valp):
+            @Promise
+            def promise():
+                expr = exprp.resolve()
+                defn = get_field_defn(scope, token, expr.type, fname)
+                val = scope.convert(valp.resolve(), defn.type)
+                return IR.SetStructField(
+                    token,
+                    defn,
+                    expr,
+                    val,
+                )
+            return promise
+
         def parse_postfix(scope):
             expr = parse_primary(scope)
             while True:
@@ -1138,6 +1247,13 @@ def parser(ns):
                 if at('('):
                     argsp = parse_args(scope)
                     expr = pfcall(scope, token, expr, argsp)
+                elif consume('.'):
+                    name = expect_id()
+                    if consume('='):
+                        valp = parse_expression(scope)
+                        expr = psetfield(scope, token, expr, name, valp)
+                    else:
+                        expr = pgetfield(scope, token, expr, name)
                 else:
                     break
             return expr
@@ -1190,22 +1306,61 @@ def parser(ns):
         def promfunc(scope, token, decl, bodyp):
             @Promise
             def promise():
-                body = bodyp.resolve() if bodyp else None
-                if body is not None:
-                    if (decl.rtype != IR.VOID and
-                            not IR.convertible(body.type, decl.rtype)):
-                        with scope.push(token):
-                            raise scope.error(
-                                f'Function expected to return {decl.rtype} '
-                                f'but actually returns {body.type}')
+                raw_body = bodyp.resolve() if bodyp else None
+                if raw_body is not None and decl.rtype != IR.VOID:
+                    body = scope.convert(raw_body, decl.rtype)
+                else:
+                    body = raw_body
+
                 return IR.FunctionDefinition(token, decl, body)
+            return promise
+
+        def parse_struct(scope, token, extern):
+            name = expect_id()
+            decl = scope.struct_type(token, module_name, name)
+            if scope[name] is not decl:
+                scope[name] = decl
+
+            fields = []
+            expect('{')
+            consume_all('\n')
+            while not consume('}'):
+                field_token = peek()
+                field_extern = bool(consume('extern'))
+                field_type = expect_type(scope)
+                field_name = expect_id()
+                fields.append(IR.StructField(
+                    field_token,
+                    field_extern or extern,
+                    field_type,
+                    field_name,
+                ))
+                consume_all('\n')
+
+            @Promise
+            def promise():
+                for field in fields:
+                    if isinstance(field.type, IR.StructDeclaration):
+                        if field.type.defn is None:
+                            with scope.push(field.token):
+                                raise scope.error(
+                                    f'Type {field.type} used as struct '
+                                    f'member before being defined'
+                                )
+                decl.defn = IR.StructDefinition(
+                    token,
+                    extern,
+                    decl,
+                    fields,
+                )
+                return decl.defn
             return promise
 
         def parse_global(scope):
             token = peek()
             extern = bool(consume('extern'))
-            if at('struct'):
-                return parse_struct(token, extern)
+            if consume('struct'):
+                return parse_struct(scope, token, extern)
             else:
                 type = expect_type(scope)
                 name = expect_id()
@@ -1281,6 +1436,8 @@ def C(ns):
 
     ENCODED_NAME_PREFIX = 'KLCN'
 
+    ENCODED_FIELD_PREFIX = 'KLCF'
+
     OUT_VAR_NAME = 'KLCoutptr'
 
     encode_map = {
@@ -1330,10 +1487,13 @@ def C(ns):
             self.next_temp_var_id += 1
             return name
 
-        def declare(self, t: IR.Type):
-            name = self.new_temp_var_name()
-            self._decls += declare(t, name) + ';'
-            return name
+        def declare(self, t: IR.Type, cname=None):
+            cname = (
+                self.new_temp_var_name() if cname is None else
+                cname
+            )
+            self._decls += f'{declare(t, cname)} = {init_expr_for(t)};'
+            return cname
 
         @contextlib.contextmanager
         def using_out(self, out):
@@ -1379,7 +1539,17 @@ def C(ns):
         )
 
     def translate_header(module: IR.Module) -> str:
-        sb = FractalStringBuilder(0)
+        guard_name = (
+            relative_header_path_from_name(module.name)
+                .replace('.', '_')
+                .replace(os.path.sep, '_')
+        )
+        msb = FractalStringBuilder(0)
+        msb += f'#ifndef {guard_name}'
+        msb += f'#define {guard_name}'
+        sb = msb.spawn()
+        msb += f'#endif/*{guard_name}*/'
+
         sb += f'#include "kcrt.h"'
         for inc in module.includes:
             if inc.use_quotes:
@@ -1391,6 +1561,8 @@ def C(ns):
             path = relative_header_path_from_name(imp.module_name)
             sb += f'#include "{path}"'
 
+        fwdstruct = sb.spawn()
+        structs = sb.spawn()
         gvardecls = sb.spawn()
         fdecls = sb.spawn()
 
@@ -1400,10 +1572,31 @@ def C(ns):
                     gvardecls += f'extern {proto_for(defn)};'
             elif isinstance(defn, IR.FunctionDefinition):
                 fdecls += f'extern {proto_for(defn)};'
+            elif isinstance(defn, IR.StructDefinition):
+                cname = c_struct_name(defn.decl)
+                # We only actually define the struct itself if
+                #   1. the struct was not declard extern, and
+                #   2. a body was explicitly provided.
+                # If there is no body, this might not even be
+                # a struct.
+                if defn.fields is not None and not defn.extern:
+                    fwdstruct += f'typedef struct {cname} {cname};'
+                    structs += f'struct {cname} ' '{'
+                    fields_out = structs.spawn(1)
+                    for field in defn.fields:
+                        fields_out += declare(
+                            field.type,
+                            c_struct_field_name(field),
+                        ) + ';';
+                    if not defn.fields:
+                        # Empty structs aren't standard C.
+                        # Add a dummy field.
+                        fields_out += f'char dummy;'
+                    structs += '};'
             else:
                 raise Fubar([], defn)
 
-        return str(sb)
+        return str(msb)
 
     def translate_source(module: IR.Module) -> str:
         ctx = Context()
@@ -1416,6 +1609,18 @@ def C(ns):
         return (
             encode(name) if module_name is None else
             encode(f'{module_name}.{name}')
+        )
+
+    def c_struct_name(decl: IR.StructDeclaration):
+        return (
+            decl.short_name if decl.extern else
+            qualify(decl.module_name, decl.short_name)
+        )
+
+    def c_struct_field_name(defn: IR.StructField):
+        return (
+            defn.name if defn.extern else
+            encode(defn.name, prefix=ENCODED_FIELD_PREFIX)
         )
 
     # Get the C name of variable with given declaration
@@ -1444,6 +1649,11 @@ def C(ns):
     @declare.on(IR.PrimitiveTypeDeclaration)
     def declare(self, name):
         return f'{self.name} {name}'.strip()
+
+    @declare.on(IR.StructDeclaration)
+    def declare(self, name):
+        cname = c_struct_name(self)
+        return f'{cname} {name}'.strip()
 
     @declare.on(IR.PointerType)
     def declare(self, name):
@@ -1505,6 +1715,10 @@ def C(ns):
     def D(self, ctx):
         ctx.out += proto_for(self) + ';'
 
+    @D.on(IR.StructDefinition)
+    def D(self, ctx):
+        pass
+
     @D.on(IR.FunctionDefinition)
     def D(self, ctx):
         decl = self.decl
@@ -1523,7 +1737,6 @@ def C(ns):
                     ctx.out += f'  *{OUT_VAR_NAME} = {retvar};'
                 ctx.out += f'  return NULL;'
             ctx.out += '}'
-
 
     proto_for = Multimethod('proto_for')
 
@@ -1555,6 +1768,8 @@ def C(ns):
         out = ctx.out.spawn(1)
         last_retvar = None
         with ctx.using_declout(declout), ctx.using_out(out):
+            for decl in self.decls:
+                ctx.declare(decl.type, cvarname(decl))
             for expr in self.exprs:
                 last_retvar = E(expr, ctx)
         if self.type != IR.VOID:
@@ -1574,6 +1789,28 @@ def C(ns):
     @E.on(IR.LocalName)
     def E(self, ctx):
         return cvarname(self.decl)
+
+    @E.on(IR.GetStructField)
+    def E(self, ctx):
+        # NOTE: It's kind of inefficient the way do it here
+        # because of the copying we do with structs.
+        structvar = E(self.expr, ctx)
+        retvar = ctx.declare(self.type)
+        cfname = c_struct_field_name(self.field_defn)
+        ctx.out += f'{retvar} = {structvar}.{cfname};'
+        return retvar
+
+    @E.on(IR.SetStructField)
+    def E(self, ctx):
+        # NOTE: It's kind of inefficient the way do it here
+        # because of the copying we do with structs.
+        structvar = E(self.expr, ctx)
+        resultvar = E(self.valexpr, ctx)
+        retvar = ctx.declare(self.type)
+        cfname = c_struct_field_name(self.field_defn)
+        ctx.out += f'{retvar} = {resultvar};'
+        ctx.out += f'{structvar}.{cfname} = {retvar};'
+        return retvar
 
     @E.on(IR.IntLiteral)
     def E(self, ctx):
@@ -1638,6 +1875,25 @@ def C(ns):
     @E.on(IR.FunctionName)
     def E(self, ctx):
         return cvarname(self.decl)
+
+    # For initializing variables when declaring them
+    init_expr_for = Multimethod('init_expr_for')
+
+    @init_expr_for.on(IR.StructDeclaration)
+    def init_expr_for(self):
+        return '{0}'
+
+    @init_expr_for.on(IR.PointerType)
+    def init_expr_for(self):
+        return 'NULL'
+
+    @init_expr_for.on(IR.RawPointerType)
+    def init_expr_for(self):
+        return 'NULL'
+
+    @init_expr_for.on(IR.PrimitiveTypeDeclaration)
+    def init_expr_for(self):
+        return '0'
 
 
 def main():

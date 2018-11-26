@@ -4,3 +4,6 @@ void sayhi() {
   printf("Hi\n")
   throw 'foo'
 }
+
+struct Baz {
+}
