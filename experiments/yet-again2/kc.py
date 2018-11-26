@@ -179,56 +179,6 @@ def pcall(f, *mixed_args):
     return promise
 
 
-class Node(object):
-    def __init__(self, token, *args):
-        self.token = token
-        for (fname, ftype), arg in zip(type(self).fields, args):
-            if not isinstance(arg, ftype):
-                raise TypeError('Expected type of %r to be %r, but got %r' % (
-                    fname, ftype, arg))
-            setattr(self, fname, arg)
-        if len(type(self).fields) != len(args):
-            raise TypeError('%s expects %s arguments, but got %s' % (
-                type(self).__name__, len(type(self).fields), len(args)))
-
-    def __repr__(self):
-        return '%s(%s)' % (
-            type(self).__name__,
-            ', '.join(repr(getattr(self, n)) for n, _ in type(self).fields),
-        )
-
-    def foreach(self, f):
-        self.map(f)
-
-    def map(self, f):
-        nt = type(self)
-        return nt(self.token, *[
-            Node._map_helper(getattr(self, fieldname))
-            for fieldname, _ in nt.fields
-        ])
-
-    @classmethod
-    def _map_helper(cls, f, value):
-        if isinstance(value, (type(None), int, float, bool, str, IR.CType)):
-            return value
-        if isinstance(value, list):
-            return [Node._map_helper(x) for x in value]
-        if isinstance(value, tuple):
-            return tuple(Node._map_helper(x) for x in value)
-        if isinstance(value, set):
-            return {Node._map_helper(x) for x in value}
-        if isinstance(value, dict):
-            return {
-                Node._map_helper(k): Node._map_helper(v)
-                for k, v in value.items()
-            }
-        if isinstance(value, Node):
-            return f(value)
-        raise TypeError(
-            f'Unsupported Node.map element type '
-            f'{type(value)} ({repr(value)})')
-
-
 @Namespace
 def typeutil(ns):
     class FakeType(object):
@@ -273,6 +223,19 @@ def typeutil(ns):
 
 @Namespace
 def lexer(ns):
+
+    PRIMITIVE_TYPE_NAMES = (
+        'void',
+        'char',
+        'short',
+        'int',
+        'long',
+        'float',
+        'double',
+        'size_t',
+    )
+    ns(PRIMITIVE_TYPE_NAMES, 'PRIMITIVE_TYPE_NAMES')
+
     KEYWORDS = {
       'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
       'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
@@ -280,7 +243,7 @@ def lexer(ns):
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
       'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
       'except', 'case','switch', 'var',
-    }
+    } | set(PRIMITIVE_TYPE_NAMES)
     ns(KEYWORDS, 'KEYWORDS')
 
     SYMBOLS = tuple(reversed(sorted([
@@ -424,21 +387,388 @@ def lexer(ns):
                 raise error([i], 'Unrecognized token')
 
 
+builtin_token = lexer.lex(Source(*(['builtin'] * 3)))[0]
+
+
 @Namespace
 def IR(ns):
-    pass
+
+    @ns
+    class Node(object):
+        def __init__(self, token, *args):
+            self.token = token
+            for (fname, ftype), arg in zip(type(self).fields, args):
+                if not isinstance(arg, ftype):
+                    raise TypeError('Expected type of %r to be %r, but got %r' % (
+                        fname, ftype, arg))
+                setattr(self, fname, arg)
+            if len(type(self).fields) != len(args):
+                raise TypeError('%s expects %s arguments, but got %s' % (
+                    type(self).__name__, len(type(self).fields), len(args)))
+
+        def __repr__(self):
+            return '%s(%s)' % (
+                type(self).__name__,
+                ', '.join(repr(getattr(self, n)) for n, _ in type(self).fields),
+            )
+
+        def format(self, depth=0, out=None):
+            return_ = out is None
+            out = [] if out is None else out
+            ind = '  ' * depth
+            out.append(f'{ind}{type(self).__name__}\n')
+            for fname, _ in type(self).fields:
+                fval = getattr(self, fname)
+                if isinstance(fval, list) and fval:
+                    out.append(f'{ind}  {fname}...\n')
+                    for item in fval:
+                        if isinstance(item, Node):
+                            item.format(depth + 2, out)
+                        else:
+                            out.append(f'{ind}    {repr(item)}\n')
+                elif isinstance(fval, CollectionNode):
+                    out.append(f'{ind}  {fname}\n')
+                    fval.format(depth + 2, out)
+                else:
+                    out.append(f'{ind}  {fname} = {repr(fval)}\n')
+
+            if return_:
+                return ''.join(out)
+
+
+
+        def foreach(self, f):
+            self.map(f)
+
+        def map(self, f):
+            nt = type(self)
+            return nt(self.token, *[
+                Node._map_helper(getattr(self, fieldname))
+                for fieldname, _ in nt.fields
+            ])
+
+        @classmethod
+        def _map_helper(cls, f, value):
+            if isinstance(value, (type(None), int, float, bool, str, IR.CType)):
+                return value
+            if isinstance(value, list):
+                return [Node._map_helper(x) for x in value]
+            if isinstance(value, tuple):
+                return tuple(Node._map_helper(x) for x in value)
+            if isinstance(value, set):
+                return {Node._map_helper(x) for x in value}
+            if isinstance(value, dict):
+                return {
+                    Node._map_helper(k): Node._map_helper(v)
+                    for k, v in value.items()
+                }
+            if isinstance(value, Node):
+                return f(value)
+            raise TypeError(
+                f'Unsupported Node.map element type '
+                f'{type(value)} ({repr(value)})')
+
+    @ns
+    class CollectionNode(Node):
+        """A marker class to help with Node.format"""
+
+    @ns
+    class Type:
+        """Marker class for what values indicate Types.
+        """
+
+        @property
+        def is_primitive(self):
+            return False
+
+        @property
+        def is_pointer(self):
+            return False
+
+    @ns
+    class Declaration(Node):
+        """Marker class for values that can be looked up by a Scope.
+
+        abstract
+            token: Token
+        """
+
+    @ns
+    class VariableDeclaration(Declaration):
+        pass
+
+    @ns
+    class Parameter(VariableDeclaration):
+        fields = (
+            ('type', Type),
+            ('name', str),
+        )
+
+    @ns
+    class FunctionDeclaration(Declaration):
+        fields = (
+            ('extern', bool),
+            ('rtype', Type),
+            ('module_name', str),
+            ('short_name', str),
+            ('params', typeutil.List[Parameter]),
+            ('vararg', bool),
+            ('has_body', bool),
+        )
+
+        @property
+        def type(self):
+            return FunctionPointerType(
+                self.rtype,
+                [p.type for p in self.params],
+                self.vararg,
+            )
+
+    @ns
+    class GlobalVariableDeclaration(VariableDeclaration):
+        fields = (
+            ('type', Type),
+            ('module_name', str),
+            ('short_name', str),
+        )
+
+    @ns
+    class LocalVariableDeclaration(VariableDeclaration):
+        fields = (
+            ('type', Type),
+            ('name', str),
+        )
+
+    @ns
+    class TypeDeclaration(Type, Declaration):
+        pass
+
+    @ns
+    class PrimitiveTypeDeclaration(TypeDeclaration):
+        fields = (
+            ('name', str),
+        )
+
+        @property
+        def is_primitive(self):
+            return True
+
+    class ProxyMixin:
+        def __eq__(self, other):
+            return type(self) is type(other) and self._proxy == other._proxy
+
+        def __hash__(self):
+            return hash((type(self), self._proxy))
+
+        def __repr__(self):
+            return f'{type(self).__name__}{self._proxy}'
+
+    @ns
+    class RawPointerType(Type, ProxyMixin):
+        def __init__(self, base):
+            self.base = base
+
+        @property
+        def _proxy(self):
+            return (self.base,)
+
+    @ns
+    class PointerType(Type, ProxyMixin):
+        def __init__(self, base):
+            self.base = base
+
+        @property
+        def _proxy(self):
+            return (self.base,)
+
+    @ns
+    class FunctionPointerType(Type, ProxyMixin):
+        def __init__(self, rtype, paramtypes, vararg):
+            self.rtype = rtype
+            self.paramtypes = tuple(paramtypes)
+            self.vararg = vararg
+
+        @property
+        def _proxy(self):
+            return (self.rtype, self.paramtypes, self.vararg)
+
+        def check_args(self, scope, token, args):
+            if self.vararg:
+                if len(self.paramtypes) < len(args):
+                    with scope.push(token):
+                        raise scope.error(
+                            f'Expected at least {len(self.paramtypes)} '
+                            f'args but got {len(args)}'
+                        )
+            else:
+                if len(self.paramtypes) != len(args):
+                    with scope.push(token):
+                        raise scope.error(
+                            f'Expected {len(self.paramtypes)} '
+                            f'args but got {len(args)}'
+                        )
+            for i, (pt, arg) in enumerate(zip(self.paramtypes, args), 1):
+                if not convertible(arg.type, pt):
+                    with scope.push(arg.token):
+                        raise scope.error(
+                            f'Expected arg {i} to be {pt} but got '
+                            f'{arg.type}')
+
+    @ns
+    class ConstType(Type, ProxyMixin):
+        def __init__(slf, base):
+            self.base = base
+
+        @property
+        def _proxy(self):
+            return (self.base,)
+
+    @ns
+    class StructDeclaration(TypeDeclaration):
+        defn = None
+        fields = (
+            ('module_name', str),
+            ('name', str),
+        )
+
+    PRIMITIVE_TYPE_MAP = {
+        t: PrimitiveTypeDeclaration(builtin_token, t)
+        for t in lexer.PRIMITIVE_TYPE_NAMES
+    }
+    ns(PRIMITIVE_TYPE_MAP, 'PRIMITIVE_TYPE_MAP')
+
+    VOID = PRIMITIVE_TYPE_MAP['void']
+    ns(VOID, 'VOID')
+
+    convertible = Multimethod('convertible', 2)
+
+    @convertible.on(PrimitiveTypeDeclaration, PrimitiveTypeDeclaration)
+    def convertible(a, b):
+        return a == b or (a.name, b.name) in {
+            ('int', 'long'),
+        }
+
+    @convertible.on(Type, Type)
+    def convertible(a, b):
+        return a == b
+
+    @ns
+    class GlobalDefinition(Node):
+        pass
+
+    @ns
+    class Expression(Node):
+        """
+        abstract
+            type: Type
+        """
+
+    @ns
+    class Block(CollectionNode):
+        fields = (
+            ('decls', typeutil.List[LocalVariableDeclaration]),
+            ('exprs', typeutil.List[Expression]),
+        )
+
+        @property
+        def type(self):
+            return self.exprs[-1].type if self.exprs else VOID
+
+    @ns
+    class FunctionName(Expression):
+        fields = (
+            ('decl', FunctionDeclaration),
+        )
+
+        @property
+        def type(self):
+            return self.decl.type
+
+    @ns
+    class LocalName(Expression):
+        fields = (
+            ('decl', LocalVariableDeclaration),
+        )
+
+        @property
+        def type(self):
+            return self.decl.type
+
+    @ns
+    class SetLocalName(Expression):
+        fields = (
+            ('decl', LocalVariableDeclaration),
+            ('expr', Expression),
+        )
+
+        @property
+        def type(self):
+            return self.decl.type
+
+    @ns
+    class FunctionCall(Expression):
+        fields = (
+            ('type', Type),
+            ('f', Expression),
+            ('args', typeutil.List[Expression]),
+        )
+
+    @ns
+    class IntLiteral(Expression):
+        type = PRIMITIVE_TYPE_MAP['int']
+
+        fields = (
+            ('value', int),
+        )
+
+    @ns
+    class DoubleLiteral(Expression):
+        type = PRIMITIVE_TYPE_MAP['double']
+
+        fields = (
+            ('value', float),
+        )
+
+    @ns
+    class FromImport(Node):
+        fields = (
+            ('module_name', str),
+            ('exported_name', str),
+            ('alias', str),
+        )
+
+    @ns
+    class FunctionDefinition(GlobalDefinition):
+        fields = (
+            ('decl', FunctionDeclaration),
+            ('body', typeutil.Optional[Block]),
+        )
+
+    @ns
+    class GlobalVariableDefinition(GlobalDefinition):
+        fields = (
+            ('decl', GlobalVariableDeclaration),
+        )
+
+    @ns
+    class Module(Node):
+        fields = (
+            ('imports', typeutil.List[FromImport]),
+            ('definitions', typeutil.List[GlobalDefinition]),
+        )
 
 
 @Namespace
 def parser(ns):
 
-    builtin_token = lexer.lex(Source(*(['builtin'] * 3)))[0]
-
     class Scope:
-        def __init__(self, parent):
+        def __init__(self, parent, search_dir=None):
+            if search_dir is None:
+                search_dir = parent.search_dir
             self.parent = parent
             self.table = dict()
-            self.root = self if parent is None else self.root
+            self.search_dir = search_dir
+            self.root = self if parent is None else parent.root
             self.stack = [] if parent is None else parent.stack
             self.cache = dict() if parent is None else parent.cache
 
@@ -452,6 +782,17 @@ def parser(ns):
                 yield
             finally:
                 self.stack.pop()
+
+        def struct_type(self, token, module_name, name):
+            if name not in self:
+                self[name] = decl = (
+                    IR.StructDeclaration(token, module_name, name)
+                )
+            decl = self[name]
+            if not isinstance(decl, IR.StructDeclaration):
+                with scope.push(token), scope.push(decl.token):
+                    raise f'{name} is not a struct'
+            return decl
 
         def __getitem__(self, key: str) -> IR.Declaration:
             if key in self.table:
@@ -479,27 +820,49 @@ def parser(ns):
                     raise self.error(f'{repr(key)} not defined')
             return self.table[key]
 
-        def load(self, module_name) -> ('Scope', Promise):
+        def _load(self, module_name) -> ('Scope', Promise):
             if module_name not in self.cache:
+                path = os.path.join(
+                    search_dir,
+                    module_name.replace('.', os.path.sep) + '.k',
+                )
+                try:
+                    with open(path) as f:
+                        data = f.read()
+                except IOError as e:
+                    raise self.error(
+                        f'Could not read {module_name} ({path})')
                 self.cache[module_name] = _parse(
-                    self,
-                    Source.from_name_and_path(
-                        module_name,
-                        os.path.join(
-                            'srcs',
-                            module_name.replace('.', os.path.sep) + '.k',
-                        ),
+                    self.root,
+                    Source(
+                        name=module_name,
+                        filename=path,
+                        data=data,
                     ),
                 )
             return self.cache[module_name]
 
+        def load_scope_for(self, module_name):
+            return self._load(module_name)[0]
+
+        def load_promise_for(self, module_name):
+            return self._load(module_name)[1]
+
     @ns
-    def parse(source: Source) -> typing.Dict[str, (Scope, Promise)]:
-        global_scope = Scope(None)
-        _parse(global_scope, source)
-        return global_scope.cache
+    def parse(
+            source: Source,
+            search_dir: str) -> typing.Dict[str, IR.Module]:
+        global_scope = Scope(None, search_dir=search_dir)
+        result = _parse(global_scope, source)
+        global_scope.cache[source.name] = result
+        return {
+            name: p.resolve() for
+                name, (scope, p) in
+                global_scope.cache.items()
+        }
 
     def _parse(global_scope: Scope, source: Source) -> (Scope, Promise):
+        assert global_scope.parent is None
         module_scope = Scope(global_scope)
         module_name = source.name
         tokens = lexer.lex(source)
@@ -551,236 +914,237 @@ def parser(ns):
         def expect_id():
             return expect('NAME').value
 
-        def parse_block(scope):
+        def parse_import(scope):
             token = peek()
-            expect('{')
-            exprps = []
+            expect('from')
+            parts = [expect_id()]
+            while consume('.'):
+                parts.append(expect_id())
+            module_name = '.'.join(parts)
+            expect('import')
+            exported_name = expect_id()
+            alias = expect_id() if consume('as') else exported_name
+            with scope.push(token):
+                exported_defn = (
+                    scope.load_scope_for(module_name)[exported_name]
+                )
+            scope[alias] = exported_defn
+            return Promise(lambda:
+                IR.FromImport(token, module_name, exported_name, alias))
+
+        def expect_type(scope):
+            token = peek()
+            if token.type in IR.PRIMITIVE_TYPE_MAP:
+                gettok()
+                type = IR.PRIMITIVE_TYPE_MAP[token.type]
+            else:
+                name = expect_id()
+                type = scope.struct_type(token, module_name, name)
+            while True:
+                token = peek()
+                if consume('!'):
+                    type = IR.RawPointerType(type)
+                elif consume('*'):
+                    type = IR.PointerType(type)
+                elif consume('const'):
+                    type = IR.ConstType(type)
+                else:
+                    break
+            return type
+
+        def expect_params(scope):
+            expect('(')
+            params = []
+            vararg = False
+            while not consume(')'):
+                ptok = peek()
+                ptype = expect_type(scope)
+                pname = expect_id()
+                params.append(IR.Parameter(ptok, ptype, pname))
+            return params, vararg
+
+        def at_variable_declaration():
+            if peek().type in IR.PRIMITIVE_TYPE_MAP:
+                return True
+
+            # Whitelist a few patterns as being the start
+            # of a variable declaration
+            seqs = [
+                ['NAME', 'NAME', '='],
+                ['NAME', 'NAME', '\n'],
+                ['NAME', '*', '*'],
+                ['NAME', '*', 'NAME', '='],
+                ['NAME', '*', 'NAME', '\n'],
+                ['NAME', '!'],
+                ['NAME', 'const'],
+            ]
+            for seq in seqs:
+                if [t.type for t in tokens[i:i+len(seq)]] == seq:
+                    return True
+
+            return False
+
+        def parse_block(parent_scope):
+            scope = Scope(parent_scope)
+            token = expect('{')
+            decls = []
+            exprs = []
             with skipping_newlines(False):
                 consume_all('\n')
                 while not consume('}'):
-                    exprps.append(parse_expression(scope))
+                    if at_variable_declaration():
+                        dtoken = peek()
+                        dtype = expect_type(scope)
+                        dname = expect_id()
+                        expr = (
+                            parse_expression(scope) if consume('=') else None
+                        )
+                        expect('\n')
+                        consume_all('\n')
+                        decl = IR.LocalVariableDeclaration(
+                            dtoken,
+                            dtype,
+                            dname,
+                        )
+                        decls.append(decl)
+                        scope[dname] = decl
+                        if expr is not None:
+                            exprs.append(pcall(
+                                IR.SetLocalName, dtoken, decl, expr))
+                    else:
+                        exprs.append(parse_expression(scope))
                     consume_all('\n')
-            return Promise(lambda:
-                IR.Block(token, [p.resolve() for p in exprps]))
-
-        def expect_params(scope):
-            params = []
-            expect('(')
-            with skipping_newlines(True):
-                while not consume(')'):
-                    token = peek()
-                    name = expect_id()
-                    params.append(IR.Param(token, name))
-                    if not consume(','):
-                        expect(')')
-                        break
-            return params
+            return Promise(lambda: IR.Block(
+                token, decls, [p.resolve() for p in exprs]))
 
         def parse_expression(scope):
             return parse_postfix(scope)
 
         def parse_args(scope):
-            expect('(')
             argps = []
-            with skipping_newlines(True):
-                while not consume(')'):
-                    argps.append(parse_expression(scope))
-                    if not consume(','):
-                        expect(')')
-                        break
-            return Promise(lambda: [argp.resolve() for argp in argps])
+            expect('(')
+            while not consume(')'):
+                argps.append(parse_expression(scope))
+                if not consume(','):
+                    expect(')')
+                    break
+            return Promise(lambda: [p.resolve() for p in argps])
+
+        def pfcall(scope, token, fp, argsp):
+            @Promise
+            def promise():
+                f = fp.resolve()
+                args = argsp.resolve()
+                if not isinstance(f.type, IR.FunctionPointerType):
+                    with scope.push(token):
+                        raise scope.error(f'{f.type} is not a function')
+                f.type.check_args(scope, token, args)
+                return IR.FunctionCall(token, f.type.rtype, f, args)
+            return promise
 
         def parse_postfix(scope):
-            exprp = parse_primary(scope)
+            expr = parse_primary(scope)
             while True:
-                token = peek()
                 if at('('):
                     argsp = parse_args(scope)
-                    exprp = pcall(IR.Call, token, exprp, argsp)
-                elif consume('.'):
-                    name = expect_id()
-                    if consume('='):
-                        vexpr = parse_expression()
-                        exprp = pcall(IR.SetAttr, token, exprp, name, vexpr)
-                    else:
-                        exprp = pcall(IR.GetAttr, token, expr, name)
+                    expr = pfcall(scope, token, expr, argsp)
                 else:
                     break
-            return exprp
+            return expr
+
+        def pname(scope, token, name):
+            @Promise
+            def promise():
+                with scope.push(token):
+                    decl = scope[name]
+                if isinstance(decl, IR.FunctionDeclaration):
+                    return IR.FunctionName(token, decl)
+                if isinstance(decl, IR.LocalVariableDeclaration):
+                    return IR.LocalName(token, decl)
+                with scope.push(token):
+                    raise scope.fubar(f'{decl}')
+            return promise
 
         def parse_primary(scope):
             token = peek()
             if consume('('):
                 with skipping_newlines(True):
-                    exprp = parse_expression(scope)
-                    expect(')')
-                    return exprp
-            if consume('$'):
-                return parse_block(scope)
+                    expr = parse_expression(scope)
+                    return expr
+            if consume('NAME'):
+                name = token.value
+                return pname(scope, token, name)
             if consume('INT'):
                 return Promise.value(IR.IntLiteral(token, token.value))
             if consume('FLOAT'):
-                return Promise.value(IR.FloatLiteral(token, token.value))
-            if consume('STRING'):
-                return Promise.value(IR.StringLiteral(token, token.value))
-            if consume('NAME'):
-                name = token.value
-                if consume('='):
-                    exprp = parse_expression(scope)
-                    if name not in scope:
-                        scope[name] = IR.LocalDeclaration(token, name)
-                    @Promise
-                    def promise():
-                        with scope.push(token):
-                            defn = scope[name]
-                        if isinstance(defn, IR.GlobalDeclaration):
-                            return IR.SetAttr(
-                                token,
-                                IR.GetModule(token, defn.module_name),
-                                defn.short_name,
-                                exprp.resolve(),
-                            )
-                        elif isinstance(defn, IR.LocalDeclaration):
-                            return IR.SetLocal(
-                                token,
-                                defn.name,
-                                exprp.resolve(),
-                            )
-                        elif isinstance(defn, IR.ModuleDeclaration):
-                            with scope.push(token):
-                                raise scope.error(
-                                    f'{name} ({defn.module_name}) '
-                                    f'is a module!')
-                        else:
-                            with scope.push(token):
-                                raise scope.fubar(repr(defn))
-                    return promise
-                else:
-                    @Promise
-                    def promise():
-                        with scope.push(token):
-                            defn = scope[name]
-                        if isinstance(defn, IR.GlobalDeclaration):
-                            return IR.GetAttr(
-                                token,
-                                IR.GetModule(token, defn.module_name),
-                                defn.short_name,
-                            )
-                        elif isinstance(defn, IR.LocalDeclaration):
-                            return IR.GetLocal(token, defn.name)
-                        elif isinstance(defn, IR.ModuleDeclaration):
-                            return IR.GetModule(token, defn.name)
-                        else:
-                            with scope.push(token):
-                                raise scope.fubar(repr(defn))
-                    return promise
-
+                return Promise.value(IR.DoubleLiteral(token, token.value))
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
 
-        def parse_global_def(scope):
-            token = expect('def')
-            short_name = expect_id()
-            params = expect_params(scope)
-            scope[short_name] = IR.GlobalDeclaration(
-                token,
-                module_name,
-                short_name,
-            )
-            bodyp = parse_lambda_from_body(scope, token, short_name, params)
-            return Promise(lambda:
-                IR.GlobalVariableDefinition(
-                    token,
-                    module_name,
-                    short_name,
-                    bodyp.resolve(),
-                ))
-
-        def parse_lambda_from_body(scope, token, name, params):
-            fscope = Scope(scope)
-            for param in params:
-                fscope[param.name] = (
-                    IR.LocalDeclaration(param.token, param.name)
-                )
-            bodyp = parse_block(fscope)
-            fvars = [
-                defn for defn in fscope.table.values()
-                if isinstance(defn, IR.LocalDeclaration)
-            ]
-            return Promise(lambda:
-                IR.Lambda(token, name, params, bodyp.resolve(), fvars)
-            )
-
-        def parse_global_var(scope):
-            token = expect('var')
-            short_name = expect_id()
-            scope[short_name] = IR.GlobalDeclaration(
-                token,
-                module_name,
-                short_name,
-            )
-            exprp = (
-                parse_expression(scope) if consume('=') else
-                Promise.value(NullLiteral(token))
-            )
-            expect('\n')
-            return Promise(lambda:
-                IR.GlobalVariableDefinition(
-                    token,
-                    module_name,
-                    short_name,
-                    exprp.resolve(),
-                ))
-
         def parse_global(scope):
-            if at('def'):
-                return parse_global_def(scope)
+            token = peek()
+            extern = bool(consume('extern'))
+            if at('struct'):
+                return parse_struct(token, extern)
             else:
-                return parse_global_var(scope)
-
-        def expect_import(scope):
-            token = expect('import')
-            parts = [expect_id()]
-            while consume('.'):
-                parts.append(expect_id())
-            module_name = '.'.join(parts)
-            alias = expect_id() if consume('as') else parts[-1]
-            scope[alias] = IR.ImportDeclaration(token, module_name)
-            scope.load(module_name)
-            return IR.Import(token, module_name, alias)
-
-        imports = []
-        defn_promises = []
+                type = expect_type(scope)
+                name = expect_id()
+                if consume('\n'):
+                    scope[name] = decl = IR.GlobalVariableDeclaration(
+                        token,
+                        type,
+                        module_name,
+                        name,
+                    )
+                    return Promise(lambda: IR.GlobalVariableDefinition(
+                        token,
+                        decl,
+                    ))
+                else:
+                    params, vararg = expect_params(scope)
+                    bodyp = None if consume('\n') else parse_block(scope)
+                    scope[name] = decl = IR.FunctionDeclaration(
+                        token,
+                        extern,
+                        type,
+                        module_name,
+                        name,
+                        params,
+                        vararg,
+                        bodyp is not None
+                    )
+                    return Promise(lambda: IR.FunctionDefinition(
+                        token, decl, bodyp.resolve() if bodyp else None,
+                    ))
 
         token = peek()
+        importps = []
+        defnps = []
+
         consume_all('\n')
-        while at('import'):
-            imports.append(expect_import(module_scope))
+        while at('from'):
+            importps.append(parse_import(module_scope))
             consume_all('\n')
-
         while not at('EOF'):
-            defn_promises.append(parse_global(module_scope))
+            defnps.append(parse_global(module_scope))
             consume_all('\n')
 
-        return module_scope, Promise(lambda:
-            IR.Module(
-                token,
-                module_name,
-                imports,
-                [p.resolve() for p in defn_promises]
-            )
-        )
+        return module_scope, Promise(lambda: IR.Module(
+            token,
+            [p.resolve() for p in importps],
+            [p.resolve() for p in defnps],
+        ))
 
 
 def main():
     aparser = argparse.ArgumentParser()
-    aparser.add_argument('filenames', nargs='+')
+    aparser.add_argument('filename')
     aparser.add_argument('--search-dir', default='srcs')
     aparser.add_argument('--out-dir', default='out')
     args = aparser.parse_args()
-    for filename in args.filenames:
-        source = Source.from_name_and_path('main', filename)
-        print(parser.parse(source))
+    source = Source.from_name_and_path('main', args.filename)
+    for module in parser.parse(source, search_dir=args.search_dir).values():
+        print(module.format())
 
 
 if __name__ == '__main__':
