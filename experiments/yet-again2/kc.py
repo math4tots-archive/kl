@@ -1,4 +1,5 @@
 import argparse
+import collections
 import contextlib
 import itertools
 import os
@@ -1470,7 +1471,44 @@ def C(ns):
         )
 
     class Context:
-        "Translation Context"
+        """Translation Context
+
+        Memory Management:
+            The basic approach is with automatic reference counting.
+            To make the reference counting logic here less error prone,
+            we use a combination of three methods:
+
+                declare(type, [cname]), and
+                retain_scope()
+                release_all()
+
+                declare(type, [cname]) -> cname:
+                    Declares a variable in the current retain scope
+                    that will automatically be released when
+                    the current retain_scope exits.
+                retain_scope() (Contxt manager)
+                    Used with 'with', creates a scope over which all
+                    variables declared within that scope are retained.
+                release_all()
+                    Emits code that will release all retained variables
+                    in current scope.
+                    The normal code for releasing retained variables
+                    at the end of the scope will still be emitted.
+                    This is useful for e.g. early returns
+
+        FractalStringBuilder
+            The text is filled with FractalStringBuilder which has
+            the ability to bookmark locations for filling
+            in content even after content after it has been filled.
+            This is really useful in some cases (e.g. with declaring
+            variables in the beginning of blocks, and for headers
+            where forward declares must come before other declares, etc.),
+            however, this feature should not be needed very much
+            during the main code generation of expressions.
+            Manually spawning the builder can cause issues with
+            some Context methods here, like with the memory management,
+            or with indentations.
+        """
 
         def __init__(self):
             self.out = FractalStringBuilder(0)
@@ -1496,22 +1534,23 @@ def C(ns):
             return cname
 
         @contextlib.contextmanager
-        def using_out(self, out):
-            old_out = self.out
-            self.out = out
-            try:
-                yield
-            finally:
-                self.out = old_out
-
-        @contextlib.contextmanager
-        def using_declout(self, declout):
+        def retain_scope(self):
             old_decls = self._decls
-            self._decls = declout
+            out = self.out
+            self._decls = out.spawn()
             try:
                 yield
             finally:
                 self._decls = old_decls
+
+        @contextlib.contextmanager
+        def push_indent(self, depth):
+            old_out = self.out
+            self.out = old_out.spawn(depth)
+            try:
+                yield
+            finally:
+                self.out = old_out
 
     @ns
     def write_out(tu: TranslationUnit, out_dir: str):
@@ -1538,6 +1577,24 @@ def C(ns):
             translate_source(module),
         )
 
+    def _get_includes(module):
+        incs = ['#include "kcrt.h"']
+
+        # explicitly listed includes
+        for inc in module.includes:
+            if inc.use_quotes:
+                incs.append(f'#include "{inc.value}"')
+            else:
+                incs.append(f'#include <{inc.value}>')
+
+        # includes implied from imports
+        for imp in module.imports:
+            path = relative_header_path_from_name(imp.module_name)
+            incs.append(f'#include "{path}"')
+
+        # remove duplicates
+        return tuple(collections.OrderedDict.fromkeys(incs))
+
     def translate_header(module: IR.Module) -> str:
         guard_name = (
             relative_header_path_from_name(module.name)
@@ -1550,16 +1607,8 @@ def C(ns):
         sb = msb.spawn()
         msb += f'#endif/*{guard_name}*/'
 
-        sb += f'#include "kcrt.h"'
-        for inc in module.includes:
-            if inc.use_quotes:
-                sb += f'#include "{inc.value}"'
-            else:
-                sb += f'#include <{inc.value}>'
-
-        for imp in module.imports:
-            path = relative_header_path_from_name(imp.module_name)
-            sb += f'#include "{path}"'
+        for include_line in _get_includes(module):
+            sb += include_line
 
         fwdstruct = sb.spawn()
         structs = sb.spawn()
@@ -1724,18 +1773,16 @@ def C(ns):
         decl = self.decl
 
         if self.body is not None:
-            ctx.out += proto_for(self) + '{'
-            declout = ctx.out.spawn(1)
-            out = ctx.out.spawn(1)
-            with ctx.using_declout(declout), ctx.using_out(out):
+            ctx.out += proto_for(self) + ' {'
+            with ctx.push_indent(1), ctx.retain_scope():
                 retvar = E(self.body, ctx)
-            if decl.extern:
-                if decl.rtype != IR.VOID:
-                    ctx.out += f'  return {retvar};'
-            else:
-                if decl.rtype != IR.VOID:
-                    ctx.out += f'  *{OUT_VAR_NAME} = {retvar};'
-                ctx.out += f'  return NULL;'
+                if decl.extern:
+                    if decl.rtype != IR.VOID:
+                        ctx.out += f'return {retvar};'
+                else:
+                    if decl.rtype != IR.VOID:
+                        ctx.out += f'*{OUT_VAR_NAME} = {retvar};'
+                    ctx.out += f'return NULL;'
             ctx.out += '}'
 
     proto_for = Multimethod('proto_for')
@@ -1764,18 +1811,15 @@ def C(ns):
             None
         )
         ctx.out += '{'
-        declout = ctx.out.spawn(1)
-        out = ctx.out.spawn(1)
         last_retvar = None
-        with ctx.using_declout(declout), ctx.using_out(out):
+        with ctx.push_indent(1), ctx.retain_scope():
             for decl in self.decls:
                 ctx.declare(decl.type, cvarname(decl))
             for expr in self.exprs:
                 last_retvar = E(expr, ctx)
-        if self.type != IR.VOID:
-            assert last_retvar is not None, self.type
-            xout = ctx.out.spawn(1)
-            xout += f'{retvar} = {last_retvar};'
+            if self.type != IR.VOID:
+                assert last_retvar is not None, self.type
+                ctx.out += f'{retvar} = {last_retvar};'
         ctx.out += '}'
         return retvar
 
@@ -1859,11 +1903,11 @@ def C(ns):
             statvar = ctx.declare(IR.EXCEPTION_POINTER)
             ctx.out += f'{statvar} = {fvar}({margvars});'
             ctx.out += f'if ({statvar}) ' '{'
-            excout = ctx.out.spawn(1)
-            if self.from_extern:
-                excout += f'KLC_panic_with_error({statvar});'
-            else:
-                excout += f'return {statvar};'
+            with ctx.push_indent(1):
+                if self.from_extern:
+                    ctx.out += f'KLC_panic_with_error({statvar});'
+                else:
+                    ctx.out += f'return {statvar};'
             ctx.out += '}'
             return retvar
 
