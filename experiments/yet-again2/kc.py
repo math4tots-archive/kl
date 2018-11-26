@@ -73,6 +73,41 @@ class Multimethod:
         return f(*args)
 
 
+class FractalStringBuilder(object):
+    def __init__(self, depth):
+        self.parts = []
+        self.depth = depth
+
+    def __str__(self):
+        parts = []
+        self._dump(parts)
+        return ''.join(parts)
+
+    def _dump(self, parts):
+        for part in self.parts:
+            if isinstance(part, FractalStringBuilder):
+                part._dump(parts)
+            else:
+                parts.append(str(part))
+
+    def __iadd__(self, line):
+        if '\n' in line:
+            raise TypeError()
+        # Ignore empty lines
+        if line:
+            self('  ' * self.depth + line + '\n')
+        return self
+
+    def __call__(self, s):
+        self.parts.append(s)
+        return self
+
+    def spawn(self, depth_diff=0):
+        child = FractalStringBuilder(self.depth + depth_diff)
+        self.parts.append(child)
+        return child
+
+
 class Source(typing.NamedTuple):
     name: str
     filename: str
@@ -239,7 +274,7 @@ def lexer(ns):
     KEYWORDS = {
       'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
       'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
-      'struct',
+      'struct', 'const',
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
       'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
       'except', 'case','switch', 'var',
@@ -518,7 +553,7 @@ def IR(ns):
 
         @property
         def type(self):
-            return FunctionPointerType(
+            return FunctionType(
                 self.rtype,
                 [p.type for p in self.params],
                 self.vararg,
@@ -527,6 +562,7 @@ def IR(ns):
     @ns
     class GlobalVariableDeclaration(VariableDeclaration):
         fields = (
+            ('extern', bool),
             ('type', Type),
             ('module_name', str),
             ('short_name', str),
@@ -582,7 +618,7 @@ def IR(ns):
             return (self.base,)
 
     @ns
-    class FunctionPointerType(Type, ProxyMixin):
+    class FunctionType(Type, ProxyMixin):
         def __init__(self, rtype, paramtypes, vararg):
             self.rtype = rtype
             self.paramtypes = tuple(paramtypes)
@@ -616,7 +652,7 @@ def IR(ns):
 
     @ns
     class ConstType(Type, ProxyMixin):
-        def __init__(slf, base):
+        def __init__(self, base):
             self.base = base
 
         @property
@@ -641,6 +677,7 @@ def IR(ns):
     ns(VOID, 'VOID')
 
     convertible = Multimethod('convertible', 2)
+    ns(convertible, 'convertible')
 
     @convertible.on(PrimitiveTypeDeclaration, PrimitiveTypeDeclaration)
     def convertible(a, b):
@@ -730,6 +767,21 @@ def IR(ns):
         )
 
     @ns
+    class StringLiteral(Expression):
+        type = PointerType(ConstType(PRIMITIVE_TYPE_MAP['char']))
+
+        fields = (
+            ('value', str),
+        )
+
+    @ns
+    class Include(Node):
+        fields = (
+            ('use_quotes', bool),
+            ('value', str),
+        )
+
+    @ns
     class FromImport(Node):
         fields = (
             ('module_name', str),
@@ -753,6 +805,8 @@ def IR(ns):
     @ns
     class Module(Node):
         fields = (
+            ('name', str),
+            ('includes', typeutil.List[Include]),
             ('imports', typeutil.List[FromImport]),
             ('definitions', typeutil.List[GlobalDefinition]),
         )
@@ -823,7 +877,7 @@ def parser(ns):
         def _load(self, module_name) -> ('Scope', Promise):
             if module_name not in self.cache:
                 path = os.path.join(
-                    search_dir,
+                    self.search_dir,
                     module_name.replace('.', os.path.sep) + '.k',
                 )
                 try:
@@ -868,9 +922,6 @@ def parser(ns):
         tokens = lexer.lex(source)
         i = 0
         indent_stack = []
-
-        def qualify(name):
-            return f'{module_name}.{name}'
 
         def should_skip_newlines():
             return indent_stack and indent_stack[-1]
@@ -932,6 +983,12 @@ def parser(ns):
             return Promise(lambda:
                 IR.FromImport(token, module_name, exported_name, alias))
 
+        def expect_name(name):
+            if peek().type != 'NAME' or peek().value != name:
+                with module_scope.push(peek()):
+                    raise module_scope.error(f'Expected name {name}')
+            return gettok()
+
         def expect_type(scope):
             token = peek()
             if token.type in IR.PRIMITIVE_TYPE_MAP:
@@ -957,10 +1014,17 @@ def parser(ns):
             params = []
             vararg = False
             while not consume(')'):
+                if consume('...'):
+                    expect(')')
+                    vararg = True
+                    break
                 ptok = peek()
                 ptype = expect_type(scope)
                 pname = expect_id()
                 params.append(IR.Parameter(ptok, ptype, pname))
+                if not consume(','):
+                    expect(')')
+                    break
             return params, vararg
 
         def at_variable_declaration():
@@ -1035,7 +1099,7 @@ def parser(ns):
             def promise():
                 f = fp.resolve()
                 args = argsp.resolve()
-                if not isinstance(f.type, IR.FunctionPointerType):
+                if not isinstance(f.type, IR.FunctionType):
                     with scope.push(token):
                         raise scope.error(f'{f.type} is not a function')
                 f.type.check_args(scope, token, args)
@@ -1045,6 +1109,7 @@ def parser(ns):
         def parse_postfix(scope):
             expr = parse_primary(scope)
             while True:
+                token = peek()
                 if at('('):
                     argsp = parse_args(scope)
                     expr = pfcall(scope, token, expr, argsp)
@@ -1078,8 +1143,24 @@ def parser(ns):
                 return Promise.value(IR.IntLiteral(token, token.value))
             if consume('FLOAT'):
                 return Promise.value(IR.DoubleLiteral(token, token.value))
+            if consume('STRING'):
+                return Promise.value(IR.StringLiteral(token, token.value))
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
+
+        def promfunc(scope, token, decl, bodyp):
+            @Promise
+            def promise():
+                body = bodyp.resolve() if bodyp else None
+                if body is not None:
+                    if (decl.rtype != IR.VOID and
+                            not IR.convertible(body.type, decl.rtype)):
+                        with scope.push(token):
+                            raise scope.error(
+                                f'Function expected to return {decl.rtype} '
+                                f'but actually returns {body.type}')
+                return IR.FunctionDefinition(token, decl, body)
+            return promise
 
         def parse_global(scope):
             token = peek()
@@ -1092,6 +1173,7 @@ def parser(ns):
                 if consume('\n'):
                     scope[name] = decl = IR.GlobalVariableDeclaration(
                         token,
+                        extern,
                         type,
                         module_name,
                         name,
@@ -1113,15 +1195,29 @@ def parser(ns):
                         vararg,
                         bodyp is not None
                     )
-                    return Promise(lambda: IR.FunctionDefinition(
-                        token, decl, bodyp.resolve() if bodyp else None,
-                    ))
+                    return promfunc(scope, token, decl, bodyp)
 
-        token = peek()
+        module_token = peek()
+        includes = []
         importps = []
         defnps = []
 
         consume_all('\n')
+        while at('#'):
+            itoken = expect('#')
+            expect_name('include')
+            use_quotes = at('STRING')
+            if use_quotes:
+                ivalue = expect('STRING').value
+            else:
+                expect('<')
+                parts = []
+                while not consume('>'):
+                    parts.append(gettok().value)
+                ivalue = ''.join(parts)
+            consume_all('\n')
+            includes.append(IR.Include(itoken, use_quotes, ivalue))
+
         while at('from'):
             importps.append(parse_import(module_scope))
             consume_all('\n')
@@ -1130,10 +1226,309 @@ def parser(ns):
             consume_all('\n')
 
         return module_scope, Promise(lambda: IR.Module(
-            token,
+            module_token,
+            module_name,
+            includes,
             [p.resolve() for p in importps],
             [p.resolve() for p in defnps],
         ))
+
+
+@Namespace
+def C(ns):
+
+    ENCODED_NAME_PREFIX = 'KLCN'
+
+    encode_map = {
+        '_': '_U',  # U for Underscore
+        '.': '_D',  # D for Dot
+        '#': '_H',  # H for Hashtag
+    }
+
+    def encode_char(c):
+        if c.isalnum() or c.isdigit():
+            return c
+        elif c in encode_map:
+            return encode_map[c]
+        raise TypeError(f'Invalid name character {c}')
+
+    def encode(name, prefix=ENCODED_NAME_PREFIX):
+        return prefix + ''.join(map(encode_char, name))
+
+    def relative_header_path_from_name(module_name):
+        return module_name.replace('.', os.path.sep) + '.k.h'
+
+    def relative_source_path_from_name(module_name):
+        return module_name.replace('.', os.path.sep) + '.k.c'
+
+    class TranslationUnit(IR.Node):
+        fields = (
+            ('name', str),
+            ('h', str),
+            ('c', str),
+        )
+
+    class Context:
+        "Translation Context"
+
+        def __init__(self):
+            self.out = FractalStringBuilder(0)
+            self.next_temp_var_id = 0
+
+            # A place where temporary variables may be declared
+            # We need this mechanism because in C89, you can't
+            # willy-nilly declare variables anywhere (they
+            # have to be declared at the beginning of a block).
+            self._decls = None
+
+        def new_temp_var_name(self):
+            name = f'KLCT{self.next_temp_var_id}'
+            self.next_temp_var_id += 1
+            return name
+
+        def declare(self, t: IR.Type):
+            name = self.new_temp_var_name()
+            self._decls += declare(t, name) + ';'
+            return name
+
+        @contextlib.contextmanager
+        def using_out(self, out):
+            old_out = self.out
+            self.out = out
+            try:
+                yield
+            finally:
+                self.out = old_out
+
+        @contextlib.contextmanager
+        def using_declout(self, declout):
+            old_decls = self._decls
+            self._decls = declout
+            try:
+                yield
+            finally:
+                self._decls = old_decls
+
+    @ns
+    def write_out(tu: TranslationUnit, out_dir: str):
+        header_path = os.path.join(
+            out_dir,
+            relative_header_path_from_name(tu.name),
+        )
+        source_path = os.path.join(
+            out_dir,
+            relative_source_path_from_name(tu.name),
+        )
+        os.makedirs(out_dir, exist_ok=True)
+        with open(header_path, 'w') as f:
+            f.write(tu.h)
+        with open(source_path, 'w') as f:
+            f.write(tu.c)
+
+    @ns
+    def translate(module: IR.Module) -> TranslationUnit:
+        return TranslationUnit(
+            module.token,
+            module.name,
+            translate_header(module),
+            translate_source(module),
+        )
+
+    def translate_header(module: IR.Module) -> str:
+        sb = FractalStringBuilder(0)
+        for inc in module.includes:
+            if inc.use_quotes:
+                sb += f'#include "{inc.value}"'
+            else:
+                sb += f'#include <{inc.value}>'
+
+        for imp in module.imports:
+            path = relative_header_path_from_name(imp.module_name)
+            sb += f'#include "{path}"'
+
+        gvardecls = sb.spawn()
+        fdecls = sb.spawn()
+
+        for defn in module.definitions:
+            if isinstance(defn, IR.GlobalVariableDefinition):
+                if not defn.decl.extern:
+                    gvardecls += f'extern {proto_for(defn)};'
+            elif isinstance(defn, IR.FunctionDefinition):
+                fdecls += f'extern {proto_for(defn)};'
+            else:
+                raise Fubar([], defn)
+
+        return str(sb)
+
+    def translate_source(module: IR.Module) -> str:
+        ctx = Context()
+        ctx.out += f'#include "{relative_header_path_from_name(module.name)}"'
+        for defn in module.definitions:
+            D(defn, ctx)
+        return str(ctx.out)
+
+    def qualify(module_name, name):
+        return (
+            encode(name) if module_name is None else
+            encode(f'{module_name}.{name}')
+        )
+
+    # Get the C name of variable with given declaration
+    cvarname = Multimethod('cvarname')
+
+    @cvarname.on(IR.GlobalVariableDeclaration)
+    def cvarname(self):
+        return (
+            self.short_name if self.extern else
+            qualify(self.module_name, self.short_name)
+        )
+
+    @cvarname.on(IR.LocalVariableDeclaration)
+    def cvarname(self):
+        return encode(self.name)
+
+    @cvarname.on(IR.FunctionDeclaration)
+    def cvarname(self):
+        return (
+            self.short_name if self.extern else
+            qualify(self.module_name, self.short_name)
+        )
+
+    declare = Multimethod('declare')
+
+    @declare.on(IR.PrimitiveTypeDeclaration)
+    def declare(self, name):
+        return f'{self.name} {name}'.strip()
+
+    @declare.on(IR.PointerType)
+    def declare(self, name):
+        return declare(self.base, f' *{name}'.strip())
+
+    @declare.on(IR.ConstType)
+    def declare(self, name):
+        return declare(self.base, f'const {name}'.strip())
+
+    @declare.on(IR.FunctionType)
+    def declare(self, name, pnames=None):
+        if pnames is None:
+            pnames = [''] * len(self.paramtypes)
+
+        # take care with operator precedence.
+        # we need extra parens here because function call
+        # binds tighter than the pointer type modifier.
+        if name.startswith('*'):
+            name = f'({name})'
+
+        params = ', '.join(
+            [declare(ptype, pname)
+                for ptype, pname in zip(self.paramtypes, pnames)] +
+            (['...'] if self.vararg else []),
+        )
+
+        return declare(self.rtype, f'{name}({params})')
+
+    # translate definition for source
+    D = Multimethod('D')
+
+    @D.on(IR.GlobalVariableDefinition)
+    def D(self, ctx):
+        ctx.out += proto_for(self) + ';'
+
+    @D.on(IR.FunctionDefinition)
+    def D(self, ctx):
+        decl = self.decl
+
+        if self.body is not None:
+            ctx.out += proto_for(self) + '{'
+            declout = ctx.out.spawn(1)
+            out = ctx.out.spawn(1)
+            with ctx.using_declout(declout), ctx.using_out(out):
+                retvar = E(self.body, ctx)
+            if decl.rtype != IR.VOID:
+                ctx.out += f'  return {retvar};'
+            ctx.out += '}'
+
+
+    proto_for = Multimethod('proto_for')
+
+    @proto_for.on(IR.FunctionDefinition)
+    def proto_for(self):
+        decl = self.decl
+        return declare(
+            decl.type,
+            cvarname(decl),
+            [encode(p.name) for p in decl.params],
+        )
+
+    @proto_for.on(IR.GlobalVariableDefinition)
+    def proto_for(self):
+        decl = self.decl
+        return declare(decl.type, cvarname(decl))
+
+    # translate expressions
+    E = Multimethod('E')
+
+    @E.on(IR.Block)
+    def E(self, ctx):
+        retvar = (
+            ctx.declare(self.type) if self.type != IR.VOID else
+            None
+        )
+        ctx.out += '{'
+        declout = ctx.out.spawn(1)
+        out = ctx.out.spawn(1)
+        last_retvar = None
+        with ctx.using_declout(declout), ctx.using_out(out):
+            for expr in self.exprs:
+                last_retvar = E(expr, ctx)
+        if self.type != IR.VOID:
+            assert last_retvar is not None, self.type
+            xout = ctx.out.spawn(1)
+            xout += f'{retvar} = {last_retvar};'
+        ctx.out += '}'
+        return retvar
+
+    @E.on(IR.SetLocalName)
+    def E(self, ctx):
+        cname = cvarname(self.decl)
+        retvar = E(self.expr, ctx)
+        ctx.out += f'{cname} = {retvar};'
+        return cname
+
+    @E.on(IR.LocalName)
+    def E(self, ctx):
+        return cvarname(self.decl)
+
+    @E.on(IR.IntLiteral)
+    def E(self, ctx):
+        return str(self.value)
+
+    @E.on(IR.StringLiteral)
+    def E(self, ctx):
+        escaped = (
+            self.value
+                .replace('\\', '\\\\')
+                .replace('\t', '\\t')
+                .replace('\n', '\\n')
+                .replace('\r', '\\r')
+                .replace('"', '\\"')
+                .replace("'", "\\'"))
+        return f'"{escaped}"'
+
+    @E.on(IR.FunctionCall)
+    def E(self, ctx):
+        fvar = E(self.f, ctx)
+        argvars = ', '.join(E(arg, ctx) for arg in self.args)
+        if self.type == IR.VOID:
+            ctx.out += f'{fvar}({argvars});'
+        else:
+            retvar = ctx.declare(self.type)
+            ctx.out += f'{retvar} = {fvar}({argvars});'
+            return retvar
+
+    @E.on(IR.FunctionName)
+    def E(self, ctx):
+        return cvarname(self.decl)
 
 
 def main():
@@ -1141,10 +1536,27 @@ def main():
     aparser.add_argument('filename')
     aparser.add_argument('--search-dir', default='srcs')
     aparser.add_argument('--out-dir', default='out')
+    aparser.add_argument('--operation', '-p', default='translate', choices=(
+        'parse',
+        'translate',
+    ))
     args = aparser.parse_args()
     source = Source.from_name_and_path('main', args.filename)
-    for module in parser.parse(source, search_dir=args.search_dir).values():
-        print(module.format())
+    module_table = parser.parse(source, search_dir=args.search_dir)
+
+    if args.operation == 'parse':
+        for module in module_table.values():
+            print(module.format())
+
+    tu_table = {
+        name: C.translate(module) for name, module in module_table.items()
+    }
+
+    for tu in tu_table.values():
+        C.write_out(tu, out_dir=args.out_dir)
+
+    if args.operation == 'translate':
+        return
 
 
 if __name__ == '__main__':
