@@ -928,14 +928,6 @@ def parser(ns):
         def __contains__(self, key: str) -> bool:
             return key in self.table or self.parent and key in self.parent
 
-        def pull(self, key: str) -> IR.Declaration:
-            if key not in self.table:
-                if self.parent and key in self.parent:
-                    self.table[key] = self.parent.pull(key)
-                else:
-                    raise self.error(f'{repr(key)} not defined')
-            return self.table[key]
-
         def check_module_name(self, module_name: str):
             if not Source.module_name_pattern.match(module_name):
                 raise self.error(
