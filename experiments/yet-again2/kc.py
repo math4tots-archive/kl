@@ -605,15 +605,6 @@ def IR(ns):
             return f'{type(self).__name__}{self._proxy}'
 
     @ns
-    class RawPointerType(Type, ProxyMixin):
-        def __init__(self, base):
-            self.base = base
-
-        @property
-        def _proxy(self):
-            return (self.base,)
-
-    @ns
     class PointerType(Type, ProxyMixin):
         def __init__(self, base):
             self.base = base
@@ -690,7 +681,7 @@ def IR(ns):
     VOID = PRIMITIVE_TYPE_MAP['void']
     ns(VOID, 'VOID')
 
-    VOIDP = RawPointerType(VOID)
+    VOIDP = PointerType(VOID)
     ns(VOIDP, 'VOIDP')
 
     EXCEPTION_POINTER = VOIDP
@@ -823,7 +814,7 @@ def IR(ns):
 
     @ns
     class StringLiteral(Expression):
-        type = RawPointerType(ConstType(PRIMITIVE_TYPE_MAP['char']))
+        type = PointerType(ConstType(PRIMITIVE_TYPE_MAP['char']))
 
         fields = (
             ('value', str),
@@ -1090,9 +1081,7 @@ def parser(ns):
                 type = scope.struct_type(token, module_name, name)
             while True:
                 token = peek()
-                if consume('!'):
-                    type = IR.RawPointerType(type)
-                elif consume('*'):
+                if consume('*'):
                     type = IR.PointerType(type)
                 elif consume('const'):
                     type = IR.ConstType(type)
@@ -1706,13 +1695,8 @@ def C(ns):
         cname = c_struct_name(self)
         return f'{cname} {name}'.strip()
 
-    @declare.on(IR.RawPointerType)
-    def declare(self, name):
-        return declare(self.base, f' *{name}'.strip())
-
     @declare.on(IR.PointerType)
     def declare(self, name):
-        raise Error([], [self, name])
         return declare(self.base, f' *{name}'.strip())
 
     @declare.on(IR.ConstType)
@@ -1735,7 +1719,7 @@ def C(ns):
                 [OUT_VAR_NAME] + list(pnames)
             )
             paramtypes = [
-                IR.RawPointerType(self.rtype)
+                IR.PointerType(self.rtype)
             ] + list(self.paramtypes)
             return declare_raw_c_functype(
                 IR.FunctionType(
@@ -1937,10 +1921,6 @@ def C(ns):
         return '{0}'
 
     @init_expr_for.on(IR.PointerType)
-    def init_expr_for(self):
-        return 'NULL'
-
-    @init_expr_for.on(IR.RawPointerType)
     def init_expr_for(self):
         return 'NULL'
 
