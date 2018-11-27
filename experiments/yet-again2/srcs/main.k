@@ -12,6 +12,9 @@ struct Foo {
   extern long y
 }
 
+extern void asdf(unsigned char c) {
+}
+
 extern int main() {
   Foo foo
   printf("foo.x = %d\n", foo.x)
@@ -20,6 +23,10 @@ extern int main() {
   void* fp = malloc(3)
   unsigned long i = 14
   printf("fp = %p\n", fp)
+
+  signed char c
+  asdf(c)
+
   sayhi()
   0
 }

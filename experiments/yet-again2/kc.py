@@ -309,6 +309,19 @@ def lexer(ns):
       '_Thread_local',
     ]
 
+    C_PRIMITIVE_TYPE_SPECIFIERS = {
+        'void',
+        'char',
+        'short',
+        'int',
+        'long',
+        'float',
+        'double',
+        'signed',
+        'unsigned',
+    }
+    ns(C_PRIMITIVE_TYPE_SPECIFIERS, 'C_PRIMITIVE_TYPE_SPECIFIERS')
+
     PRIMITIVE_TYPE_NAMES = (
         'void',
         'char',
@@ -319,10 +332,21 @@ def lexer(ns):
         'double',
         'unsigned',
 
-        # 'unsigned int',  # dupes 'unsigned'
+        # char is special in that 'char', 'unsigned char', and
+        # 'signed char' are all distinct types.
         'unsigned char',
+        'signed char',
+
+        # all other 'signed' variants dupe other types.
+
+        # 'unsigned int',  # dupes 'unsigned'
         'unsigned short',
         'unsigned long',
+        # 'unsigned long long',  # not available in C89
+
+        # 'long int',  # dupes 'long'
+        'long double',
+        # 'long long',  # not available in C89
     )
     ns(PRIMITIVE_TYPE_NAMES, 'PRIMITIVE_TYPE_NAMES')
 
@@ -743,11 +767,19 @@ def IR(ns):
 
     @convertible.on(PrimitiveTypeDeclaration, PrimitiveTypeDeclaration)
     def convertible(a, b):
-        return a == b or (a.name, b.name) in {
-            ('int', 'long'),
-            ('int', 'size_t'),
-            ('long', 'size_t'),
-        }
+        return a == b or (
+            (a.name, b.name) in {
+                ('int', 'long'),
+                ('int', 'size_t'),
+                ('long', 'size_t'),
+            }
+        ) or (
+            frozenset((a.name, b.name)) in set(map(frozenset, [
+                ['char', 'unsigned char'],
+                ['char', 'signed char'],
+                ['unsigned char', 'signed char'],
+            ]))
+        )
 
     @convertible.on(Type, Type)
     def convertible(a, b):
@@ -1143,9 +1175,9 @@ def parser(ns):
 
         def parse_type(scope):
             token = peek()
-            if token.type in IR.PRIMITIVE_TYPE_MAP:
+            if token.type in lexer.C_PRIMITIVE_TYPE_SPECIFIERS:
                 parts = [gettok().type]
-                while peek().type in IR.PRIMITIVE_TYPE_MAP:
+                while peek().type in lexer.C_PRIMITIVE_TYPE_SPECIFIERS:
                     parts.append(gettok().type)
                 name = ' '.join(parts)
                 if name not in IR.PRIMITIVE_TYPE_MAP:
@@ -1186,7 +1218,7 @@ def parser(ns):
             return Promise(lambda: ([p.resolve() for p in paramps], vararg))
 
         def at_variable_declaration():
-            if peek().type in IR.PRIMITIVE_TYPE_MAP:
+            if peek().type in lexer.C_PRIMITIVE_TYPE_SPECIFIERS:
                 return True
 
             # Whitelist a few patterns as being the start
