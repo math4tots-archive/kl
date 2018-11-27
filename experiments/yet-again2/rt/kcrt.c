@@ -25,6 +25,6 @@ void* KLC_new_error_with_message(const char* msg) {
   return error;
 }
 
-const char* KLC_get_error_message(const void* errorp) {
+const char* KLC_get_error_message(void* errorp) {
   return ((KLC_Error*) errorp)->message;
 }

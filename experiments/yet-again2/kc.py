@@ -318,7 +318,11 @@ def lexer(ns):
         'float',
         'double',
         'unsigned',
-        'size_t',
+
+        # 'unsigned int',  # dupes 'unsigned'
+        'unsigned char',
+        'unsigned short',
+        'unsigned long',
     )
     ns(PRIMITIVE_TYPE_NAMES, 'PRIMITIVE_TYPE_NAMES')
 
@@ -1140,20 +1144,28 @@ def parser(ns):
         def parse_type(scope):
             token = peek()
             if token.type in IR.PRIMITIVE_TYPE_MAP:
-                gettok()
-                typep = Promise.value(IR.PRIMITIVE_TYPE_MAP[token.type])
+                parts = [gettok().type]
+                while peek().type in IR.PRIMITIVE_TYPE_MAP:
+                    parts.append(gettok().type)
+                name = ' '.join(parts)
+                if name not in IR.PRIMITIVE_TYPE_MAP:
+                    with scope.push(token):
+                        raise scope.error(f'{repr(name)} is not a type')
+                type_promise = (
+                    Promise.value(IR.PRIMITIVE_TYPE_MAP[name])
+                )
             else:
                 name = expect_id()
-                typep = promise_type_from_name(scope, token, name)
+                type_promise = promise_type_from_name(scope, token, name)
             while True:
                 token = peek()
                 if consume('*'):
-                    typep = pcall(IR.PointerType, typep)
+                    type_promise = pcall(IR.PointerType, type_promise)
                 elif consume('const'):
-                    typep = pcall(IR.ConstType, typep)
+                    type_promise = pcall(IR.ConstType, type_promise)
                 else:
                     break
-            return typep
+            return type_promise
 
         def parse_params(scope):
             expect('(')

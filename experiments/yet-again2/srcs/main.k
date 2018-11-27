@@ -18,6 +18,7 @@ extern int main() {
   foo.x = 15
   printf("foo.x = %d\n", foo.x)
   void* fp = malloc(3)
+  unsigned long i = 14
   printf("fp = %p\n", fp)
   sayhi()
   0
