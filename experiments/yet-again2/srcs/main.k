@@ -2,6 +2,7 @@
 from lib import sayhi
 from lib import printf
 from lib import Baz
+from c import size_t
 
 extern void* malloc(size_t size)
 

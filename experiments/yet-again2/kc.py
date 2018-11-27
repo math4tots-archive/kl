@@ -262,6 +262,52 @@ def typeutil(ns):
 
 @Namespace
 def lexer(ns):
+    C_KEYWORDS = [
+      'auto',
+      'break',
+      'case',
+      'char',
+      'const',
+      'continue',
+      'default',
+      'do',
+      'double',
+      'else',
+      'enum',
+      'extern',
+      'float',
+      'for',
+      'goto',
+      'if',
+      'inline',  # (since C99)
+      'int',
+      'long',
+      'register',
+      'restrict',  # (since C99)
+      'return',
+      'short',
+      'signed',
+      'sizeof',
+      'static',
+      'struct',
+      'switch',
+      'typedef',
+      'union',
+      'unsigned',
+      'void',
+      'volatile',
+      'while',
+      '_Alignas',  # (since C11)
+      '_Alignof',  # (since C11)
+      '_Atomic',  # (since C11)
+      '_Bool',  # (since C99)
+      '_Complex',  # (since C99)
+      '_Generic',  # (since C11)
+      '_Imaginary',  # (since C99)
+      '_Noreturn',  # (since C11)
+      '_Static_assert',  # (since C11)
+      '_Thread_local',
+    ]
 
     PRIMITIVE_TYPE_NAMES = (
         'void',
@@ -271,6 +317,7 @@ def lexer(ns):
         'long',
         'float',
         'double',
+        'unsigned',
         'size_t',
     )
     ns(PRIMITIVE_TYPE_NAMES, 'PRIMITIVE_TYPE_NAMES')
@@ -282,7 +329,7 @@ def lexer(ns):
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
       'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
       'except', 'case','switch', 'var',
-    } | set(PRIMITIVE_TYPE_NAMES)
+    } | set(C_KEYWORDS)
     ns(KEYWORDS, 'KEYWORDS')
 
     SYMBOLS = tuple(reversed(sorted([
@@ -707,6 +754,10 @@ def IR(ns):
         pass
 
     @ns
+    class PrimitiveTypeDefinition(GlobalDefinition):
+        fields = ()
+
+    @ns
     class Expression(Node):
         """
         abstract
@@ -899,31 +950,28 @@ def parser(ns):
             finally:
                 self.stack.pop()
 
-        def struct_type(self, token, module_name, name):
-            if name not in self:
-                self[name] = decl = (
-                    IR.StructDeclaration(token, module_name, name)
-                )
-            decl = self[name]
-            if not isinstance(decl, IR.StructDeclaration):
-                with scope.push(token), scope.push(decl.token):
-                    raise f'{name} is not a struct'
-            return decl
-
         def __getitem__(self, key: str) -> IR.Declaration:
+            value = self._getp(key).resolve()
+            assert isinstance(value, IR.Declaration), value
+            return value
+
+        def _getp(self, key: str) -> Promise:
             if key in self.table:
                 return self.table[key]
             elif self.parent is not None:
-                return self.parent[key]
+                return self.parent._getp(key)
             else:
                 raise self.error(f'{repr(key)} not defined')
 
         def __setitem__(self, key: str, value: IR.Declaration):
             assert isinstance(value, IR.Declaration), value
+            self.set_promise(value.token, key, Promise.value(value))
+
+        def set_promise(self, token: Token, key: str, p: Promise):
             if key in self.table:
-                with self.push(value.token), self.push(self.table[key].token):
+                with self.push(token), self.push(self.table[key].token):
                     raise self.error(f'Duplicate definition of {repr(key)}')
-            self.table[key] = value
+            self.table[key] = p
 
         def __contains__(self, key: str) -> bool:
             return key in self.table or self.parent and key in self.parent
@@ -990,6 +1038,21 @@ def parser(ns):
         }
 
     def _parse(global_scope: Scope, source: Source) -> (Scope, Promise):
+        """
+        Implementation notes:
+
+            Functions with names matching 'expect_*'
+                parses a construct, and returns some value.
+
+            Functions with names matching 'parse_*'
+                are counterparts to 'expect_*' functions, but
+                return Promise types.
+
+            Functions with names matching 'promise_*'
+                are helper functions (usually for 'parse_*' functions)
+                that don't do any parsing themselves, but
+                return Promise types.
+        """
         assert global_scope.parent is None
         module_scope = Scope(global_scope)
         module_name = source.name
@@ -1063,27 +1126,38 @@ def parser(ns):
                     raise module_scope.error(f'Expected name {name}')
             return gettok()
 
-        def expect_type(scope):
+        def promise_type_from_name(scope, token, name):
+            @Promise
+            def promise():
+                with scope.push(token):
+                    type = scope[name]
+                if not isinstance(type, IR.Type):
+                    with scope.push(token), scope.push(type):
+                        raise scope.error(f'{name} is not a type')
+                return type
+            return promise
+
+        def parse_type(scope):
             token = peek()
             if token.type in IR.PRIMITIVE_TYPE_MAP:
                 gettok()
-                type = IR.PRIMITIVE_TYPE_MAP[token.type]
+                typep = Promise.value(IR.PRIMITIVE_TYPE_MAP[token.type])
             else:
                 name = expect_id()
-                type = scope.struct_type(token, module_name, name)
+                typep = promise_type_from_name(scope, token, name)
             while True:
                 token = peek()
                 if consume('*'):
-                    type = IR.PointerType(type)
+                    typep = pcall(IR.PointerType, typep)
                 elif consume('const'):
-                    type = IR.ConstType(type)
+                    typep = pcall(IR.ConstType, typep)
                 else:
                     break
-            return type
+            return typep
 
-        def expect_params(scope):
+        def parse_params(scope):
             expect('(')
-            params = []
+            paramps = []
             vararg = False
             while not consume(')'):
                 if consume('...'):
@@ -1091,13 +1165,13 @@ def parser(ns):
                     vararg = True
                     break
                 ptok = peek()
-                ptype = expect_type(scope)
+                ptypep = parse_type(scope)
                 pname = expect_id()
-                params.append(IR.Parameter(ptok, ptype, pname))
+                paramps.append(pcall(IR.Parameter, ptok, ptypep, pname))
                 if not consume(','):
                     expect(')')
                     break
-            return params, vararg
+            return Promise(lambda: ([p.resolve() for p in paramps], vararg))
 
         def at_variable_declaration():
             if peek().type in IR.PRIMITIVE_TYPE_MAP:
@@ -1123,35 +1197,43 @@ def parser(ns):
         def parse_block(parent_scope):
             scope = Scope(parent_scope)
             token = expect('{')
-            decls = []
-            exprs = []
+            declps = []
+            expr_promises = []
             with skipping_newlines(False):
                 consume_all('\n')
                 while not consume('}'):
                     if at_variable_declaration():
-                        dtoken = peek()
-                        dtype = expect_type(scope)
-                        dname = expect_id()
-                        expr = (
+                        decl_token = peek()
+                        decl_type_promise = parse_type(scope)
+                        decl_name = expect_id()
+                        expr_promise = (
                             parse_expression(scope) if consume('=') else None
                         )
                         expect('\n')
                         consume_all('\n')
-                        decl = IR.LocalVariableDeclaration(
-                            dtoken,
-                            dtype,
-                            dname,
+                        decl_promise = pcall(
+                            IR.LocalVariableDeclaration,
+                            decl_token,
+                            decl_type_promise,
+                            decl_name,
                         )
-                        decls.append(decl)
-                        scope[dname] = decl
-                        if expr is not None:
-                            exprs.append(pcall(
-                                IR.SetLocalName, dtoken, decl, expr))
+                        declps.append(decl_promise)
+                        scope.set_promise(
+                            decl_token, decl_name, decl_promise)
+                        if expr_promise is not None:
+                            expr_promises.append(pcall(
+                                IR.SetLocalName,
+                                decl_token,
+                                decl_promise,
+                                expr_promise,
+                            ))
                     else:
-                        exprs.append(parse_expression(scope))
+                        expr_promises.append(parse_expression(scope))
                     consume_all('\n')
             return Promise(lambda: IR.Block(
-                token, decls, [p.resolve() for p in exprs]))
+                token,
+                [p.resolve() for p in declps],
+                [p.resolve() for p in expr_promises]))
 
         def parse_expression(scope):
             return parse_postfix(scope)
@@ -1166,10 +1248,10 @@ def parser(ns):
                     break
             return Promise(lambda: [p.resolve() for p in argps])
 
-        def pfcall(scope, token, fp, argsp):
+        def promise_fcall(scope, token, function_promise, argsp):
             @Promise
             def promise():
-                f = fp.resolve()
+                f = function_promise.resolve()
                 raw_args = argsp.resolve()
                 if not isinstance(f.type, IR.FunctionType):
                     with scope.push(token):
@@ -1230,7 +1312,12 @@ def parser(ns):
                 token = peek()
                 if at('('):
                     argsp = parse_args(scope)
-                    expr = pfcall(scope, token, expr, argsp)
+                    expr = promise_fcall(
+                        scope=scope,
+                        token=token,
+                        function_promise=expr,
+                        argsp=argsp,
+                    )
                 elif consume('.'):
                     name = expect_id()
                     if consume('='):
@@ -1287,10 +1374,11 @@ def parser(ns):
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
 
-        def promfunc(scope, token, decl, bodyp):
+        def promise_func(scope, token, decl_promise, body_promise):
             @Promise
             def promise():
-                raw_body = bodyp.resolve() if bodyp else None
+                decl = decl_promise.resolve()
+                raw_body = body_promise.resolve() if body_promise else None
                 if raw_body is not None and decl.rtype != IR.VOID:
                     body = scope.convert(raw_body, decl.rtype)
                 else:
@@ -1301,28 +1389,29 @@ def parser(ns):
 
         def parse_struct(scope, token, extern):
             name = expect_id()
-            decl = scope.struct_type(token, module_name, name)
-            if scope[name] is not decl:
-                scope[name] = decl
+            decl = IR.StructDeclaration(token, module_name, name)
+            scope[name] = decl
 
-            fields = []
+            field_promises = []
             expect('{')
             consume_all('\n')
             while not consume('}'):
                 field_token = peek()
                 field_extern = bool(consume('extern'))
-                field_type = expect_type(scope)
+                field_type_promise = parse_type(scope)
                 field_name = expect_id()
-                fields.append(IR.StructField(
+                field_promises.append(pcall(
+                    IR.StructField,
                     field_token,
                     field_extern or extern,
-                    field_type,
+                    field_type_promise,
                     field_name,
                 ))
                 consume_all('\n')
 
             @Promise
             def promise():
+                fields = [p.resolve() for p in field_promises]
                 for field in fields:
                     if isinstance(field.type, IR.StructDeclaration):
                         if field.type.defn is None:
@@ -1343,40 +1432,61 @@ def parser(ns):
         def parse_global(scope):
             token = peek()
             extern = bool(consume('extern'))
-            if consume('struct'):
+            if consume('typedef'):
+                expect('*')
+                name = expect_id()
+                scope[name] = IR.PrimitiveTypeDeclaration(token, name)
+                return Promise.value(IR.PrimitiveTypeDefinition(token))
+            elif consume('struct'):
                 return parse_struct(scope, token, extern)
             else:
-                type = expect_type(scope)
+                type_promise = parse_type(scope)
                 name = expect_id()
                 if consume('\n'):
-                    scope[name] = decl = IR.GlobalVariableDeclaration(
+                    decl_promise = pcall(
+                        IR.GlobalVariableDeclaration,
                         token,
                         extern,
-                        type,
+                        type_promise,
                         module_name,
                         name,
                     )
-                    return Promise(lambda: IR.GlobalVariableDefinition(
+                    scope.set_promise(token, name, decl_promise)
+                    return pcall(
+                        IR.GlobalVariableDefinition,
                         token,
-                        decl,
-                    ))
+                        decl_promise,
+                    )
                 else:
-                    params, vararg = expect_params(scope)
+                    params_and_vararg_promise = parse_params(scope)
+                    params_promise = Promise(lambda:
+                        params_and_vararg_promise.resolve()[0])
+                    vararg_promise = Promise(lambda:
+                        params_and_vararg_promise.resolve()[1])
                     has_body = not consume('\n')
-                    scope[name] = decl = IR.FunctionDeclaration(
+                    decl_promise = pcall(
+                        IR.FunctionDeclaration,
                         token,
                         extern,
-                        type,
+                        type_promise,
                         module_name,
                         name,
-                        params,
-                        vararg,
-                        has_body
+                        params_promise,
+                        vararg_promise,
+                        has_body,
                     )
-                    fscope = Scope(scope)
-                    fscope['@func'] = decl
-                    bodyp = parse_block(fscope) if has_body else None
-                    return promfunc(scope, token, decl, bodyp)
+                    scope.set_promise(token, name, decl_promise)
+                    func_scope = Scope(scope)
+                    func_scope.set_promise(token, '@func', decl_promise)
+                    body_promise = (
+                        parse_block(func_scope) if has_body else None
+                    )
+                    return promise_func(
+                        scope=scope,
+                        token=token,
+                        decl_promise=decl_promise,
+                        body_promise=body_promise,
+                    )
 
         module_token = peek()
         includes = []
@@ -1625,6 +1735,10 @@ def C(ns):
                         # Add a dummy field.
                         fields_out += f'char dummy;'
                     structs += '};'
+            elif isinstance(defn, IR.PrimitiveTypeDefinition):
+                # These definitions are just to help the compiler,
+                # nothing actually needs to get emitted for this.
+                pass
             else:
                 raise Fubar([], defn)
 
@@ -1769,6 +1883,12 @@ def C(ns):
                         ctx.out += f'*{OUT_VAR_NAME} = {retvar};'
                     ctx.out += f'return NULL;'
             ctx.out += '}'
+
+    @D.on(IR.PrimitiveTypeDefinition)
+    def D(self, ctx):
+        # These definitions are just to help the compiler,
+        # nothing actually needs to get emitted for this.
+        pass
 
     proto_for = Multimethod('proto_for')
 
