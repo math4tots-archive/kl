@@ -362,7 +362,7 @@ def lexer(ns):
 
     SYMBOLS = tuple(reversed(sorted([
       '\n',
-      '||', '&&', '|', '&', '<<', '>>', '~', '...',
+      '||', '&&', '|', '&', '<<', '>>', '~', '...', '$',
       ';', '#', '?', ':', '!', '++', '--',  # '**',
       '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
       '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
@@ -801,7 +801,7 @@ def IR(ns):
         """
 
     @ns
-    class Block(CollectionNode):
+    class Block(Expression, CollectionNode):
         fields = (
             ('decls', typeutil.List[LocalVariableDeclaration]),
             ('exprs', typeutil.List[Expression]),
@@ -1398,6 +1398,8 @@ def parser(ns):
 
         def parse_primary(scope):
             token = peek()
+            if consume('$'):
+                return parse_block(scope)
             if consume('('):
                 with skipping_newlines(True):
                     expr = parse_expression(scope)
@@ -1983,26 +1985,42 @@ def C(ns):
     def E(self, ctx):
         return cvarname(self.decl)
 
+    def _get_struct_field_chain(expr):
+        reverse_field_chain = []
+        while isinstance(expr, IR.GetStructField):
+            reverse_field_chain.append(expr.field_defn)
+            expr = expr.expr
+        assert isinstance(expr.type, IR.StructDeclaration), expr
+        return expr, list(reversed(reverse_field_chain))
+
     @E.on(IR.GetStructField)
     def E(self, ctx):
-        # NOTE: It's kind of inefficient the way do it here
-        # because of the copying we do with structs.
-        structvar = E(self.expr, ctx)
+        struct_expr, field_defns = _get_struct_field_chain(self)
+        c_field_names = [
+            c_struct_field_name(defn) for defn in field_defns
+        ]
+        c_field_chain = '.'.join(c_field_names)
+        structvar = E(struct_expr, ctx)
         retvar = ctx.declare(self.type)
         cfname = c_struct_field_name(self.field_defn)
-        ctx.out += f'{retvar} = {structvar}.{cfname};'
+        ctx.out += f'{retvar} = {structvar}.{c_field_chain};'
         return retvar
 
     @E.on(IR.SetStructField)
     def E(self, ctx):
-        # NOTE: It's kind of inefficient the way do it here
-        # because of the copying we do with structs.
-        structvar = E(self.expr, ctx)
+        struct_expr, field_defns = _get_struct_field_chain(self.expr)
+        c_field_names = [
+            c_struct_field_name(defn) for defn in field_defns
+        ] + [
+            c_struct_field_name(self.field_defn),
+        ]
+        c_field_chain = '.'.join(c_field_names)
+        structvar = E(struct_expr, ctx)
         resultvar = E(self.valexpr, ctx)
         retvar = ctx.declare(self.type)
         cfname = c_struct_field_name(self.field_defn)
         ctx.out += f'{retvar} = {resultvar};'
-        ctx.out += f'{structvar}.{cfname} = {retvar};'
+        ctx.out += f'{structvar}.{c_field_chain} = {retvar};'
         return retvar
 
     @E.on(IR.IntLiteral)

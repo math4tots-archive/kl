@@ -15,6 +15,18 @@ struct Foo {
 extern void asdf(unsigned char c) {
 }
 
+struct C {
+  int d
+}
+
+struct B {
+  C c
+}
+
+struct A {
+  B b
+}
+
 extern int main() {
   Foo foo
   printf("foo.x = %d\n", foo.x)
@@ -24,8 +36,17 @@ extern int main() {
   unsigned long i = 14
   printf("fp = %p\n", fp)
 
-  signed char c
-  asdf(c)
+  ${
+    signed char c
+    asdf(c)
+  }
+
+  ${
+    A a
+    printf("a.b.c.d = %d\n", a.b.c.d)
+    a.b.c.d = 149
+    printf("a.b.c.d = %d\n", a.b.c.d)
+  }
 
   sayhi()
   0
