@@ -690,7 +690,7 @@ def IR(ns):
     VOID = PRIMITIVE_TYPE_MAP['void']
     ns(VOID, 'VOID')
 
-    VOIDP = PointerType(VOID)
+    VOIDP = RawPointerType(VOID)
     ns(VOIDP, 'VOIDP')
 
     EXCEPTION_POINTER = VOIDP
@@ -703,6 +703,8 @@ def IR(ns):
     def convertible(a, b):
         return a == b or (a.name, b.name) in {
             ('int', 'long'),
+            ('int', 'size_t'),
+            ('long', 'size_t'),
         }
 
     @convertible.on(Type, Type)
@@ -821,7 +823,7 @@ def IR(ns):
 
     @ns
     class StringLiteral(Expression):
-        type = PointerType(ConstType(PRIMITIVE_TYPE_MAP['char']))
+        type = RawPointerType(ConstType(PRIMITIVE_TYPE_MAP['char']))
 
         fields = (
             ('value', str),
@@ -1704,8 +1706,13 @@ def C(ns):
         cname = c_struct_name(self)
         return f'{cname} {name}'.strip()
 
+    @declare.on(IR.RawPointerType)
+    def declare(self, name):
+        return declare(self.base, f' *{name}'.strip())
+
     @declare.on(IR.PointerType)
     def declare(self, name):
+        raise Error([], [self, name])
         return declare(self.base, f' *{name}'.strip())
 
     @declare.on(IR.ConstType)
@@ -1727,7 +1734,9 @@ def C(ns):
             pnames = None if pnames is None else (
                 [OUT_VAR_NAME] + list(pnames)
             )
-            paramtypes = [IR.PointerType(self.rtype)] + list(self.paramtypes)
+            paramtypes = [
+                IR.RawPointerType(self.rtype)
+            ] + list(self.paramtypes)
             return declare_raw_c_functype(
                 IR.FunctionType(
                     extern=self.extern,

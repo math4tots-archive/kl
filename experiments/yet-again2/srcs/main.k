@@ -3,6 +3,8 @@ from lib import sayhi
 from lib import printf
 from lib import Baz
 
+extern void! malloc(size_t size)
+
 struct Foo {
   Baz b
   int x
@@ -14,6 +16,8 @@ extern int main() {
   printf("foo.x = %d\n", foo.x)
   foo.x = 15
   printf("foo.x = %d\n", foo.x)
+  void! fp = malloc(3)
+  printf("fp = %p\n", fp)
   sayhi()
   0
 }
