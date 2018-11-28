@@ -2394,6 +2394,7 @@ def C(ns):
 
     @E.on(IR.GetStructField)
     def E(self, ctx):
+        assert not isinstance(self.type, IR.Retainable), self
         struct_expr, field_defns = _get_struct_field_chain(self)
         c_field_names = [
             get_c_struct_field_name(defn) for defn in field_defns
@@ -2403,11 +2404,11 @@ def C(ns):
         retvar = ctx.declare(self.type)
         cfname = get_c_struct_field_name(self.field_defn)
         ctx.out += f'{retvar} = {structvar}.{c_field_chain};'
-        ctx.retain(retvar)
         return retvar
 
     @E.on(IR.SetStructField)
     def E(self, ctx):
+        assert not isinstance(self.type, IR.Retainable), self
         struct_expr, field_defns = _get_struct_field_chain(self.expr)
         c_field_names = [
             get_c_struct_field_name(defn) for defn in field_defns
