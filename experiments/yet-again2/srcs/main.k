@@ -5,6 +5,7 @@ from lib import Baz
 from c import size_t
 
 extern void* malloc(size_t size)
+extern void free(void* p)
 
 struct Foo {
   Baz b
@@ -29,6 +30,10 @@ struct A {
 
 class Animal {
   A a
+  Food f
+}
+
+class Food {
 }
 
 extern int main() {
@@ -39,6 +44,7 @@ extern int main() {
   void* fp = malloc(3)
   unsigned long i = 14
   printf("fp = %p\n", fp)
+  free(fp)
 
   ${
     signed char c
@@ -50,6 +56,12 @@ extern int main() {
     printf("a.b.c.d = %d\n", a.b.c.d)
     a.b.c.d = 149
     printf("a.b.c.d = %d\n", a.b.c.d)
+  }
+
+  ${
+    Animal a = $(Animal)
+    Animal b = a
+    // printf("a.f = %p\n", a.f)
   }
 
   sayhi()

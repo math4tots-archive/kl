@@ -2,6 +2,7 @@
 #define kcrt_h
 #include <stddef.h>
 
+typedef struct KLC_Error KLC_Error;
 typedef struct KLC_Header KLC_Header;
 typedef struct KLC_Class KLC_Class;
 typedef void KLC_Deleter(KLC_Header*, KLC_Header**);
@@ -9,11 +10,13 @@ typedef void KLC_Deleter(KLC_Header*, KLC_Header**);
 struct KLC_Header {
   size_t refcnt;
   KLC_Class* cls;
+  KLC_Header* next; /* for stackless release with partial_release */
 };
 
 struct KLC_Class {
-  char* name;
-  KLC_Deleter* deleter;
+  const char* module_name;
+  const char* short_name;
+  KLC_Deleter*const deleter;
 };
 
 char* KLC_CopyString(const char* s);

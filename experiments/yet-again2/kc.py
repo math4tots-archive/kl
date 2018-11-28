@@ -684,6 +684,10 @@ def IR(ns):
             return f'{type(self).__name__}{self._proxy}'
 
     @ns
+    class Retainable:
+        "Type mixin that indicates the given type is reference counted"
+
+    @ns
     class PointerType(Type, ProxyMixin):
         def __init__(self, base):
             self.base = base
@@ -750,7 +754,7 @@ def IR(ns):
         pass
 
     @ns
-    class ClassDeclaration(StructOrClassDeclaration):
+    class ClassDeclaration(StructOrClassDeclaration, Retainable):
         pass
 
     PRIMITIVE_TYPE_MAP = {
@@ -764,9 +768,6 @@ def IR(ns):
 
     VOIDP = PointerType(VOID)
     ns(VOIDP, 'VOIDP')
-
-    EXCEPTION_POINTER = VOIDP
-    ns(EXCEPTION_POINTER, 'EXCEPTION_POINTER')
 
     convertible = Multimethod('convertible', 2)
     ns(convertible, 'convertible')
@@ -890,6 +891,12 @@ def IR(ns):
         )
 
     @ns
+    class Malloc(Expression):
+        fields = (
+            ('type', Type),
+        )
+
+    @ns
     class IntLiteral(Expression):
         type = PRIMITIVE_TYPE_MAP['int']
 
@@ -938,12 +945,13 @@ def IR(ns):
 
     @ns
     class StructOrClassDefinition(GlobalDefinition):
-        pass
+        @property
+        def extern(self):
+            return self.decl.extern
 
     @ns
     class StructDefinition(StructOrClassDefinition):
         fields = (
-            ('extern', bool),
             ('decl', StructDeclaration),
             ('fields', typeutil.Optional[typeutil.List[FieldDefinition]]),
         )
@@ -951,7 +959,6 @@ def IR(ns):
     @ns
     class ClassDefinition(StructOrClassDefinition):
         fields = (
-            ('extern', bool),
             ('decl', ClassDeclaration),
             ('fields', typeutil.Optional[typeutil.List[FieldDefinition]]),
         )
@@ -977,6 +984,32 @@ def IR(ns):
             ('imports', typeutil.List[FromImport]),
             ('definitions', typeutil.List[GlobalDefinition]),
         )
+
+    def new_builtin_extern_struct(name):
+        decl = StructDeclaration(
+            builtin_token,
+            True,
+            'builtin',
+            'KLC_Header',
+        )
+        decl.defn = StructDefinition(
+            builtin_token,
+            decl,
+            None,
+        )
+        return decl
+
+    HEADER_TYPE = new_builtin_extern_struct('KLC_Header')
+    ns(HEADER_TYPE, 'HEADER_TYPE')
+    ns(PointerType(HEADER_TYPE), 'HEADER_POINTER_TYPE')
+
+    CLASS_TYPE = new_builtin_extern_struct('KLC_Class')
+    ns(CLASS_TYPE, 'CLASS_TYPE')
+    ns(PointerType(CLASS_TYPE), 'CLASS_POINTER_TYPE')
+
+    ERROR_TYPE = new_builtin_extern_struct('KLC_Error')
+    ns(ERROR_TYPE, 'ERROR_TYPE')
+    ns(PointerType(ERROR_TYPE), 'ERROR_POINTER_TYPE')
 
 
 @Namespace
@@ -1430,10 +1463,28 @@ def parser(ns):
                 return IR.ThrowStringLiteral(token, value)
             return promise
 
+        def promise_malloc(scope, token, type_promise):
+            @Promise
+            def promise():
+                type = type_promise.resolve()
+                if not isinstance(type, IR.ClassDeclaration):
+                    with scope.push(token):
+                        raise scope.error(
+                            f'Malloc ($) only allowed for Class types, '
+                            f'but got {type}')
+                return IR.Malloc(token, type)
+            return promise
+
         def parse_primary(scope):
             token = peek()
             if consume('$'):
-                return parse_block(scope)
+                if at('{'):
+                    return parse_block(scope)
+                else:
+                    expect('(')
+                    type_promise = parse_type(scope)
+                    expect(')')
+                    return promise_malloc(scope, token, type_promise)
             if consume('('):
                 with skipping_newlines(True):
                     expr = parse_expression(scope)
@@ -1468,7 +1519,11 @@ def parser(ns):
             return promise
 
         def parse_fields(
-                scope, extern, allow_empty_body, allow_extern_fields):
+                scope,
+                extern,
+                allow_empty_body,
+                allow_retainable_fields,
+                allow_extern_fields):
             if allow_empty_body and consume('\n'):
                 return Promise.value(None)
 
@@ -1502,6 +1557,12 @@ def parser(ns):
                                 raise scope.error(
                                     f'{field.type} is an incomplete type'
                                 )
+                    elif (not allow_retainable_fields and
+                            isinstance(field.type, IR.Retainable)):
+                        with scope.push(field.token):
+                            raise scope.error(
+                                'Retainable types are not allowed here'
+                            )
                 return fields
             return promise
 
@@ -1511,6 +1572,7 @@ def parser(ns):
                 scope,
                 token,
                 extern,
+                allow_retainable_fields,
                 allow_empty_body,
                 allow_extern_fields):
             name = expect_id()
@@ -1520,13 +1582,13 @@ def parser(ns):
                 scope=scope,
                 extern=extern,
                 allow_empty_body=allow_empty_body,
+                allow_retainable_fields=allow_retainable_fields,
                 allow_extern_fields=allow_extern_fields,
             )
             @Promise
             def promise():
                 defn = Defn(
                     token,
-                    extern,
                     decl,
                     fields_promise.resolve(),
                 )
@@ -1541,6 +1603,7 @@ def parser(ns):
                 scope=scope,
                 token=token,
                 extern=extern,
+                allow_retainable_fields=False,
                 allow_extern_fields=True,
                 allow_empty_body=True,
             )
@@ -1553,6 +1616,7 @@ def parser(ns):
                 scope=scope,
                 token=token,
                 extern=extern,
+                allow_retainable_fields=True,
                 allow_extern_fields=False,
                 allow_empty_body=False,
             )
@@ -1663,11 +1727,26 @@ def C(ns):
     ENCODED_LOCAL_VARIABLE_PREFIX = 'KLCLV'
     ENCODED_STRUCT_PREFIX = 'KLCST'
     ENCODED_STRUCT_FIELD_PREFIX = 'KLCSF'
+    ENCODED_CLASS_PROTO_NAME = 'KLCCP'
+    ENCODED_CLASS_MALLOC_PREFIX = 'KLCCM'
+    ENCODED_CLASS_DELETER_PREFIX = 'KLCCD'
     ENCODED_CLASS_STRUCT_PREFIX = 'KLCCS'
     ENCODED_CLASS_FIELD_PREFIX = 'KLCCF'
-    OUT_VAR_NAME = 'KLCoutptr'
-    CLASS_HEADER_FIELD_NAME = f'header'
-    HEADER_STRUCT_NAME = f'KLC_Header'
+    OUTPUT_PTR_NAME = 'KLC_output_ptr'
+    CLASS_HEADER_FIELD_NAME = 'header'
+    HEADER_STRUCT_NAME = 'KLC_Header'
+    ERROR_POINTER_NAME = 'KLC_error'
+    ERROR_POINTER_TYPE = IR.ERROR_POINTER_TYPE
+    HEADER_POINTER_TYPE = IR.HEADER_POINTER_TYPE
+    DELETER_TYPE = IR.FunctionType(
+        extern=True,
+        rtype=IR.VOID,
+        paramtypes=[
+            HEADER_POINTER_TYPE,
+            IR.PointerType(HEADER_POINTER_TYPE),
+        ],
+        vararg=False,
+    )
 
     encode_map = {
         '_': '_U',  # U for Underscore
@@ -1742,22 +1821,36 @@ def C(ns):
             self.out = FractalStringBuilder(0)
             self.next_temp_var_id = 0
 
+            # Map of declared C local variables to their types
+            # These are updated as we enter and exit scopes.
+            self._scope = collections.OrderedDict()
+
+            # The label to jump to to exit the current scope
+            # (e.g. for exceptions or early returns)
+            # We can't willy-nilly exit the function because we still
+            # need to release all the variables.
+            # Jumping to the designated label ensures variables in
+            # all scopes are properly released.
+            self._exit_jump_label = None
+
             # A place where temporary variables may be declared
             # We need this mechanism because in C89, you can't
             # willy-nilly declare variables anywhere (they
             # have to be declared at the beginning of a block).
             self._decls = None
 
-        def new_temp_var_name(self):
+        def _new_unique_cname(self):
             name = f'KLCT{self.next_temp_var_id}'
             self.next_temp_var_id += 1
             return name
 
         def declare(self, t: IR.Type, cname=None):
             cname = (
-                self.new_temp_var_name() if cname is None else
+                self._new_unique_cname() if cname is None else
                 cname
             )
+            assert cname not in self._scope, cname
+            self._scope[cname] = t
             self._decls += f'{declare(t, cname)} = {init_expr_for(t)};'
             return cname
 
@@ -1765,15 +1858,60 @@ def C(ns):
         def retain_scope(self):
             old_decls = self._decls
             old_out = self.out
+            old_exit_jump_label = self._exit_jump_label
+            old_scope_size = len(self._scope)
+
             old_out += '{'
             self._decls = old_out.spawn(1)
             self.out = old_out.spawn(1)
+            after_release = old_out.spawn(1)
             old_out += '}'
+
+            new_exit_jump_label = self._new_unique_cname()
+            self._exit_jump_label = new_exit_jump_label
+
             try:
-                yield
+                # We yield 'after_release' so that the caller may
+                # add statements after all local variables have
+                # been released
+                yield after_release
             finally:
+                # This is where all code exiting this block will jump
+                # to before they exit.
+                self.out += f'{new_exit_jump_label}:;'
+
+                # Release all variables in this scope
+                while len(self._scope) > old_scope_size:
+                    cname, type = self._scope.popitem(last=True)
+                    self.out += _release(type=type, cname=cname)
+
+                # If there is a surrounding scope and an exception
+                # is being thrown, we want to jump out of the outer
+                # scope as well.
+                if old_exit_jump_label:
+                    self.out += f'if ({ERROR_POINTER_NAME}) ' '{'
+                    with self.push_indent(1):
+                        self.out += f'goto {old_exit_jump_label};'
+                    self.out += '}'
+
                 self._decls = old_decls
                 self.out = old_out
+                self._exit_jump_label = old_exit_jump_label
+
+        def jump_out_of_scope(self):
+            self.out += f'goto {self._exit_jump_label};'
+
+        def retain(self, cname, out=None):
+            assert cname is None or cname in self._scope, cname
+            if cname is not None:
+                out = out or self.out
+                out += _retain(self._scope[cname], cname)
+
+        def release(self, cname, out=None):
+            assert cname is None or cname in self._scope, cname
+            if cname is not None:
+                out = out or self.out
+                out += _release(self._scope[cname], cname)
 
         @contextlib.contextmanager
         def push_indent(self, depth):
@@ -1783,6 +1921,18 @@ def C(ns):
                 yield
             finally:
                 self.out = old_out
+
+    def _retain(type, cname):
+        if isinstance(type, IR.ClassDeclaration):
+            return f'KLC_retain((KLC_Header*) {cname});'
+        else:
+            return ''
+
+    def _release(type, cname):
+        if isinstance(type, IR.ClassDeclaration):
+            return f'KLC_release((KLC_Header*) {cname});'
+        else:
+            return ''
 
     @ns
     def write_out(tu: TranslationUnit, out_dir: str):
@@ -1858,7 +2008,7 @@ def C(ns):
                 # nothing actually needs to get emitted for this.
                 pass
             elif isinstance(defn, IR.StructDefinition):
-                cname = c_struct_name(defn.decl)
+                cname = get_c_struct_name(defn.decl)
                 # We only actually define the struct itself if
                 #   1. the struct was not declard extern, and
                 #   2. a body was explicitly provided.
@@ -1871,7 +2021,7 @@ def C(ns):
                     for field in defn.fields:
                         fields_out += declare(
                             field.type,
-                            c_struct_field_name(field),
+                            get_c_struct_field_name(field),
                         ) + ';';
                     if not defn.fields:
                         # Empty structs aren't standard C.
@@ -1880,8 +2030,14 @@ def C(ns):
                     structs += '};'
             elif isinstance(defn, IR.ClassDefinition):
                 assert not defn.extern, defn
-                struct_name = class_c_struct_name(defn.decl)
+                struct_name = get_class_struct_name(defn.decl)
+                malloc_name = get_class_malloc_name(defn.decl)
+                malloc_type = get_class_malloc_type(defn.decl)
+                deleter_name = get_class_deleter_name(defn.decl)
+                proto_name = get_class_proto_name(defn.decl)
+
                 fwdstruct += f'typedef struct {struct_name} {struct_name};'
+
                 structs += f'struct {struct_name} ' '{'
                 fields_out = structs.spawn(1)
                 fields_out += (
@@ -1890,9 +2046,15 @@ def C(ns):
                 for field in defn.fields:
                     fields_out += declare(
                         field.type,
-                        class_c_struct_field_name(field),
+                        get_class_c_struct_field_name(field),
                     ) + ';'
                 structs += '};'
+
+                gvardecls += f'extern KLC_Class {proto_name};'
+
+                fdecls += f'extern {declare(malloc_type, malloc_name)};'
+                fdecls += f'extern {declare(DELETER_TYPE, deleter_name)};'
+
             else:
                 raise Fubar([], defn)
 
@@ -1911,7 +2073,8 @@ def C(ns):
             encode(f'{module_name}.{name}', prefix=prefix)
         )
 
-    def c_struct_name(decl: IR.StructDeclaration):
+    def get_c_struct_name(decl: IR.StructDeclaration):
+        assert isinstance(decl, IR.StructDeclaration), decl
         return (
             decl.short_name if decl.extern else
             qualify(
@@ -1921,13 +2084,46 @@ def C(ns):
             )
         )
 
-    def c_struct_field_name(defn: IR.FieldDefinition):
+    def get_c_struct_field_name(defn: IR.FieldDefinition):
         return (
             defn.name if defn.extern else
             encode(defn.name, prefix=ENCODED_STRUCT_FIELD_PREFIX)
         )
 
-    def class_c_struct_name(decl: IR.ClassDeclaration):
+    def get_class_proto_name(decl: IR.Declaration):
+        assert isinstance(decl, IR.ClassDeclaration), decl
+        return qualify(
+            decl.module_name,
+            decl.short_name,
+            prefix=ENCODED_CLASS_PROTO_NAME,
+        )
+
+    def get_class_malloc_type(decl: IR.ClassDeclaration):
+        assert isinstance(decl, IR.ClassDeclaration), decl
+        return IR.FunctionType(
+            extern=True,
+            rtype=decl,
+            paramtypes=[],
+            vararg=False,
+        )
+
+    def get_class_malloc_name(decl: IR.ClassDeclaration):
+        assert isinstance(decl, IR.ClassDeclaration), decl
+        return qualify(
+            decl.module_name,
+            decl.short_name,
+            prefix=ENCODED_CLASS_MALLOC_PREFIX,
+        )
+
+    def get_class_deleter_name(decl: IR.ClassDeclaration):
+        assert isinstance(decl, IR.ClassDeclaration), decl
+        return qualify(
+            decl.module_name,
+            decl.short_name,
+            prefix=ENCODED_CLASS_DELETER_PREFIX,
+        )
+
+    def get_class_struct_name(decl: IR.ClassDeclaration):
         assert isinstance(decl, IR.ClassDeclaration), decl
         assert not decl.extern, decl
         return qualify(
@@ -1936,7 +2132,7 @@ def C(ns):
             prefix=ENCODED_CLASS_STRUCT_PREFIX,
         )
 
-    def class_c_struct_field_name(defn: IR.FieldDefinition):
+    def get_class_c_struct_field_name(defn: IR.FieldDefinition):
         assert not defn.extern, defn
         return encode(defn.name, prefix=ENCODED_CLASS_FIELD_PREFIX)
 
@@ -1981,8 +2177,13 @@ def C(ns):
 
     @declare.on(IR.StructDeclaration)
     def declare(self, name):
-        cname = c_struct_name(self)
-        return f'{cname} {name}'.strip()
+        struct_name = get_c_struct_name(self)
+        return f'{struct_name} {name}'.strip()
+
+    @declare.on(IR.ClassDeclaration)
+    def declare(self, name):
+        struct_name = get_class_struct_name(self)
+        return f'{struct_name}* {name}'.strip()
 
     @declare.on(IR.PointerType)
     def declare(self, name):
@@ -2003,9 +2204,9 @@ def C(ns):
         if self.extern:
             return declare_raw_c_functype(self, name, pnames)
         else:
-            rtype = IR.EXCEPTION_POINTER
+            rtype = ERROR_POINTER_TYPE
             pnames = None if pnames is None else (
-                [OUT_VAR_NAME] + list(pnames)
+                [OUTPUT_PTR_NAME] + list(pnames)
             )
             paramtypes = [
                 IR.PointerType(self.rtype)
@@ -2058,15 +2259,17 @@ def C(ns):
 
         if self.body is not None:
             ctx.out += proto_for(self)
-            with ctx.retain_scope():
+            with ctx.retain_scope() as after_release:
+                ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
                 retvar = E(self.body, ctx)
+                ctx.retain(retvar)
                 if decl.extern:
                     if decl.rtype != IR.VOID:
-                        ctx.out += f'return {retvar};'
+                        after_release += f'return {retvar};'
                 else:
                     if decl.rtype != IR.VOID:
-                        ctx.out += f'*{OUT_VAR_NAME} = {retvar};'
-                    ctx.out += f'return NULL;'
+                        after_release += f'*{OUTPUT_PTR_NAME} = {retvar};'
+                    after_release += f'return {ERROR_POINTER_NAME};'
 
     @D.on(IR.StructDefinition)
     def D(self, ctx):
@@ -2074,7 +2277,49 @@ def C(ns):
 
     @D.on(IR.ClassDefinition)
     def D(self, ctx):
-        pass
+        decl = self.decl
+        struct_name = get_class_struct_name(decl)
+        malloc_name = get_class_malloc_name(decl)
+        malloc_type = get_class_malloc_type(decl)
+        deleter_name = get_class_deleter_name(decl)
+        proto_name = get_class_proto_name(decl)
+
+        ctx.out += f'KLC_Class {proto_name} = ' '{'
+        with ctx.push_indent(1):
+            ctx.out += f'"{decl.module_name}",'
+            ctx.out += f'"{decl.short_name}",'
+            ctx.out += f'&{deleter_name},'
+        ctx.out += '};'
+
+        ctx.out += declare(malloc_type, malloc_name)
+        ctx.out += '{'
+        with ctx.push_indent(1):
+            ctx.out += f'{struct_name} zero = ' '{0};'
+            ctx.out += f'{struct_name}* ret = malloc(sizeof({struct_name}));'
+            ctx.out += f'*ret = zero;'
+            ctx.out += f'ret->header.cls = &{proto_name};'
+            ctx.out += f'return ret;'
+        ctx.out += '}'
+
+        ctx.out += declare(DELETER_TYPE, deleter_name, ['robj', 'dq'])
+        ctx.out += '{'
+        retainable_fields = [
+            field for field in self.fields if
+            isinstance(field.type, IR.Retainable)
+        ]
+        if retainable_fields:
+            with ctx.push_indent(1):
+                ctx.out += f'{struct_name}* obj = ({struct_name}*) robj;'
+                for field in retainable_fields:
+                    if isinstance(field.type, IR.ClassDeclaration):
+                        c_field_name = get_class_c_struct_field_name (field)
+                        ctx.out += (
+                            f'KLC_partial_release('
+                            f'(KLC_Header*) obj->{c_field_name}, dq);'
+                        )
+                    else:
+                        assert False, field
+        ctx.out += '}'
 
     proto_for = Multimethod('proto_for')
 
@@ -2098,6 +2343,16 @@ def C(ns):
     # translate expressions
     E = Multimethod('E')
 
+    """
+    Memory management rules with expressions:
+
+        * All variables declared with 'declare' will be
+            auto-released at the end of the given retain_scope
+
+        * Every 'E' definition should balance all the refs
+            within its function boundary.
+    """
+
     @E.on(IR.Block)
     def E(self, ctx):
         retvar = (
@@ -2113,12 +2368,15 @@ def C(ns):
             if self.type != IR.VOID:
                 assert last_retvar is not None, self.type
                 ctx.out += f'{retvar} = {last_retvar};'
+                ctx.retain(retvar)
         return retvar
 
     @E.on(IR.SetLocalName)
     def E(self, ctx):
         cname = cvarname(self.decl)
         retvar = E(self.expr, ctx)
+        ctx.retain(retvar)
+        ctx.release(cname)
         ctx.out += f'{cname} = {retvar};'
         return cname
 
@@ -2138,35 +2396,38 @@ def C(ns):
     def E(self, ctx):
         struct_expr, field_defns = _get_struct_field_chain(self)
         c_field_names = [
-            c_struct_field_name(defn) for defn in field_defns
+            get_c_struct_field_name(defn) for defn in field_defns
         ]
         c_field_chain = '.'.join(c_field_names)
         structvar = E(struct_expr, ctx)
         retvar = ctx.declare(self.type)
-        cfname = c_struct_field_name(self.field_defn)
+        cfname = get_c_struct_field_name(self.field_defn)
         ctx.out += f'{retvar} = {structvar}.{c_field_chain};'
+        ctx.retain(retvar)
         return retvar
 
     @E.on(IR.SetStructField)
     def E(self, ctx):
         struct_expr, field_defns = _get_struct_field_chain(self.expr)
         c_field_names = [
-            c_struct_field_name(defn) for defn in field_defns
+            get_c_struct_field_name(defn) for defn in field_defns
         ] + [
-            c_struct_field_name(self.field_defn),
+            get_c_struct_field_name(self.field_defn),
         ]
         c_field_chain = '.'.join(c_field_names)
         structvar = E(struct_expr, ctx)
         resultvar = E(self.valexpr, ctx)
         retvar = ctx.declare(self.type)
-        cfname = c_struct_field_name(self.field_defn)
+        cfname = get_c_struct_field_name(self.field_defn)
         ctx.out += f'{retvar} = {resultvar};'
         ctx.out += f'{structvar}.{c_field_chain} = {retvar};'
         return retvar
 
     @E.on(IR.IntLiteral)
     def E(self, ctx):
-        return str(self.value)
+        retvar = ctx.declare(IR.PRIMITIVE_TYPE_MAP['int'])
+        ctx.out += f'{retvar} = {self.value};'
+        return retvar
 
     def escape_str(s):
         return (
@@ -2193,6 +2454,10 @@ def C(ns):
                 ctx.out += f'{fvar}({argvars});'
                 return
             else:
+                # Function calls implicitly generate a retain,
+                # so there's no need to explicitly retain here.
+                # And of course, the release is implicit with
+                # the 'declare'.
                 retvar = ctx.declare(self.type)
                 ctx.out += f'{retvar} = {fvar}({argvars});'
                 return retvar
@@ -2208,21 +2473,31 @@ def C(ns):
                 f'{retvarp}, {argvars}' if self.args else retvarp
             )
 
-            statvar = ctx.declare(IR.EXCEPTION_POINTER)
-            ctx.out += f'{statvar} = {fvar}({margvars});'
-            ctx.out += f'if ({statvar}) ' '{'
+            ctx.out += f'{ERROR_POINTER_NAME} = {fvar}({margvars});'
+            ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
             with ctx.push_indent(1):
                 if self.from_extern:
-                    ctx.out += f'KLC_panic_with_error({statvar});'
+                    ctx.out += f'KLC_panic_with_error({ERROR_POINTER_NAME});'
                 else:
-                    ctx.out += f'return {statvar};'
+                    ctx.jump_out_of_scope()
             ctx.out += '}'
             return retvar
+
+    @E.on(IR.Malloc)
+    def E(self, ctx):
+        malloc_name = get_class_malloc_name(self.type)
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = {malloc_name}();'
+        return retvar
 
     @E.on(IR.ThrowStringLiteral)
     def E(self, ctx):
         escaped = escape_str(self.value)
-        ctx.out += f'return KLC_new_error_with_message("{escaped}");'
+        ctx.out += (
+            f'{ERROR_POINTER_NAME} = '
+            f'KLC_new_error_with_message("{escaped}");'
+        )
+        ctx.jump_out_of_scope()
 
     @E.on(IR.FunctionName)
     def E(self, ctx):
@@ -2234,6 +2509,10 @@ def C(ns):
     @init_expr_for.on(IR.StructDeclaration)
     def init_expr_for(self):
         return '{0}'
+
+    @init_expr_for.on(IR.ClassDeclaration)
+    def init_expr_for(self):
+        return 'NULL'
 
     @init_expr_for.on(IR.PointerType)
     def init_expr_for(self):
