@@ -1675,12 +1675,16 @@ def C(ns):
         @contextlib.contextmanager
         def retain_scope(self):
             old_decls = self._decls
-            out = self.out
-            self._decls = out.spawn()
+            old_out = self.out
+            old_out += '{'
+            self._decls = old_out.spawn(1)
+            self.out = old_out.spawn(1)
+            old_out += '}'
             try:
                 yield
             finally:
                 self._decls = old_decls
+                self.out = old_out
 
         @contextlib.contextmanager
         def push_indent(self, depth):
@@ -1918,8 +1922,8 @@ def C(ns):
         decl = self.decl
 
         if self.body is not None:
-            ctx.out += proto_for(self) + ' {'
-            with ctx.push_indent(1), ctx.retain_scope():
+            ctx.out += proto_for(self)
+            with ctx.retain_scope():
                 retvar = E(self.body, ctx)
                 if decl.extern:
                     if decl.rtype != IR.VOID:
@@ -1928,7 +1932,6 @@ def C(ns):
                     if decl.rtype != IR.VOID:
                         ctx.out += f'*{OUT_VAR_NAME} = {retvar};'
                     ctx.out += f'return NULL;'
-            ctx.out += '}'
 
     @D.on(IR.PrimitiveTypeDefinition)
     def D(self, ctx):
@@ -1961,9 +1964,8 @@ def C(ns):
             ctx.declare(self.type) if self.type != IR.VOID else
             None
         )
-        ctx.out += '{'
         last_retvar = None
-        with ctx.push_indent(1), ctx.retain_scope():
+        with ctx.retain_scope():
             for decl in self.decls:
                 ctx.declare(decl.type, cvarname(decl))
             for expr in self.exprs:
@@ -1971,7 +1973,6 @@ def C(ns):
             if self.type != IR.VOID:
                 assert last_retvar is not None, self.type
                 ctx.out += f'{retvar} = {last_retvar};'
-        ctx.out += '}'
         return retvar
 
     @E.on(IR.SetLocalName)
