@@ -1386,7 +1386,7 @@ def parser(ns):
                     raise scope.fubar(f'{decl}')
             return promise
 
-        def pthrowstrlit(scope, token, value):
+        def promise_throw_string_literal(scope, token, value):
             @Promise
             def promise():
                 if scope['@func'].extern:
@@ -1416,7 +1416,7 @@ def parser(ns):
             if consume('throw'):
                 # For now, only allow string literals
                 value = expect('STRING').value
-                return pthrowstrlit(scope, token, value)
+                return promise_throw_string_literal(scope, token, value)
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
 
