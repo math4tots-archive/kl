@@ -27,6 +27,10 @@ struct A {
   B b
 }
 
+class Animal {
+  A a
+}
+
 extern int main() {
   Foo foo
   printf("foo.x = %d\n", foo.x)
