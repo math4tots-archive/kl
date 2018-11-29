@@ -2647,16 +2647,21 @@ def C(ns):
             ctx.declare(self.type) if self.type != IR.VOID else
             None
         )
-        last_retvar = None
         with ctx.retain_scope():
             for decl in self.decls:
                 ctx.declare(decl.type, cvarname(decl))
-            for expr in self.exprs:
-                last_retvar = E(expr, ctx)
+
+            for expr in self.exprs[:-1]:
+                with ctx.retain_scope():
+                    E(expr, ctx)
+            if self.exprs:
+                last_retvar = E(self.exprs[-1], ctx)
+
             if self.type != IR.VOID:
                 assert last_retvar is not None, self.type
                 ctx.out += f'{retvar} = {last_retvar};'
                 ctx.retain(retvar)
+
         return retvar
 
     @E.on(IR.This)
