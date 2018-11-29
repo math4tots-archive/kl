@@ -360,7 +360,8 @@ def lexer(ns):
       'struct', 'const', 'throw',
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
       'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
-      'except', 'case','switch', 'var',
+      'except', 'case','switch', 'var', 'this',
+      'static_cast',
     } | set(C_KEYWORDS)
     ns(KEYWORDS, 'KEYWORDS')
 
@@ -629,17 +630,6 @@ def IR(ns):
         """
 
     @ns
-    class ExpressionContext(PseudoDeclaration):
-        """Contains information needed for resolving expressions
-        """
-        fields = (
-            # Indicates whether we're in an 'extern' context.
-            # E.g. we cannot throw exceptions from an extern
-            # context. Also the calling convention is different.
-            ('extern', bool),
-        )
-
-    @ns
     class VariableDeclaration(Declaration):
         pass
 
@@ -771,21 +761,44 @@ def IR(ns):
     @ns
     class StructOrClassDeclaration(TypeDeclaration):
         defn = None
+        _fields = None
+        fields = (
+            ('extern', bool),
+            ('module_name', str),
+            ('short_name', str),
+            ('field_promises', typeutil.List[Promise]),
+        )
+
+        def get_fields(self):
+            if self._fields is None:
+                fields = [p.resolve() for p in self.field_promises]
+                for field in fields:
+                    assert isinstance(field, FieldDefinition), field
+                self._fields = fields
+            return self._fields
 
     @ns
     class StructDeclaration(StructOrClassDeclaration):
-        fields = (
-            ('extern', bool),
-            ('module_name', str),
-            ('short_name', str),
-        )
+        pass
 
     @ns
     class ClassDeclaration(StructOrClassDeclaration, Retainable):
+        pass
+
+    @ns
+    class ExpressionContext(PseudoDeclaration):
+        """Contains information needed for resolving expressions
+        """
+        def __init__(self, token, extern, cls):
+            super().__init__(token, extern, cls)
+
         fields = (
+            # Indicates whether we're in an 'extern' context.
+            # E.g. we cannot throw exceptions from an extern
+            # context. Also the calling convention is different.
             ('extern', bool),
-            ('module_name', str),
-            ('short_name', str),
+
+            ('cls', typeutil.Optional[ClassDeclaration])
         )
 
     PRIMITIVE_TYPE_MAP = {
@@ -931,6 +944,29 @@ def IR(ns):
             return self.field_defn.type
 
     @ns
+    class GetClassField(Expression):
+        fields = (
+            ('field_defn', FieldDefinition),
+            ('expr', Expression),
+        )
+
+        @property
+        def type(self):
+            return self.field_defn.type
+
+    @ns
+    class SetClassField(Expression):
+        fields = (
+            ('field_defn', FieldDefinition),
+            ('expr', Expression),
+            ('valexpr', Expression),
+        )
+
+        @property
+        def type(self):
+            return self.field_defn.type
+
+    @ns
     class FunctionCall(Expression):
         fields = (
             ('from_extern', bool),  # iff we are calling form extern func
@@ -945,6 +981,16 @@ def IR(ns):
         fields = (
             ('type', Type),
         )
+
+    @ns
+    class This(Expression):
+        fields = (
+            ('cls', ClassDeclaration),
+        )
+
+        @property
+        def type(self):
+            return self.cls
 
     @ns
     class IntLiteral(Expression):
@@ -968,6 +1014,13 @@ def IR(ns):
 
         fields = (
             ('value', str),
+        )
+
+    @ns
+    class PointerCast(Expression):
+        fields = (
+            ('type', PointerType),
+            ('expr', Expression),
         )
 
     @ns
@@ -1052,6 +1105,7 @@ def IR(ns):
             True,
             'builtin',
             'KLC_Header',
+            [],
         )
         decl.defn = StructDefinition(
             builtin_token,
@@ -1426,7 +1480,7 @@ def parser(ns):
             ))
 
         def _check_has_expression_context(scope):
-            assert isinstance(scope['@expr_ctx'], IR.ExpressionContext)
+            assert isinstance(scope['@ec'], IR.ExpressionContext)
 
         def parse_expression(scope):
             _check_has_expression_context(scope)
@@ -1453,7 +1507,7 @@ def parser(ns):
                 args = f.type.convert_args(scope, token, raw_args)
                 return IR.FunctionCall(
                     token,
-                    scope['@expr_ctx'].extern,
+                    scope['@ec'].extern,
                     f.type.extern,
                     f.type.rtype,
                     f,
@@ -1462,11 +1516,11 @@ def parser(ns):
             return promise
 
         def get_field_defn(scope, token, type, field_name):
-            if not isinstance(type, IR.StructDeclaration):
+            if not isinstance(type,
+                    (IR.StructDeclaration, IR.ClassDeclaration)):
                 with scope.push(token):
                     raise scope.error(f'{type} is not a struct type')
-            defn = type.defn
-            fields = [f for f in defn.fields if f.name == field_name]
+            fields = [f for f in type.get_fields() if f.name == field_name]
             if not fields:
                 with scope.push(token):
                     raise scope.error(
@@ -1474,30 +1528,55 @@ def parser(ns):
             field, = fields
             return field
 
-        def pgetfield(scope, token, exprp, fname):
+        def promise_get_field(scope, token, exprp, fname):
             @Promise
             def promise():
                 expr = exprp.resolve()
                 defn = get_field_defn(scope, token, expr.type, fname)
-                return IR.GetStructField(
-                    token,
-                    defn,
-                    expr,
-                )
+                if isinstance(expr.type, IR.StructDeclaration):
+                    return IR.GetStructField(
+                        token,
+                        defn,
+                        expr,
+                    )
+                elif isinstance(expr.type, IR.ClassDeclaration):
+                    return IR.GetClassField(
+                        token,
+                        defn,
+                        expr,
+                    )
+                else:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'{expr.type} is not a struct or class type'
+                        )
             return promise
 
-        def psetfield(scope, token, exprp, fname, valp):
+        def promise_set_field(scope, token, exprp, fname, valp):
             @Promise
             def promise():
                 expr = exprp.resolve()
                 defn = get_field_defn(scope, token, expr.type, fname)
                 val = scope.convert(valp.resolve(), defn.type)
-                return IR.SetStructField(
-                    token,
-                    defn,
-                    expr,
-                    val,
-                )
+                if isinstance(expr.type, IR.StructDeclaration):
+                    return IR.SetStructField(
+                        token,
+                        defn,
+                        expr,
+                        val,
+                    )
+                elif isinstance(expr.type, IR.ClassDeclaration):
+                    return IR.SetClassField(
+                        token,
+                        defn,
+                        expr,
+                        val,
+                    )
+                else:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'{expr.type} is not a struct or class type'
+                        )
             return promise
 
         def parse_postfix(scope):
@@ -1516,9 +1595,10 @@ def parser(ns):
                     name = expect_id()
                     if consume('='):
                         valp = parse_expression(scope)
-                        expr = psetfield(scope, token, expr, name, valp)
+                        expr = promise_set_field(
+                            scope, token, expr, name, valp)
                     else:
-                        expr = pgetfield(scope, token, expr, name)
+                        expr = promise_get_field(scope, token, expr, name)
                 else:
                     break
             return expr
@@ -1541,7 +1621,7 @@ def parser(ns):
         def promise_throw_string_literal(scope, token, value):
             @Promise
             def promise():
-                if scope['@expr_ctx'].extern:
+                if scope['@ec'].extern:
                     with scope.push(token):
                         raise scope.error(
                             f'You cannot throw from an extern context')
@@ -1560,6 +1640,37 @@ def parser(ns):
                 return IR.Malloc(token, type)
             return promise
 
+        def promise_this(scope, token):
+            @Promise
+            def promise():
+                ec = scope['@ec']
+                if ec.cls is None:
+                    with scope.push(token):
+                        raise scope.error(
+                            f"this cannot be used outside of "
+                            f"a class"
+                        )
+                return IR.This(token, ec.cls)
+            return promise
+
+        def make_cast(scope, token, type, arg):
+            if isinstance(type, IR.PointerType):
+                if isinstance(arg.type, IR.PointerType):
+                    return IR.PointerCast(
+                        token,
+                        type,
+                        arg,
+                    )
+                else:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'Only pointer can be cast to other pointer '
+                            f'types but got {arg.type}')
+            with scope.push(token):
+                raise scope.error(
+                    f'Only pointer casts are supported right now')
+
+
         def parse_primary(scope):
             token = peek()
             if consume('$'):
@@ -1574,6 +1685,8 @@ def parser(ns):
                 with skipping_newlines(True):
                     expr = parse_expression(scope)
                     return expr
+            if consume('this'):
+                return promise_this(scope, token)
             if consume('NAME'):
                 name = token.value
                 return promise_name(scope, token, name)
@@ -1587,6 +1700,19 @@ def parser(ns):
                 # For now, only allow string literals
                 value = expect('STRING').value
                 return promise_throw_string_literal(scope, token, value)
+            if consume('static_cast'):
+                expect('(')
+                type_promise = parse_type(scope)
+                expect(',')
+                arg_promise = parse_expression(scope)
+                expect(')')
+                return pcall(
+                    make_cast,
+                    scope,
+                    token,
+                    type_promise,
+                    arg_promise,
+                )
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
 
@@ -1618,10 +1744,19 @@ def parser(ns):
                             'Retainable types are not allowed here'
                         )
 
+        def check_member_names(scope, members):
+            table = dict()
+            for field in members:
+                if field.name in table:
+                    token = field.token
+                    other = table[field.name].token
+                    with scope.push(token), scope.push(other):
+                        raise scope.error(
+                            f'Member name conflict for {field.name}')
+                table[field.name] = field
+
         def parse_struct(scope, token, extern):
             name = expect_id()
-            decl = IR.StructDeclaration(token, extern, module_name, name)
-            scope[name] = decl
 
             field_promises = []
             expect('{')
@@ -1641,9 +1776,19 @@ def parser(ns):
                 expect('\n')
                 consume_all('\n')
 
+            decl = IR.StructDeclaration(
+                token,
+                extern,
+                module_name,
+                name,
+                field_promises,
+            )
+            scope[name] = decl
+
             @Promise
             def promise():
-                fields = [p.resolve() for p in field_promises]
+                fields = decl.get_fields()
+                check_member_names(scope, fields)
                 check_fields(scope, fields, allow_retainable_fields=False)
                 decl.defn = defn = IR.StructDefinition(token, decl, fields)
                 return defn
@@ -1653,10 +1798,18 @@ def parser(ns):
         def parse_class(scope, token, extern):
             assert not extern, 'extern is not meaningful for a class'
             name = expect_id()
-            decl = IR.ClassDeclaration(token, extern, module_name, name)
-            scope[name] = decl
 
             field_promises = []
+
+            decl = IR.ClassDeclaration(
+                token,
+                extern,
+                module_name,
+                name,
+                field_promises,
+            )
+            scope[name] = decl
+
             delete_hook_promise = None
             expect('{')
             consume_all('\n')
@@ -1664,9 +1817,10 @@ def parser(ns):
                 member_token = peek()
                 if consume('delete'):
                     dest_scope = Scope(scope)
-                    dest_scope['@expr_ctx'] = IR.ExpressionContext(
+                    dest_scope['@ec'] = IR.ExpressionContext(
                         token,
-                        True,  # extern
+                        extern=True,
+                        cls=decl,
                     )
                     delete_hook_promise = pcall(
                         IR.DeleteHook,
@@ -1688,7 +1842,8 @@ def parser(ns):
 
             @Promise
             def promise():
-                fields = [p.resolve() for p in field_promises]
+                fields = decl.get_fields()
+                check_member_names(scope, fields)
                 check_fields(scope, fields, allow_retainable_fields=True)
                 delete_hook = (
                     delete_hook_from_promise(token, delete_hook_promise)
@@ -1759,9 +1914,10 @@ def parser(ns):
                     )
                     scope.set_promise(token, name, decl_promise)
                     func_scope = Scope(scope)
-                    func_scope['@expr_ctx'] = IR.ExpressionContext(
-                        token,
-                        extern,
+                    func_scope['@ec'] = IR.ExpressionContext(
+                        token=token,
+                        extern=extern,
+                        cls=None,
                     )
                     body_promise = (
                         parse_block(func_scope) if has_body else None
@@ -1812,6 +1968,7 @@ def parser(ns):
 
 @Namespace
 def C(ns):
+    THIS_NAME = 'KLC_this'
     ENCODED_FUNCTION_PREFIX = 'KLCFN'
     ENCODED_GLOBAL_VARIABLE_PREFIX = 'KLCGV'
     ENCODED_PARAM_VARIABLE_PREFIX = 'KLCPV'
@@ -1999,11 +2156,23 @@ def C(ns):
                 out = out or self.out
                 out += _retain(self._scope[cname], cname)
 
-        def release(self, cname, out=None):
+        def release(self, cname, out=None, clear_var=False):
+            """Releases the given (declared) local variable.
+
+            If clear_var is true, the given variable will also
+            be set to NULL after release.
+
+            If clear_var is not set, the given variable will
+            be released naturally at the end of the scope.
+            """
             assert cname is None or cname in self._scope, cname
             if cname is not None:
                 out = out or self.out
-                out += _release(self._scope[cname], cname)
+                cmd = _release(self._scope[cname], cname)
+                if cmd:
+                    out += cmd
+                    if clear_var:
+                        out += f'{cname} = NULL;'
 
         @contextlib.contextmanager
         def push_indent(self, depth):
@@ -2413,7 +2582,9 @@ def C(ns):
             ctx.out += f'return ret;'
         ctx.out += '}'
 
-        ctx.out += declare(delete_hook_type, delete_hook_name, ['obj'])
+        ctx.out += declare(delete_hook_type, delete_hook_name, [
+            THIS_NAME,
+        ])
         with ctx.retain_scope():
             ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
             E(self.delete_hook.body, ctx)
@@ -2488,6 +2659,13 @@ def C(ns):
                 ctx.retain(retvar)
         return retvar
 
+    @E.on(IR.This)
+    def E(self, ctx):
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = {THIS_NAME};'
+        ctx.retain(retvar)
+        return retvar
+
     @E.on(IR.SetLocalName)
     def E(self, ctx):
         cname = cvarname(self.decl)
@@ -2541,6 +2719,33 @@ def C(ns):
         ctx.out += f'{structvar}.{c_field_chain} = {retvar};'
         return retvar
 
+    @E.on(IR.GetClassField)
+    def E(self, ctx):
+        c_field_name = get_class_c_struct_field_name(self.field_defn)
+        this_var = E(self.expr, ctx)
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = {this_var}->{c_field_name};'
+        ctx.retain(retvar)
+        return retvar
+
+    @E.on(IR.SetClassField)
+    def E(self, ctx):
+        c_field_name = get_class_c_struct_field_name(self.field_defn)
+        this_var = E(self.expr, ctx)
+        val_var = E(self.valexpr, ctx)
+        retvar = ctx.declare(self.type)
+        release_var = ctx.declare(self.field_defn.type)
+
+        field_expr_str = f'{this_var}->{c_field_name}'
+
+        ctx.retain(retvar)
+        ctx.out += f'{release_var} = {field_expr_str};'
+        ctx.release(release_var, clear_var=True)
+        ctx.out += f'{retvar} = {val_var};'
+        ctx.out += f'{field_expr_str} = {retvar};'
+        ctx.retain(retvar)
+        return retvar
+
     @E.on(IR.IntLiteral)
     def E(self, ctx):
         retvar = ctx.declare(IR.PRIMITIVE_TYPE_MAP['int'])
@@ -2580,6 +2785,10 @@ def C(ns):
                 ctx.out += f'{retvar} = {fvar}({argvars});'
                 return retvar
         else:
+            # Function calls implicitly generate a retain,
+            # so there's no need to explicitly retain here.
+            # And of course, the release is implicit with
+            # the 'declare'.
             if self.type == IR.VOID:
                 retvar = None
                 retvarp = 'NULL'
@@ -2606,6 +2815,14 @@ def C(ns):
         malloc_name = get_class_malloc_name(self.type)
         retvar = ctx.declare(self.type)
         ctx.out += f'{retvar} = {malloc_name}();'
+        return retvar
+
+    @E.on(IR.PointerCast)
+    def E(self, ctx):
+        exprvar = E(self.expr, ctx)
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = (({declare(self.type, "")}) {exprvar});'
+        ctx.retain(retvar)
         return retvar
 
     @E.on(IR.ThrowStringLiteral)
