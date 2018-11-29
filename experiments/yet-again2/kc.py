@@ -190,6 +190,9 @@ class Promise:
             self._result = self._callback()
         return self._result
 
+    def map(self, mapping_function):
+        return Promise(lambda: mapping_function(self.resolve()))
+
     def __repr__(self):
         return f'Promise({repr(self.resolve())})'
 
@@ -351,7 +354,8 @@ def lexer(ns):
     ns(PRIMITIVE_TYPE_NAMES, 'PRIMITIVE_TYPE_NAMES')
 
     KEYWORDS = {
-      'is', 'not', 'null', 'true', 'false', 'new', 'and', 'or', 'in',
+      'is', 'not', 'null', 'true', 'false', 'new', 'delete',
+      'and', 'or', 'in',
       'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
       'struct', 'const', 'throw',
       'for', 'if', 'else', 'while', 'break', 'continue', 'return',
@@ -590,14 +594,35 @@ def IR(ns):
     class Type:
         """Marker class for what values indicate Types.
         """
-
         @property
-        def is_primitive(self):
-            return False
+        def is_pseudo_type(self):
+            return isinstance(self, PseudoType)
 
-        @property
-        def is_pointer(self):
-            return False
+    @ns
+    class PseudoType(Type):
+        """Marker class for types that aren't types for concrete
+        values. E.g. module or class names.
+        """
+
+    @ns
+    class TypeType(Type):
+        """An expression that a class rather than a value
+        """
+
+    @ns
+    class ClassTypeType(TypeType):
+
+        def __init__(self, type: Type):
+            self.type = type
+
+        def __eq__(self, other):
+            return type(self) is type(other) and self.type == other.type
+
+        def __hash__(self):
+            return hash((type(self), self.type))
+
+        def __repr__(self):
+            return f'ClassTypeType({self.type})'
 
     @ns
     class Declaration(Node):
@@ -668,10 +693,6 @@ def IR(ns):
         fields = (
             ('name', str),
         )
-
-        @property
-        def is_primitive(self):
-            return True
 
     class ProxyMixin:
         def __eq__(self, other):
@@ -1305,6 +1326,12 @@ def parser(ns):
                 return IR.SetLocalName(token, decl, expr)
             return promise
 
+        def assert_not_pseudo_expression(scope, expr):
+            if expr.type.is_pseudo_type:
+                with scope.push(expr.token):
+                    raise scope.error(f'{expr.type} is not a value')
+            return expr
+
         def parse_block(parent_scope):
             scope = Scope(parent_scope)
             token = expect('{')
@@ -1344,7 +1371,11 @@ def parser(ns):
             return Promise(lambda: IR.Block(
                 token,
                 [p.resolve() for p in declps],
-                [p.resolve() for p in expr_promises]))
+                [
+                    assert_not_pseudo_expression(scope, p.resolve())
+                    for p in expr_promises
+                ],
+            ))
 
         def parse_expression(scope):
             return parse_postfix(scope)
@@ -1440,7 +1471,7 @@ def parser(ns):
                     break
             return expr
 
-        def pname(scope, token, name):
+        def promise_name(scope, token, name):
             @Promise
             def promise():
                 with scope.push(token):
@@ -1449,8 +1480,10 @@ def parser(ns):
                     return IR.FunctionName(token, decl)
                 if isinstance(decl, IR.LocalVariableDeclaration):
                     return IR.LocalName(token, decl)
+                if isinstance(decl, IR.ClassDeclaration):
+                    return IR.ClassTypeType(decl)
                 with scope.push(token):
-                    raise scope.fubar(f'{decl}')
+                    raise scope.error(f'{decl} is not a variable')
             return promise
 
         def promise_throw_string_literal(scope, token, value):
@@ -1491,7 +1524,7 @@ def parser(ns):
                     return expr
             if consume('NAME'):
                 name = token.value
-                return pname(scope, token, name)
+                return promise_name(scope, token, name)
             if consume('INT'):
                 return Promise.value(IR.IntLiteral(token, token.value))
             if consume('FLOAT'):
@@ -1517,6 +1550,21 @@ def parser(ns):
 
                 return IR.FunctionDefinition(token, decl, body)
             return promise
+
+        def check_fields(scope, fields, *, allow_retainable_fields):
+            for field in fields:
+                if isinstance(field.type, IR.StructDefinition):
+                    if field.type.defn is None:
+                        with scope.push(field.token):
+                            raise scope.error(
+                                f'{field.type} is an incomplete type'
+                            )
+                elif (not allow_retainable_fields and
+                        isinstance(field.type, IR.Retainable)):
+                    with scope.push(field.token):
+                        raise scope.error(
+                            'Retainable types are not allowed here'
+                        )
 
         def parse_fields(
                 scope,
@@ -1550,19 +1598,11 @@ def parser(ns):
             @Promise
             def promise():
                 fields = [p.resolve() for p in field_promises]
-                for field in fields:
-                    if isinstance(field.type, IR.StructDefinition):
-                        if field.type.defn is None:
-                            with scope.push(field.token):
-                                raise scope.error(
-                                    f'{field.type} is an incomplete type'
-                                )
-                    elif (not allow_retainable_fields and
-                            isinstance(field.type, IR.Retainable)):
-                        with scope.push(field.token):
-                            raise scope.error(
-                                'Retainable types are not allowed here'
-                            )
+                check_fields(
+                    scope,
+                    fields,
+                    allow_retainable_fields=allow_retainable_fields,
+                )
                 return fields
             return promise
 
@@ -1597,29 +1637,68 @@ def parser(ns):
             return promise
 
         def parse_struct(scope, token, extern):
-            return parse_struct_or_class(
-                Decl=IR.StructDeclaration,
-                Defn=IR.StructDefinition,
-                scope=scope,
-                token=token,
-                extern=extern,
-                allow_retainable_fields=False,
-                allow_extern_fields=True,
-                allow_empty_body=True,
-            )
+            name = expect_id()
+            decl = IR.StructDeclaration(token, extern, module_name, name)
+            scope[name] = decl
+
+            field_promises = []
+            expect('{')
+            consume_all('\n')
+            while not consume('}'):
+                field_token = peek()
+                field_extern = bool(consume('extern'))
+                field_type_promise = parse_type(scope)
+                field_name = expect_id()
+                field_promises.append(pcall(
+                    IR.FieldDefinition,
+                    field_token,
+                    field_extern or extern,
+                    field_type_promise,
+                    field_name,
+                ))
+                expect('\n')
+                consume_all('\n')
+
+            @Promise
+            def promise():
+                fields = [p.resolve() for p in field_promises]
+                check_fields(scope, fields, allow_retainable_fields=False)
+                decl.defn = defn = IR.StructDefinition(token, decl, fields)
+                return defn
+
+            return promise
 
         def parse_class(scope, token, extern):
             assert not extern, 'extern class not defined yet'
-            return parse_struct_or_class(
-                Decl=IR.ClassDeclaration,
-                Defn=IR.ClassDefinition,
-                scope=scope,
-                token=token,
-                extern=extern,
-                allow_retainable_fields=True,
-                allow_extern_fields=False,
-                allow_empty_body=False,
-            )
+            name = expect_id()
+            decl = IR.ClassDeclaration(token, extern, module_name, name)
+            scope[name] = decl
+
+            field_promises = []
+            expect('{')
+            consume_all('\n')
+            while not consume('}'):
+                member_token = peek()
+                member_type_promise = parse_type(scope)
+                member_name = expect_id()
+                field_promises.append(pcall(
+                    IR.FieldDefinition,
+                    member_token,
+                    False,
+                    member_type_promise,
+                    member_name,
+                ))
+                expect('\n')
+                consume_all('\n')
+
+            @Promise
+            def promise():
+                fields = [p.resolve() for p in field_promises]
+                check_fields(scope, fields, allow_retainable_fields=True)
+                decl.defn = defn = IR.ClassDefinition(token, decl, fields)
+                return defn
+
+            return promise
 
         def parse_global(scope):
             token = peek()

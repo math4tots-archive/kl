@@ -14,8 +14,8 @@ struct KLC_Header {
 };
 
 struct KLC_Class {
-  const char* module_name;
-  const char* short_name;
+  const char*const module_name;
+  const char*const short_name;
   KLC_Deleter*const deleter;
 };
 
