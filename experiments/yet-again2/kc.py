@@ -595,23 +595,13 @@ def IR(ns):
         """Marker class for what values indicate Types.
         """
         @property
-        def is_pseudo_type(self):
-            return isinstance(self, PseudoType)
-
-    @ns
-    class PseudoType(Type):
-        """Marker class for types that aren't types for concrete
-        values. E.g. module or class names.
-        """
+        def is_meta_type(self):
+            return isinstance(self, TypeType)
 
     @ns
     class TypeType(Type):
-        """An expression that a class rather than a value
+        """Type of an expression that a type rather than a value
         """
-
-    @ns
-    class ClassTypeType(TypeType):
-
         def __init__(self, type: Type):
             self.type = type
 
@@ -622,7 +612,7 @@ def IR(ns):
             return hash((type(self), self.type))
 
         def __repr__(self):
-            return f'ClassTypeType({self.type})'
+            return f'TypeType({self.type})'
 
     @ns
     class Declaration(Node):
@@ -764,6 +754,9 @@ def IR(ns):
     @ns
     class StructOrClassDeclaration(TypeDeclaration):
         defn = None
+
+    @ns
+    class StructDeclaration(StructOrClassDeclaration):
         fields = (
             ('extern', bool),
             ('module_name', str),
@@ -771,12 +764,12 @@ def IR(ns):
         )
 
     @ns
-    class StructDeclaration(StructOrClassDeclaration):
-        pass
-
-    @ns
     class ClassDeclaration(StructOrClassDeclaration, Retainable):
-        pass
+        fields = (
+            ('extern', bool),
+            ('module_name', str),
+            ('short_name', str),
+        )
 
     PRIMITIVE_TYPE_MAP = {
         t: PrimitiveTypeDeclaration(builtin_token, t)
@@ -827,6 +820,25 @@ def IR(ns):
         abstract
             type: Type
         """
+
+        @property
+        def is_pseudo_expression(self):
+            return isinstance(self, PseudoExpression)
+
+    @ns
+    class PseudoExpression(Expression):
+        """Expressions that are not themselves concrete values.
+        """
+
+    @ns
+    class TypeExpression(PseudoExpression):
+        fields = (
+            ('type_value', Type),
+        )
+
+        @property
+        def type(self):
+            return TypeType(self.type_value)
 
     @ns
     class Block(Expression, CollectionNode):
@@ -983,6 +995,10 @@ def IR(ns):
             ('decl', ClassDeclaration),
             ('fields', typeutil.Optional[typeutil.List[FieldDefinition]]),
         )
+
+        @property
+        def extern(self):
+            return False
 
     @ns
     class FunctionDefinition(GlobalDefinition):
@@ -1326,10 +1342,10 @@ def parser(ns):
                 return IR.SetLocalName(token, decl, expr)
             return promise
 
-        def assert_not_pseudo_expression(scope, expr):
-            if expr.type.is_pseudo_type:
+        def check_concrete_expression(scope, expr):
+            if expr.type.is_meta_type or expr.is_pseudo_expression:
                 with scope.push(expr.token):
-                    raise scope.error(f'{expr.type} is not a value')
+                    raise scope.error(f'{expr} is not a value')
             return expr
 
         def parse_block(parent_scope):
@@ -1372,7 +1388,7 @@ def parser(ns):
                 token,
                 [p.resolve() for p in declps],
                 [
-                    assert_not_pseudo_expression(scope, p.resolve())
+                    check_concrete_expression(scope, p.resolve())
                     for p in expr_promises
                 ],
             ))
@@ -1481,7 +1497,7 @@ def parser(ns):
                 if isinstance(decl, IR.LocalVariableDeclaration):
                     return IR.LocalName(token, decl)
                 if isinstance(decl, IR.ClassDeclaration):
-                    return IR.ClassTypeType(decl)
+                    return IR.TypeExpression(token, decl)
                 with scope.push(token):
                     raise scope.error(f'{decl} is not a variable')
             return promise
@@ -1566,76 +1582,6 @@ def parser(ns):
                             'Retainable types are not allowed here'
                         )
 
-        def parse_fields(
-                scope,
-                extern,
-                allow_empty_body,
-                allow_retainable_fields,
-                allow_extern_fields):
-            if allow_empty_body and consume('\n'):
-                return Promise.value(None)
-
-            field_promises = []
-            expect('{')
-            consume_all('\n')
-            while not consume('}'):
-                field_token = peek()
-                field_extern = (
-                    bool(consume('extern')) if allow_extern_fields else
-                    False
-                )
-                field_type_promise = parse_type(scope)
-                field_name = expect_id()
-                field_promises.append(pcall(
-                    IR.FieldDefinition,
-                    field_token,
-                    field_extern or extern,
-                    field_type_promise,
-                    field_name,
-                ))
-                consume_all('\n')
-
-            @Promise
-            def promise():
-                fields = [p.resolve() for p in field_promises]
-                check_fields(
-                    scope,
-                    fields,
-                    allow_retainable_fields=allow_retainable_fields,
-                )
-                return fields
-            return promise
-
-        def parse_struct_or_class(
-                Decl,
-                Defn,
-                scope,
-                token,
-                extern,
-                allow_retainable_fields,
-                allow_empty_body,
-                allow_extern_fields):
-            name = expect_id()
-            decl = Decl(token, extern, module_name, name)
-            scope[name] = decl
-            fields_promise = parse_fields(
-                scope=scope,
-                extern=extern,
-                allow_empty_body=allow_empty_body,
-                allow_retainable_fields=allow_retainable_fields,
-                allow_extern_fields=allow_extern_fields,
-            )
-            @Promise
-            def promise():
-                defn = Defn(
-                    token,
-                    decl,
-                    fields_promise.resolve(),
-                )
-                decl.defn = defn
-                return defn
-            return promise
-
         def parse_struct(scope, token, extern):
             name = expect_id()
             decl = IR.StructDeclaration(token, extern, module_name, name)
@@ -1669,7 +1615,7 @@ def parser(ns):
             return promise
 
         def parse_class(scope, token, extern):
-            assert not extern, 'extern class not defined yet'
+            assert not extern, 'extern is not meaningful for a class'
             name = expect_id()
             decl = IR.ClassDeclaration(token, extern, module_name, name)
             scope[name] = decl
