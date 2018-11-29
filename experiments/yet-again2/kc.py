@@ -623,6 +623,23 @@ def IR(ns):
         """
 
     @ns
+    class PseudoDeclaration(Declaration):
+        """This is for injecting extra information into the scope
+        PseudoDeclaration names must always start with '@'
+        """
+
+    @ns
+    class ExpressionContext(PseudoDeclaration):
+        """Contains information needed for resolving expressions
+        """
+        fields = (
+            # Indicates whether we're in an 'extern' context.
+            # E.g. we cannot throw exceptions from an extern
+            # context. Also the calling convention is different.
+            ('extern', bool),
+        )
+
+    @ns
     class VariableDeclaration(Declaration):
         pass
 
@@ -990,10 +1007,17 @@ def IR(ns):
         )
 
     @ns
+    class DeleteHook(Node):
+        fields = (
+            ('body', Block),
+        )
+
+    @ns
     class ClassDefinition(StructOrClassDefinition):
         fields = (
             ('decl', ClassDeclaration),
             ('fields', typeutil.Optional[typeutil.List[FieldDefinition]]),
+            ('delete_hook', DeleteHook),
         )
 
         @property
@@ -1074,9 +1098,16 @@ def parser(ns):
             finally:
                 self.stack.pop()
 
+        def _check_key_value(self, key: str, value: IR.Declaration):
+            assert isinstance(value, IR.Declaration), value
+            assert (
+                key.startswith('@') ==
+                    isinstance(value, IR.PseudoDeclaration)
+            ), (key, value)
+
         def __getitem__(self, key: str) -> IR.Declaration:
             value = self._getp(key).resolve()
-            assert isinstance(value, IR.Declaration), value
+            self._check_key_value(key, value)
             return value
 
         def _getp(self, key: str) -> Promise:
@@ -1088,7 +1119,7 @@ def parser(ns):
                 raise self.error(f'{repr(key)} not defined')
 
         def __setitem__(self, key: str, value: IR.Declaration):
-            assert isinstance(value, IR.Declaration), value
+            self._check_key_value(key, value)
             self.set_promise(value.token, key, Promise.value(value))
 
         def set_promise(self, token: Token, key: str, p: Promise):
@@ -1349,6 +1380,7 @@ def parser(ns):
             return expr
 
         def parse_block(parent_scope):
+            _check_has_expression_context(parent_scope)
             scope = Scope(parent_scope)
             token = expect('{')
             declps = []
@@ -1393,7 +1425,11 @@ def parser(ns):
                 ],
             ))
 
+        def _check_has_expression_context(scope):
+            assert isinstance(scope['@expr_ctx'], IR.ExpressionContext)
+
         def parse_expression(scope):
+            _check_has_expression_context(scope)
             return parse_postfix(scope)
 
         def parse_args(scope):
@@ -1417,7 +1453,7 @@ def parser(ns):
                 args = f.type.convert_args(scope, token, raw_args)
                 return IR.FunctionCall(
                     token,
-                    scope['@func'].extern,
+                    scope['@expr_ctx'].extern,
                     f.type.extern,
                     f.type.rtype,
                     f,
@@ -1505,10 +1541,10 @@ def parser(ns):
         def promise_throw_string_literal(scope, token, value):
             @Promise
             def promise():
-                if scope['@func'].extern:
+                if scope['@expr_ctx'].extern:
                     with scope.push(token):
                         raise scope.error(
-                            f'You cannot throw from an extern function')
+                            f'You cannot throw from an extern context')
                 return IR.ThrowStringLiteral(token, value)
             return promise
 
@@ -1621,30 +1657,57 @@ def parser(ns):
             scope[name] = decl
 
             field_promises = []
+            delete_hook_promise = None
             expect('{')
             consume_all('\n')
             while not consume('}'):
                 member_token = peek()
-                member_type_promise = parse_type(scope)
-                member_name = expect_id()
-                field_promises.append(pcall(
-                    IR.FieldDefinition,
-                    member_token,
-                    False,
-                    member_type_promise,
-                    member_name,
-                ))
-                expect('\n')
+                if consume('delete'):
+                    dest_scope = Scope(scope)
+                    dest_scope['@expr_ctx'] = IR.ExpressionContext(
+                        token,
+                        True,  # extern
+                    )
+                    delete_hook_promise = pcall(
+                        IR.DeleteHook,
+                        token,
+                        parse_block(dest_scope),
+                    )
+                else:
+                    member_type_promise = parse_type(scope)
+                    member_name = expect_id()
+                    field_promises.append(pcall(
+                        IR.FieldDefinition,
+                        member_token,
+                        False,
+                        member_type_promise,
+                        member_name,
+                    ))
+                    expect('\n')
                 consume_all('\n')
 
             @Promise
             def promise():
                 fields = [p.resolve() for p in field_promises]
                 check_fields(scope, fields, allow_retainable_fields=True)
-                decl.defn = defn = IR.ClassDefinition(token, decl, fields)
+                delete_hook = (
+                    delete_hook_from_promise(token, delete_hook_promise)
+                )
+                decl.defn = defn = IR.ClassDefinition(
+                    token,
+                    decl,
+                    fields,
+                    delete_hook,
+                )
                 return defn
 
             return promise
+
+        def delete_hook_from_promise(token, delete_hook_promise):
+            if delete_hook_promise is None:
+                return IR.DeleteHook(token, IR.Block(token, [], []))
+            else:
+                return delete_hook_promise.resolve()
 
         def parse_global(scope):
             token = peek()
@@ -1696,7 +1759,10 @@ def parser(ns):
                     )
                     scope.set_promise(token, name, decl_promise)
                     func_scope = Scope(scope)
-                    func_scope.set_promise(token, '@func', decl_promise)
+                    func_scope['@expr_ctx'] = IR.ExpressionContext(
+                        token,
+                        extern,
+                    )
                     body_promise = (
                         parse_block(func_scope) if has_body else None
                     )
@@ -1754,6 +1820,7 @@ def C(ns):
     ENCODED_STRUCT_FIELD_PREFIX = 'KLCSF'
     ENCODED_CLASS_PROTO_NAME = 'KLCCP'
     ENCODED_CLASS_MALLOC_PREFIX = 'KLCCM'
+    ENCODED_CLASS_DELETE_HOOK_PREFIX = 'KLCDH'
     ENCODED_CLASS_DELETER_PREFIX = 'KLCCD'
     ENCODED_CLASS_STRUCT_PREFIX = 'KLCCS'
     ENCODED_CLASS_FIELD_PREFIX = 'KLCCF'
@@ -2140,6 +2207,23 @@ def C(ns):
             prefix=ENCODED_CLASS_MALLOC_PREFIX,
         )
 
+    def get_delete_hook_type(decl: IR.ClassDeclaration):
+        assert isinstance(decl, IR.ClassDeclaration), decl
+        return IR.FunctionType(
+            extern=True,
+            rtype=IR.VOID,
+            paramtypes=[decl],
+            vararg=False,
+        )
+
+    def get_class_delete_hook_name(decl: IR.ClassDeclaration):
+        assert isinstance(decl, IR.ClassDeclaration), decl
+        return qualify(
+            decl.module_name,
+            decl.short_name,
+            prefix=ENCODED_CLASS_DELETE_HOOK_PREFIX,
+        )
+
     def get_class_deleter_name(decl: IR.ClassDeclaration):
         assert isinstance(decl, IR.ClassDeclaration), decl
         return qualify(
@@ -2287,7 +2371,8 @@ def C(ns):
             with ctx.retain_scope() as after_release:
                 ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
                 retvar = E(self.body, ctx)
-                ctx.retain(retvar)
+                if decl.rtype != IR.VOID:
+                    ctx.retain(retvar)
                 if decl.extern:
                     if decl.rtype != IR.VOID:
                         after_release += f'return {retvar};'
@@ -2306,6 +2391,8 @@ def C(ns):
         struct_name = get_class_struct_name(decl)
         malloc_name = get_class_malloc_name(decl)
         malloc_type = get_class_malloc_type(decl)
+        delete_hook_name = get_class_delete_hook_name(decl)
+        delete_hook_type = get_delete_hook_type(decl)
         deleter_name = get_class_deleter_name(decl)
         proto_name = get_class_proto_name(decl)
 
@@ -2326,24 +2413,29 @@ def C(ns):
             ctx.out += f'return ret;'
         ctx.out += '}'
 
+        ctx.out += declare(delete_hook_type, delete_hook_name, ['obj'])
+        with ctx.retain_scope():
+            ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
+            E(self.delete_hook.body, ctx)
+
         ctx.out += declare(DELETER_TYPE, deleter_name, ['robj', 'dq'])
         ctx.out += '{'
         retainable_fields = [
             field for field in self.fields if
             isinstance(field.type, IR.Retainable)
         ]
-        if retainable_fields:
-            with ctx.push_indent(1):
-                ctx.out += f'{struct_name}* obj = ({struct_name}*) robj;'
-                for field in retainable_fields:
-                    if isinstance(field.type, IR.ClassDeclaration):
-                        c_field_name = get_class_c_struct_field_name (field)
-                        ctx.out += (
-                            f'KLC_partial_release('
-                            f'(KLC_Header*) obj->{c_field_name}, dq);'
-                        )
-                    else:
-                        assert False, field
+        with ctx.push_indent(1):
+            ctx.out += f'{struct_name}* obj = ({struct_name}*) robj;'
+            ctx.out += f'{delete_hook_name}(obj);'
+            for field in retainable_fields:
+                if isinstance(field.type, IR.ClassDeclaration):
+                    c_field_name = get_class_c_struct_field_name (field)
+                    ctx.out += (
+                        f'KLC_partial_release('
+                        f'(KLC_Header*) obj->{c_field_name}, dq);'
+                    )
+                else:
+                    assert False, field
         ctx.out += '}'
 
     proto_for = Multimethod('proto_for')

@@ -40,8 +40,6 @@ void KLC_release(KLC_Header* obj) {
   KLC_partial_release(obj, &delete_queue);
   while (delete_queue) {
     obj = delete_queue;
-    printf("obj = %p\n", (void*) obj);
-    printf("obj->cls = %p\n", (void*) obj->cls);
     delete_queue = delete_queue->next;
     obj->cls->deleter(obj, &delete_queue);
     free(obj);
