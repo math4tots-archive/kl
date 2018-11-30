@@ -597,9 +597,19 @@ def IR(ns):
         """A marker class to help with Node.format"""
 
     @ns
+    class GlobalDefinition(Node):
+        pass
+
+    @ns
     class Type:
         """Marker class for what values indicate Types.
         """
+
+        # Only 'complete' types can be directly declared.
+        # This is mostly to prevent structs from being declared
+        # before their definition is processed.
+        complete = True
+
         @property
         def is_meta_type(self):
             return isinstance(self, TypeType)
@@ -627,6 +637,10 @@ def IR(ns):
         abstract
             token: Token
         """
+
+    @ns
+    class TypeDeclaration(Type, Declaration):
+        pass
 
     @ns
     class PseudoDeclaration(Declaration):
@@ -669,6 +683,44 @@ def IR(ns):
             )
 
     @ns
+    class StructOrClassDefinition(GlobalDefinition, TypeDeclaration):
+        _fields = None
+        node_fields = (
+            ('extern', bool),
+            ('module_name', str),
+            ('short_name', str),
+            ('field_promises', typeutil.List[Promise]),
+        )
+
+        @property
+        def fields(self):
+            if self._fields is None:
+                fields = [p.resolve() for p in self.field_promises]
+                for field in fields:
+                    assert isinstance(field, FieldDefinition), field
+                self._fields = fields
+            return self._fields
+
+    @ns
+    class StructDefinition(StructOrClassDefinition):
+        complete = False
+
+    @ns
+    class ClassDefinition(StructOrClassDefinition):
+        _delete_hook = None
+        node_fields = StructOrClassDefinition.node_fields + (
+            ('delete_hook_promise', Promise),
+        )
+
+        @property
+        def delete_hook(self):
+            if self._delete_hook is None:
+                delete_hook = self.delete_hook_promise.resolve()
+                assert isinstance(delete_hook, DeleteHook), delete_hook
+                self._delete_hook = delete_hook
+            return self._delete_hook
+
+    @ns
     class GlobalVariableDeclaration(VariableDeclaration):
         node_fields = (
             ('extern', bool),
@@ -685,10 +737,6 @@ def IR(ns):
         )
 
         mutable = True
-
-    @ns
-    class TypeDeclaration(Type, Declaration):
-        pass
 
     @ns
     class PrimitiveTypeDeclaration(TypeDeclaration):
@@ -763,50 +811,6 @@ def IR(ns):
         def _proxy(self):
             return (self.base,)
 
-    @ns
-    class StructOrClassDeclaration(TypeDeclaration):
-        defn = None
-        _fields = None
-        node_fields = (
-            ('extern', bool),
-            ('module_name', str),
-            ('short_name', str),
-            ('field_promises', typeutil.List[Promise]),
-        )
-
-        @property
-        def fields(self):
-            if self._fields is None:
-                fields = [p.resolve() for p in self.field_promises]
-                for field in fields:
-                    assert isinstance(field, FieldDefinition), field
-                self._fields = fields
-            return self._fields
-
-    @ns
-    class StructDeclaration(StructOrClassDeclaration):
-        pass
-
-    @ns
-    class ClassDeclaration(StructOrClassDeclaration, Retainable):
-        pass
-
-    @ns
-    class ExpressionContext(PseudoDeclaration):
-        """Contains information needed for resolving expressions
-        """
-        def __init__(self, token, extern, this_type):
-            super().__init__(token, extern, this_type)
-
-        node_fields = (
-            # Indicates whether we're in an 'extern' context.
-            # E.g. we cannot throw exceptions from an extern
-            # context. Also the calling convention is different.
-            ('extern', bool),
-
-            ('this_type', typeutil.Optional[ClassDeclaration])
-        )
-
     PRIMITIVE_TYPE_MAP = {
         t: PrimitiveTypeDeclaration(builtin_token, t)
         for t in lexer.PRIMITIVE_TYPE_NAMES
@@ -841,10 +845,6 @@ def IR(ns):
     @convertible.on(Type, Type)
     def convertible(a, b):
         return a == b
-
-    @ns
-    class GlobalDefinition(Node):
-        pass
 
     @ns
     class PrimitiveTypeDefinition(GlobalDefinition):
@@ -991,7 +991,7 @@ def IR(ns):
     @ns
     class This(Expression):
         node_fields = (
-            ('cls', ClassDeclaration),
+            ('cls', ClassDefinition),
         )
 
         @property
@@ -1053,35 +1053,19 @@ def IR(ns):
         )
 
     @ns
-    class StructOrClassDefinition(GlobalDefinition):
-        @property
-        def extern(self):
-            return self.decl.extern
-
-    @ns
-    class StructDefinition(StructOrClassDefinition):
-        node_fields = (
-            ('decl', StructDeclaration),
-            ('fields', typeutil.Optional[typeutil.List[FieldDefinition]]),
-        )
-
-    @ns
     class DeleteHook(Node):
+        _body = None
         node_fields = (
-            ('body', Block),
-        )
-
-    @ns
-    class ClassDefinition(StructOrClassDefinition):
-        node_fields = (
-            ('decl', ClassDeclaration),
-            ('fields', typeutil.Optional[typeutil.List[FieldDefinition]]),
-            ('delete_hook', DeleteHook),
+            ('body_promise', Promise),
         )
 
         @property
-        def extern(self):
-            return False
+        def body(self):
+            if self._body is None:
+                body = self.body_promise.resolve()
+                assert isinstance(body, Block), body
+                self._body = body
+            return self._body
 
     @ns
     class FunctionDefinition(GlobalDefinition):
@@ -1105,20 +1089,31 @@ def IR(ns):
             ('definitions', typeutil.List[GlobalDefinition]),
         )
 
+    @ns
+    class ExpressionContext(PseudoDeclaration):
+        """Contains information needed for resolving expressions
+        """
+        def __init__(self, token, extern, this_type):
+            super().__init__(token, extern, this_type)
+
+        node_fields = (
+            # Indicates whether we're in an 'extern' context.
+            # E.g. we cannot throw exceptions from an extern
+            # context. Also the calling convention is different.
+            ('extern', bool),
+
+            ('this_type', typeutil.Optional[ClassDefinition])
+        )
+
     def new_builtin_extern_struct(name):
-        decl = StructDeclaration(
+        defn = StructDefinition(
             builtin_token,
             True,
             'builtin',
             'KLC_Header',
             [],
         )
-        decl.defn = StructDefinition(
-            builtin_token,
-            decl,
-            None,
-        )
-        return decl
+        return defn
 
     HEADER_TYPE = new_builtin_extern_struct('KLC_Header')
     ns(HEADER_TYPE, 'HEADER_TYPE')
@@ -1540,7 +1535,7 @@ def parser(ns):
 
         def get_field_defn(scope, token, type, field_name):
             if not isinstance(type,
-                    (IR.StructDeclaration, IR.ClassDeclaration)):
+                    (IR.StructDefinition, IR.ClassDefinition)):
                 with scope.push(token):
                     raise scope.error(f'{type} is not a struct type')
             fields = [f for f in type.fields if f.name == field_name]
@@ -1556,13 +1551,13 @@ def parser(ns):
             def promise():
                 expr = exprp.resolve()
                 defn = get_field_defn(scope, token, expr.type, fname)
-                if isinstance(expr.type, IR.StructDeclaration):
+                if isinstance(expr.type, IR.StructDefinition):
                     return IR.GetStructField(
                         token,
                         defn,
                         expr,
                     )
-                elif isinstance(expr.type, IR.ClassDeclaration):
+                elif isinstance(expr.type, IR.ClassDefinition):
                     return IR.GetClassField(
                         token,
                         defn,
@@ -1581,14 +1576,14 @@ def parser(ns):
                 expr = exprp.resolve()
                 defn = get_field_defn(scope, token, expr.type, fname)
                 val = scope.convert(valp.resolve(), defn.type)
-                if isinstance(expr.type, IR.StructDeclaration):
+                if isinstance(expr.type, IR.StructDefinition):
                     return IR.SetStructField(
                         token,
                         defn,
                         expr,
                         val,
                     )
-                elif isinstance(expr.type, IR.ClassDeclaration):
+                elif isinstance(expr.type, IR.ClassDefinition):
                     return IR.SetClassField(
                         token,
                         defn,
@@ -1635,7 +1630,7 @@ def parser(ns):
                     return IR.FunctionName(token, decl)
                 if isinstance(decl, IR.LocalVariableDeclaration):
                     return IR.LocalName(token, decl)
-                if isinstance(decl, IR.ClassDeclaration):
+                if isinstance(decl, IR.ClassDefinition):
                     return IR.TypeExpression(token, decl)
                 with scope.push(token):
                     raise scope.error(f'{decl} is not a variable')
@@ -1655,7 +1650,7 @@ def parser(ns):
             @Promise
             def promise():
                 type = type_promise.resolve()
-                if not isinstance(type, IR.ClassDeclaration):
+                if not isinstance(type, IR.ClassDefinition):
                     with scope.push(token):
                         raise scope.error(
                             f'Malloc ($) only allowed for Class types, '
@@ -1737,12 +1732,11 @@ def parser(ns):
 
         def check_fields(scope, fields, *, allow_retainable_fields):
             for field in fields:
-                if isinstance(field.type, IR.StructDefinition):
-                    if field.type.defn is None:
-                        with scope.push(field.token):
-                            raise scope.error(
-                                f'{field.type} is an incomplete type'
-                            )
+                if not field.type.complete:
+                    with scope.push(field.token):
+                        raise scope.error(
+                            f'{field.type} is an incomplete type'
+                        )
                 elif (not allow_retainable_fields and
                         isinstance(field.type, IR.Retainable)):
                     with scope.push(field.token):
@@ -1782,59 +1776,57 @@ def parser(ns):
                 expect('\n')
                 consume_all('\n')
 
-            decl = IR.StructDeclaration(
+            defn = IR.StructDefinition(
                 token,
                 extern,
                 module_name,
                 name,
                 field_promises,
             )
-            scope[name] = decl
+            scope[name] = defn
 
             @Promise
             def promise():
-                fields = decl.fields
+                fields = defn.fields
                 check_member_names(scope, fields)
                 check_fields(scope, fields, allow_retainable_fields=False)
-                decl.defn = defn = IR.StructDefinition(token, decl, fields)
+                defn.complete = True
                 return defn
 
             return promise
 
-        def parse_class(scope, token, extern):
+        def parse_class(outer_scope, token, extern):
             assert not extern, 'extern is not meaningful for a class'
             name = expect_id()
 
             field_promises = []
 
-            decl = IR.ClassDeclaration(
+            defn = IR.ClassDefinition(
                 token,
                 extern,
                 module_name,
                 name,
                 field_promises,
+                Promise(lambda: delete_hook_ptr[0]),
             )
-            scope[name] = decl
+            outer_scope[name] = defn
 
-            delete_hook_promise = None
+            class_scope = Scope(outer_scope)
+
+            delete_hook_ptr = [None]
             expect('{')
             consume_all('\n')
             while not consume('}'):
                 member_token = peek()
                 if consume('delete'):
-                    dest_scope = Scope(scope)
-                    dest_scope['@ec'] = IR.ExpressionContext(
-                        token,
-                        extern=True,
-                        this_type=decl,
-                    )
-                    delete_hook_promise = pcall(
-                        IR.DeleteHook,
-                        token,
-                        parse_block(dest_scope),
+                    expect_delete_hook(
+                        scope=class_scope,
+                        token=member_token,
+                        delete_hook_ptr=delete_hook_ptr,
+                        cls=defn,
                     )
                 else:
-                    member_type_promise = parse_type(scope)
+                    member_type_promise = parse_type(outer_scope)
                     member_name = expect_id()
                     field_promises.append(pcall(
                         IR.FieldDefinition,
@@ -1846,29 +1838,41 @@ def parser(ns):
                     expect('\n')
                 consume_all('\n')
 
+            if delete_hook_ptr[0] is None:
+                delete_hook_ptr[0] = IR.DeleteHook(
+                    token,
+                    Promise.value(IR.Block(token, [], [])),
+                )
+
             @Promise
             def promise():
-                fields = decl.fields
-                check_member_names(scope, fields)
-                check_fields(scope, fields, allow_retainable_fields=True)
-                delete_hook = (
-                    delete_hook_from_promise(token, delete_hook_promise)
-                )
-                decl.defn = defn = IR.ClassDefinition(
-                    token,
-                    decl,
+                fields = defn.fields
+                check_member_names(outer_scope, fields)
+                check_fields(
+                    outer_scope,
                     fields,
-                    delete_hook,
+                    allow_retainable_fields=True,
                 )
                 return defn
 
             return promise
 
-        def delete_hook_from_promise(token, delete_hook_promise):
-            if delete_hook_promise is None:
-                return IR.DeleteHook(token, IR.Block(token, [], []))
-            else:
-                return delete_hook_promise.resolve()
+        def expect_delete_hook(scope, token, delete_hook_ptr, cls):
+            if delete_hook_ptr[0]:
+                dtok = delete_hook_ptr[0].token
+                with scope.push(dtok), scope.push(token):
+                    raise scope.error('Duplicate delete definition')
+            delete_scope = Scope(scope)
+            delete_scope['@ec'] = IR.ExpressionContext(
+                token,
+                extern=True,
+                this_type=cls,
+            )
+            delete_hook_ptr[0] = IR.DeleteHook(
+                token,
+                parse_block(delete_scope),
+            )
+            return delete_hook_ptr[0]
 
         def parse_function(scope, token, extern, type_promise, name):
             params_and_vararg_promise = parse_params(scope)
@@ -2216,13 +2220,13 @@ def C(ns):
                 self.out = old_out
 
     def _retain(type, cname):
-        if isinstance(type, IR.ClassDeclaration):
+        if isinstance(type, IR.ClassDefinition):
             return f'KLC_retain((KLC_Header*) {cname});'
         else:
             return ''
 
     def _release(type, cname):
-        if isinstance(type, IR.ClassDeclaration):
+        if isinstance(type, IR.ClassDefinition):
             return f'KLC_release((KLC_Header*) {cname});'
         else:
             return ''
@@ -2301,7 +2305,7 @@ def C(ns):
                 # nothing actually needs to get emitted for this.
                 pass
             elif isinstance(defn, IR.StructDefinition):
-                cname = get_c_struct_name(defn.decl)
+                cname = get_c_struct_name(defn)
                 # We only actually define the struct itself if
                 #   1. the struct was not declard extern, and
                 #   2. a body was explicitly provided.
@@ -2323,11 +2327,11 @@ def C(ns):
                     structs += '};'
             elif isinstance(defn, IR.ClassDefinition):
                 assert not defn.extern, defn
-                struct_name = get_class_struct_name(defn.decl)
-                malloc_name = get_class_malloc_name(defn.decl)
-                malloc_type = get_class_malloc_type(defn.decl)
-                deleter_name = get_class_deleter_name(defn.decl)
-                proto_name = get_class_proto_name(defn.decl)
+                struct_name = get_class_struct_name(defn)
+                malloc_name = get_class_malloc_name(defn)
+                malloc_type = get_class_malloc_type(defn)
+                deleter_name = get_class_deleter_name(defn)
+                proto_name = get_class_proto_name(defn)
 
                 fwdstruct += f'typedef struct {struct_name} {struct_name};'
 
@@ -2366,13 +2370,13 @@ def C(ns):
             encode(f'{module_name}.{name}', prefix=prefix)
         )
 
-    def get_c_struct_name(decl: IR.StructDeclaration):
-        assert isinstance(decl, IR.StructDeclaration), decl
+    def get_c_struct_name(defn: IR.StructDefinition):
+        assert isinstance(defn, IR.StructDefinition), defn
         return (
-            decl.short_name if decl.extern else
+            defn.short_name if defn.extern else
             qualify(
-                decl.module_name,
-                decl.short_name,
+                defn.module_name,
+                defn.short_name,
                 prefix=ENCODED_STRUCT_PREFIX,
             )
         )
@@ -2384,15 +2388,15 @@ def C(ns):
         )
 
     def get_class_proto_name(decl: IR.Declaration):
-        assert isinstance(decl, IR.ClassDeclaration), decl
+        assert isinstance(decl, IR.ClassDefinition), decl
         return qualify(
             decl.module_name,
             decl.short_name,
             prefix=ENCODED_CLASS_PROTO_NAME,
         )
 
-    def get_class_malloc_type(decl: IR.ClassDeclaration):
-        assert isinstance(decl, IR.ClassDeclaration), decl
+    def get_class_malloc_type(decl: IR.ClassDefinition):
+        assert isinstance(decl, IR.ClassDefinition), decl
         return IR.FunctionType(
             extern=True,
             rtype=decl,
@@ -2400,16 +2404,16 @@ def C(ns):
             vararg=False,
         )
 
-    def get_class_malloc_name(decl: IR.ClassDeclaration):
-        assert isinstance(decl, IR.ClassDeclaration), decl
+    def get_class_malloc_name(decl: IR.ClassDefinition):
+        assert isinstance(decl, IR.ClassDefinition), decl
         return qualify(
             decl.module_name,
             decl.short_name,
             prefix=ENCODED_CLASS_MALLOC_PREFIX,
         )
 
-    def get_delete_hook_type(decl: IR.ClassDeclaration):
-        assert isinstance(decl, IR.ClassDeclaration), decl
+    def get_delete_hook_type(decl: IR.ClassDefinition):
+        assert isinstance(decl, IR.ClassDefinition), decl
         return IR.FunctionType(
             extern=True,
             rtype=IR.VOID,
@@ -2417,24 +2421,24 @@ def C(ns):
             vararg=False,
         )
 
-    def get_class_delete_hook_name(decl: IR.ClassDeclaration):
-        assert isinstance(decl, IR.ClassDeclaration), decl
+    def get_class_delete_hook_name(decl: IR.ClassDefinition):
+        assert isinstance(decl, IR.ClassDefinition), decl
         return qualify(
             decl.module_name,
             decl.short_name,
             prefix=ENCODED_CLASS_DELETE_HOOK_PREFIX,
         )
 
-    def get_class_deleter_name(decl: IR.ClassDeclaration):
-        assert isinstance(decl, IR.ClassDeclaration), decl
+    def get_class_deleter_name(decl: IR.ClassDefinition):
+        assert isinstance(decl, IR.ClassDefinition), decl
         return qualify(
             decl.module_name,
             decl.short_name,
             prefix=ENCODED_CLASS_DELETER_PREFIX,
         )
 
-    def get_class_struct_name(decl: IR.ClassDeclaration):
-        assert isinstance(decl, IR.ClassDeclaration), decl
+    def get_class_struct_name(decl: IR.ClassDefinition):
+        assert isinstance(decl, IR.ClassDefinition), decl
         assert not decl.extern, decl
         return qualify(
             decl.module_name,
@@ -2485,12 +2489,12 @@ def C(ns):
     def declare(self, name):
         return f'{self.name} {name}'.strip()
 
-    @declare.on(IR.StructDeclaration)
+    @declare.on(IR.StructDefinition)
     def declare(self, name):
         struct_name = get_c_struct_name(self)
         return f'{struct_name} {name}'.strip()
 
-    @declare.on(IR.ClassDeclaration)
+    @declare.on(IR.ClassDefinition)
     def declare(self, name):
         struct_name = get_class_struct_name(self)
         return f'{struct_name}* {name}'.strip()
@@ -2588,19 +2592,18 @@ def C(ns):
 
     @D.on(IR.ClassDefinition)
     def D(self, ctx):
-        decl = self.decl
-        struct_name = get_class_struct_name(decl)
-        malloc_name = get_class_malloc_name(decl)
-        malloc_type = get_class_malloc_type(decl)
-        delete_hook_name = get_class_delete_hook_name(decl)
-        delete_hook_type = get_delete_hook_type(decl)
-        deleter_name = get_class_deleter_name(decl)
-        proto_name = get_class_proto_name(decl)
+        struct_name = get_class_struct_name(self)
+        malloc_name = get_class_malloc_name(self)
+        malloc_type = get_class_malloc_type(self)
+        delete_hook_name = get_class_delete_hook_name(self)
+        delete_hook_type = get_delete_hook_type(self)
+        deleter_name = get_class_deleter_name(self)
+        proto_name = get_class_proto_name(self)
 
         ctx.out += f'KLC_Class {proto_name} = ' '{'
         with ctx.push_indent(1):
-            ctx.out += f'"{decl.module_name}",'
-            ctx.out += f'"{decl.short_name}",'
+            ctx.out += f'"{self.module_name}",'
+            ctx.out += f'"{self.short_name}",'
             ctx.out += f'&{deleter_name},'
         ctx.out += '};'
 
@@ -2631,7 +2634,7 @@ def C(ns):
             ctx.out += f'{struct_name}* obj = ({struct_name}*) robj;'
             ctx.out += f'{delete_hook_name}(obj);'
             for field in retainable_fields:
-                if isinstance(field.type, IR.ClassDeclaration):
+                if isinstance(field.type, IR.ClassDefinition):
                     c_field_name = get_class_c_struct_field_name (field)
                     ctx.out += (
                         f'KLC_partial_release('
@@ -2721,7 +2724,7 @@ def C(ns):
         while isinstance(expr, IR.GetStructField):
             reverse_field_chain.append(expr.field_defn)
             expr = expr.expr
-        assert isinstance(expr.type, IR.StructDeclaration), expr
+        assert isinstance(expr.type, IR.StructDefinition), expr
         return expr, list(reversed(reverse_field_chain))
 
     @E.on(IR.GetStructField)
@@ -2878,11 +2881,11 @@ def C(ns):
     # For initializing variables when declaring them
     init_expr_for = Multimethod('init_expr_for')
 
-    @init_expr_for.on(IR.StructDeclaration)
+    @init_expr_for.on(IR.StructDefinition)
     def init_expr_for(self):
         return '{0}'
 
-    @init_expr_for.on(IR.ClassDeclaration)
+    @init_expr_for.on(IR.ClassDefinition)
     def init_expr_for(self):
         return 'NULL'
 
