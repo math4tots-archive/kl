@@ -512,6 +512,37 @@ builtin_token = lexer.lex(Source(*(['builtin'] * 3)))[0]
 @Namespace
 def IR(ns):
 
+    class LazyProperty:
+        _type = None
+
+        def __init__(self, name, type_callback, callback):
+            self.name = name
+            self.type_callback = type_callback
+            self.callback = callback
+
+        @property
+        def type(self):
+            if self._type is None:
+                self._type = self.type_callback()
+            return self._type
+
+        def __get__(self, obj, type=None):
+            if self.name not in obj.__dict__:
+                obj.__dict__[self.name] = result = self.callback(obj)
+                if not isinstance(result, self.type):
+                    raise TypeError(
+                        f'Expected property {self.name} to be '
+                        f'{self.type} but got {result}')
+            return obj.__dict__[self.name]
+
+        def __set__(self, obj, value):
+            raise AttributeError(self.name)
+
+    def lazy(type_callback):
+        def wrapper(f):
+            return LazyProperty(f.__name__, type_callback, f)
+        return wrapper
+
     @ns
     class Node(object):
         def __init__(self, token, *args):
@@ -558,8 +589,6 @@ def IR(ns):
 
             if return_:
                 return ''.join(out)
-
-
 
         def foreach(self, f):
             self.map(f)
@@ -673,7 +702,7 @@ def IR(ns):
             ('has_body', bool),
         )
 
-        @property
+        @lazy(lambda: FunctionType)
         def type(self):
             return FunctionType(
                 self.extern,
@@ -692,14 +721,9 @@ def IR(ns):
             ('field_promises', typeutil.List[Promise]),
         )
 
-        @property
+        @lazy(lambda: typeutil.List[FieldDefinition])
         def fields(self):
-            if self._fields is None:
-                fields = [p.resolve() for p in self.field_promises]
-                for field in fields:
-                    assert isinstance(field, FieldDefinition), field
-                self._fields = fields
-            return self._fields
+            return [p.resolve() for p in self.field_promises]
 
     @ns
     class StructDefinition(StructOrClassDefinition):
@@ -707,18 +731,13 @@ def IR(ns):
 
     @ns
     class ClassDefinition(StructOrClassDefinition):
-        _delete_hook = None
         node_fields = StructOrClassDefinition.node_fields + (
             ('delete_hook_promise', Promise),
         )
 
-        @property
+        @lazy(lambda: DeleteHook)
         def delete_hook(self):
-            if self._delete_hook is None:
-                delete_hook = self.delete_hook_promise.resolve()
-                assert isinstance(delete_hook, DeleteHook), delete_hook
-                self._delete_hook = delete_hook
-            return self._delete_hook
+            return self.delete_hook_promise.resolve()
 
     @ns
     class GlobalVariableDeclaration(VariableDeclaration):
@@ -779,28 +798,29 @@ def IR(ns):
         def _proxy(self):
             return (self.extern, self.rtype, self.paramtypes, self.vararg)
 
-        def convert_args(self, scope, token, args):
-            if self.vararg:
-                if len(self.paramtypes) > len(args):
-                    with scope.push(token):
-                        raise scope.error(
-                            f'Expected at least {len(self.paramtypes)} '
-                            f'args but got {len(args)}'
-                        )
-            else:
-                if len(self.paramtypes) != len(args):
-                    with scope.push(token):
-                        raise scope.error(
-                            f'Expected {len(self.paramtypes)} '
-                            f'args but got {len(args)}'
-                        )
-            converted_args = []
-            for i, (pt, arg) in enumerate(zip(self.paramtypes, args), 1):
-                converted_args.append(scope.convert(arg, pt))
-            converted_args.extend(args[len(self.paramtypes):])
-            for arg in converted_args:
-                arg.type  # validate that this field is set for all args
-            return converted_args
+    @ns
+    def convert_args(self, scope, token, args):
+        if self.vararg:
+            if len(self.paramtypes) > len(args):
+                with scope.push(token):
+                    raise scope.error(
+                        f'Expected at least {len(self.paramtypes)} '
+                        f'args but got {len(args)}'
+                    )
+        else:
+            if len(self.paramtypes) != len(args):
+                with scope.push(token):
+                    raise scope.error(
+                        f'Expected {len(self.paramtypes)} '
+                        f'args but got {len(args)}'
+                    )
+        converted_args = []
+        for i, (pt, arg) in enumerate(zip(self.paramtypes, args), 1):
+            converted_args.append(scope.convert(arg, pt))
+        converted_args.extend(args[len(self.paramtypes):])
+        for arg in converted_args:
+            arg.type  # validate that this field is set for all args
+        return converted_args
 
     @ns
     class ConstType(Type, ProxyMixin):
@@ -896,6 +916,12 @@ def IR(ns):
         @property
         def type(self):
             return self.decl.type
+
+        def __repr__(self):
+            return (
+                f'FunctionName({self.decl.module_name}.'
+                f'{self.decl.short_name})'
+            )
 
     @ns
     class LocalName(Expression):
@@ -998,6 +1024,9 @@ def IR(ns):
         def type(self):
             return self.cls
 
+        def __repr__(self):
+            return f'This({self.cls.module_name}.{self.cls.short_name})'
+
     @ns
     class IntLiteral(Expression):
         type = PRIMITIVE_TYPE_MAP['int']
@@ -1054,18 +1083,13 @@ def IR(ns):
 
     @ns
     class DeleteHook(Node):
-        _body = None
         node_fields = (
             ('body_promise', Promise),
         )
 
-        @property
+        @lazy(lambda: Block)
         def body(self):
-            if self._body is None:
-                body = self.body_promise.resolve()
-                assert isinstance(body, Block), body
-                self._body = body
-            return self._body
+            return self.body_promise.resolve()
 
     @ns
     class FunctionDefinition(GlobalDefinition):
@@ -1522,7 +1546,7 @@ def parser(ns):
                 if not isinstance(f.type, IR.FunctionType):
                     with scope.push(token):
                         raise scope.error(f'{f.type} is not a function')
-                args = f.type.convert_args(scope, token, raw_args)
+                args = IR.convert_args(f.type, scope, token, raw_args)
                 return IR.FunctionCall(
                     token,
                     scope['@ec'].extern,
