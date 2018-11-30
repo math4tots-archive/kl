@@ -2794,7 +2794,8 @@ def C(ns):
             ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
             E(self.delete_hook.body, ctx)
 
-        ctx.out += 'static ' + declare(DELETER_TYPE, deleter_name, ['robj', 'dq'])
+        ctx.out += 'static ' + declare(
+            DELETER_TYPE, deleter_name, ['robj', 'dq'])
         ctx.out += '{'
         retainable_fields = [
             field for field in self.fields if
