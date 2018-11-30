@@ -691,7 +691,7 @@ def IR(ns):
         mutable = False
 
     @ns
-    class FunctionDeclaration(Declaration):
+    class FunctionDefinition(GlobalDefinition, Declaration):
         node_fields = (
             ('extern', bool),
             ('rtype', Type),
@@ -700,7 +700,15 @@ def IR(ns):
             ('params', typeutil.List[Parameter]),
             ('vararg', bool),
             ('has_body', bool),
+            ('body_promise', typeutil.Optional[Promise]),
         )
+
+        @lazy(lambda: typeutil.Optional[Block])
+        def body(self):
+            return (
+                self.body_promise.resolve()
+                    if self.body_promise else None
+            )
 
         @lazy(lambda: FunctionType)
         def type(self):
@@ -738,6 +746,16 @@ def IR(ns):
         @lazy(lambda: DeleteHook)
         def delete_hook(self):
             return self.delete_hook_promise.resolve()
+
+    @ns
+    class DeleteHook(Node):
+        node_fields = (
+            ('body_promise', Promise),
+        )
+
+        @lazy(lambda: Block)
+        def body(self):
+            return self.body_promise.resolve()
 
     @ns
     class GlobalVariableDeclaration(VariableDeclaration):
@@ -910,17 +928,17 @@ def IR(ns):
     @ns
     class FunctionName(Expression):
         node_fields = (
-            ('decl', FunctionDeclaration),
+            ('defn', FunctionDefinition),
         )
 
         @property
         def type(self):
-            return self.decl.type
+            return self.defn.type
 
         def __repr__(self):
             return (
-                f'FunctionName({self.decl.module_name}.'
-                f'{self.decl.short_name})'
+                f'FunctionName({self.defn.module_name}.'
+                f'{self.defn.short_name})'
             )
 
     @ns
@@ -1079,23 +1097,6 @@ def IR(ns):
             ('module_name', str),
             ('exported_name', str),
             ('alias', str),
-        )
-
-    @ns
-    class DeleteHook(Node):
-        node_fields = (
-            ('body_promise', Promise),
-        )
-
-        @lazy(lambda: Block)
-        def body(self):
-            return self.body_promise.resolve()
-
-    @ns
-    class FunctionDefinition(GlobalDefinition):
-        node_fields = (
-            ('decl', FunctionDeclaration),
-            ('body', typeutil.Optional[Block]),
         )
 
     @ns
@@ -1649,15 +1650,15 @@ def parser(ns):
             @Promise
             def promise():
                 with scope.push(token):
-                    decl = scope[name]
-                if isinstance(decl, IR.FunctionDeclaration):
-                    return IR.FunctionName(token, decl)
-                if isinstance(decl, IR.LocalVariableDeclaration):
-                    return IR.LocalName(token, decl)
-                if isinstance(decl, IR.ClassDefinition):
-                    return IR.TypeExpression(token, decl)
+                    defn = scope[name]
+                if isinstance(defn, IR.FunctionDefinition):
+                    return IR.FunctionName(token, defn)
+                if isinstance(defn, IR.LocalVariableDeclaration):
+                    return IR.LocalName(token, defn)
+                if isinstance(defn, IR.ClassDefinition):
+                    return IR.TypeExpression(token, defn)
                 with scope.push(token):
-                    raise scope.error(f'{decl} is not a variable')
+                    raise scope.error(f'{defn} is not a variable')
             return promise
 
         def promise_throw_string_literal(scope, token, value):
@@ -1913,7 +1914,23 @@ def parser(ns):
                 this_type=None,
             )
             has_body = not consume('\n')
-            decl_promise = Promise(lambda: IR.FunctionDeclaration(
+            raw_body_promise = (
+                parse_block(func_scope) if has_body else None
+            )
+            @Promise
+            def body_promise():
+                defn = defn_promise.resolve()
+                if has_body:
+                    raw_body = raw_body_promise.resolve()
+                    assert raw_body is not None
+                    if defn.rtype != IR.VOID:
+                        body = scope.convert(raw_body, defn.rtype)
+                    else:
+                        body = raw_body
+                    return body
+                else:
+                    return None
+            defn_promise = Promise(lambda: IR.FunctionDefinition(
                 token,
                 extern,
                 type_promise.resolve(),
@@ -1922,19 +1939,10 @@ def parser(ns):
                 params_promise.resolve(),
                 vararg_promise.resolve(),
                 has_body,
+                body_promise,
             ))
-            scope.set_promise(token, name, decl_promise)
-            body_promise = parse_block(func_scope) if has_body else None
-            @Promise
-            def promise():
-                decl = decl_promise.resolve()
-                raw_body = body_promise.resolve() if body_promise else None
-                if raw_body is not None and decl.rtype != IR.VOID:
-                    body = scope.convert(raw_body, decl.rtype)
-                else:
-                    body = raw_body
-                return IR.FunctionDefinition(token, decl, body)
-            return promise
+            scope.set_promise(token, name, defn_promise)
+            return defn_promise
 
         def parse_global_var_defn(scope, token, extern, type_promise, name):
             expect('\n')
@@ -2496,7 +2504,7 @@ def C(ns):
     def cvarname(self):
         return encode(self.name, prefix=ENCODED_LOCAL_VARIABLE_PREFIX)
 
-    @cvarname.on(IR.FunctionDeclaration)
+    @cvarname.on(IR.FunctionDefinition)
     def cvarname(self):
         return (
             self.short_name if self.extern else
@@ -2593,20 +2601,18 @@ def C(ns):
 
     @D.on(IR.FunctionDefinition)
     def D(self, ctx):
-        decl = self.decl
-
         if self.body is not None:
             ctx.out += proto_for(self)
             with ctx.retain_scope() as after_release:
                 ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
                 retvar = E(self.body, ctx)
-                if decl.rtype != IR.VOID:
+                if self.rtype != IR.VOID:
                     ctx.retain(retvar)
-                if decl.extern:
-                    if decl.rtype != IR.VOID:
+                if self.extern:
+                    if self.rtype != IR.VOID:
                         after_release += f'return {retvar};'
                 else:
-                    if decl.rtype != IR.VOID:
+                    if self.rtype != IR.VOID:
                         after_release += f'*{OUTPUT_PTR_NAME} = {retvar};'
                     after_release += f'return {ERROR_POINTER_NAME};'
 
@@ -2672,13 +2678,12 @@ def C(ns):
 
     @proto_for.on(IR.FunctionDefinition)
     def proto_for(self):
-        decl = self.decl
         return declare(
-            decl.type,
-            cvarname(decl),
+            self.type,
+            cvarname(self),
             [
                 encode(p.name, prefix=ENCODED_PARAM_VARIABLE_PREFIX)
-                for p in decl.params
+                for p in self.params
             ],
         )
 
@@ -2900,7 +2905,7 @@ def C(ns):
 
     @E.on(IR.FunctionName)
     def E(self, ctx):
-        return cvarname(self.decl)
+        return cvarname(self.defn)
 
     # For initializing variables when declaring them
     init_expr_for = Multimethod('init_expr_for')
