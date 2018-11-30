@@ -1757,6 +1757,12 @@ def parser(ns):
                         raise scope.error(
                             f'Malloc ($) only allowed for Class types, '
                             f'but got {type}')
+                if type.module_name != module_name:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'Malloc ($) only allowed from same file '
+                            f'as definition of the class'
+                        )
                 return IR.Malloc(token, type)
             return promise
 
@@ -2477,9 +2483,6 @@ def C(ns):
             elif isinstance(defn, IR.ClassDefinition):
                 assert not defn.extern, defn
                 struct_name = get_class_struct_name(defn)
-                malloc_name = get_class_malloc_name(defn)
-                malloc_type = get_class_malloc_type(defn)
-                deleter_name = get_class_deleter_name(defn)
                 proto_name = get_class_proto_name(defn)
 
                 fwdstruct += f'typedef struct {struct_name} {struct_name};'
@@ -2498,9 +2501,6 @@ def C(ns):
 
                 gvardecls += f'extern KLC_Class {proto_name};'
 
-                fdecls += f'extern {declare(malloc_type, malloc_name)};'
-                fdecls += f'extern {declare(DELETER_TYPE, deleter_name)};'
-
                 for static_method in defn.static_methods:
                     fdecls += f'extern {proto_for(static_method)};'
 
@@ -2512,6 +2512,7 @@ def C(ns):
     def translate_source(module: IR.Module) -> str:
         ctx = Context()
         ctx.out += f'#include "{relative_header_path_from_name(module.name)}"'
+        ctx.static_fdecls = ctx.out.spawn()
         for defn in module.definitions:
             D(defn, ctx)
         return str(ctx.out)
@@ -2765,6 +2766,9 @@ def C(ns):
         delete_hook_type = get_delete_hook_type(self)
         deleter_name = get_class_deleter_name(self)
         proto_name = get_class_proto_name(self)
+
+        ctx.static_fdecls += f'extern {declare(malloc_type, malloc_name)};'
+        ctx.static_fdecls += f'extern {declare(DELETER_TYPE, deleter_name)};'
 
         ctx.out += f'KLC_Class {proto_name} = ' '{'
         with ctx.push_indent(1):
