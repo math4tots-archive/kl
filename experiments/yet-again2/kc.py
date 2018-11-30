@@ -2767,8 +2767,8 @@ def C(ns):
         deleter_name = get_class_deleter_name(self)
         proto_name = get_class_proto_name(self)
 
-        ctx.static_fdecls += f'extern {declare(malloc_type, malloc_name)};'
-        ctx.static_fdecls += f'extern {declare(DELETER_TYPE, deleter_name)};'
+        ctx.static_fdecls += f'static {declare(malloc_type, malloc_name)};'
+        ctx.static_fdecls += f'static {declare(DELETER_TYPE, deleter_name)};'
 
         ctx.out += f'KLC_Class {proto_name} = ' '{'
         with ctx.push_indent(1):
@@ -2777,7 +2777,7 @@ def C(ns):
             ctx.out += f'&{deleter_name},'
         ctx.out += '};'
 
-        ctx.out += declare(malloc_type, malloc_name)
+        ctx.out += 'static ' + declare(malloc_type, malloc_name)
         ctx.out += '{'
         with ctx.push_indent(1):
             ctx.out += f'{struct_name} zero = ' '{0};'
@@ -2787,14 +2787,14 @@ def C(ns):
             ctx.out += f'return ret;'
         ctx.out += '}'
 
-        ctx.out += declare(delete_hook_type, delete_hook_name, [
+        ctx.out += 'static ' + declare(delete_hook_type, delete_hook_name, [
             THIS_NAME,
         ])
         with ctx.retain_scope():
             ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
             E(self.delete_hook.body, ctx)
 
-        ctx.out += declare(DELETER_TYPE, deleter_name, ['robj', 'dq'])
+        ctx.out += 'static ' + declare(DELETER_TYPE, deleter_name, ['robj', 'dq'])
         ctx.out += '{'
         retainable_fields = [
             field for field in self.fields if
