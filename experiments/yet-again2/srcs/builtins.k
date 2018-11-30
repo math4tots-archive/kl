@@ -11,7 +11,13 @@ class String {
   char* buffer
   size_t size
 
+  static String new(char const* cstr) {
+    printf("new called!\n")
+    String.fromCString(cstr)
+  }
+
   static String fromCString(char const* cstr) {
+    printf("fromCString called!\n")
     String ret = $(String)
     ret.buffer = KLC_CopyString(cstr)
     ret.size = strlen(cstr)

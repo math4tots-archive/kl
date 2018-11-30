@@ -354,7 +354,7 @@ def lexer(ns):
     ns(PRIMITIVE_TYPE_NAMES, 'PRIMITIVE_TYPE_NAMES')
 
     KEYWORDS = {
-      'is', 'not', 'null', 'true', 'false', 'new', 'delete',
+      'is', 'not', 'null', 'true', 'false', 'delete',
       'and', 'or', 'in',
       'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
       'struct', 'const', 'throw',
@@ -952,6 +952,9 @@ def IR(ns):
         node_fields = (
             ('cls', ClassDefinition),
         )
+
+        def __repr__(self):
+            return f'ClassName({self.cls.module_name}.{self.cls.short_name})'
 
     @ns
     class StaticMethodName(PseudoExpression):
@@ -1616,6 +1619,17 @@ def parser(ns):
                         token,
                         scope['@ec'].extern,
                         f.defn,
+                        args,
+                    )
+                elif isinstance(f, IR.ClassName):
+                    # If using a Class name like a function,
+                    # the 'new' static method is implicitly called.
+                    defn = get_static_method(scope, token, f.cls, 'new')
+                    args = IR.convert_args(defn.type, scope, token, raw_args)
+                    return IR.StaticMethodCall(
+                        token,
+                        scope['@ec'].extern,
+                        defn,
                         args,
                     )
                 else:

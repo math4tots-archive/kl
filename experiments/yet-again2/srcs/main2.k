@@ -6,7 +6,7 @@ from c import free
 extern char* KLC_CopyString(char const* s)
 
 extern int main(int argc, char** argv) {
-  String s = String.fromCString("Hello world!")
+  String s = String("Hello world!")
   String s2 = String.fromCString("Hello world2")
   0
 }
