@@ -774,7 +774,8 @@ def IR(ns):
             ('field_promises', typeutil.List[Promise]),
         )
 
-        def get_fields(self):
+        @property
+        def fields(self):
             if self._fields is None:
                 fields = [p.resolve() for p in self.field_promises]
                 for field in fields:
@@ -1542,7 +1543,7 @@ def parser(ns):
                     (IR.StructDeclaration, IR.ClassDeclaration)):
                 with scope.push(token):
                     raise scope.error(f'{type} is not a struct type')
-            fields = [f for f in type.get_fields() if f.name == field_name]
+            fields = [f for f in type.fields if f.name == field_name]
             if not fields:
                 with scope.push(token):
                     raise scope.error(
@@ -1792,7 +1793,7 @@ def parser(ns):
 
             @Promise
             def promise():
-                fields = decl.get_fields()
+                fields = decl.fields
                 check_member_names(scope, fields)
                 check_fields(scope, fields, allow_retainable_fields=False)
                 decl.defn = defn = IR.StructDefinition(token, decl, fields)
@@ -1847,7 +1848,7 @@ def parser(ns):
 
             @Promise
             def promise():
-                fields = decl.get_fields()
+                fields = decl.fields
                 check_member_names(scope, fields)
                 check_fields(scope, fields, allow_retainable_fields=True)
                 delete_hook = (
