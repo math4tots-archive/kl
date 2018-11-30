@@ -516,19 +516,24 @@ def IR(ns):
     class Node(object):
         def __init__(self, token, *args):
             self.token = token
-            for (fname, ftype), arg in zip(type(self).fields, args):
+            for (fname, ftype), arg in zip(type(self).node_fields, args):
                 if not isinstance(arg, ftype):
-                    raise TypeError('Expected type of %r to be %r, but got %r' % (
-                        fname, ftype, arg))
+                    raise TypeError(
+                        'Expected type of %r to be %r, but got %r' % (
+                            fname, ftype, arg))
                 setattr(self, fname, arg)
-            if len(type(self).fields) != len(args):
+            if len(type(self).node_fields) != len(args):
                 raise TypeError('%s expects %s arguments, but got %s' % (
-                    type(self).__name__, len(type(self).fields), len(args)))
+                    type(self).__name__,
+                    len(type(self).node_fields),
+                    len(args),
+                ))
 
         def __repr__(self):
             return '%s(%s)' % (
                 type(self).__name__,
-                ', '.join(repr(getattr(self, n)) for n, _ in type(self).fields),
+                ', '.join(repr(getattr(self, n))
+                for n, _ in type(self).node_fields),
             )
 
         def format(self, depth=0, out=None):
@@ -536,7 +541,7 @@ def IR(ns):
             out = [] if out is None else out
             ind = '  ' * depth
             out.append(f'{ind}{type(self).__name__}\n')
-            for fname, _ in type(self).fields:
+            for fname, _ in type(self).node_fields:
                 fval = getattr(self, fname)
                 if isinstance(fval, list) and fval:
                     out.append(f'{ind}  {fname}...\n')
@@ -563,7 +568,7 @@ def IR(ns):
             nt = type(self)
             return nt(self.token, *[
                 Node._map_helper(getattr(self, fieldname))
-                for fieldname, _ in nt.fields
+                for fieldname, _ in nt.node_fields
             ])
 
         @classmethod
@@ -635,7 +640,7 @@ def IR(ns):
 
     @ns
     class Parameter(VariableDeclaration):
-        fields = (
+        node_fields = (
             ('type', Type),
             ('name', str),
         )
@@ -644,7 +649,7 @@ def IR(ns):
 
     @ns
     class FunctionDeclaration(Declaration):
-        fields = (
+        node_fields = (
             ('extern', bool),
             ('rtype', Type),
             ('module_name', str),
@@ -665,7 +670,7 @@ def IR(ns):
 
     @ns
     class GlobalVariableDeclaration(VariableDeclaration):
-        fields = (
+        node_fields = (
             ('extern', bool),
             ('type', Type),
             ('module_name', str),
@@ -674,7 +679,7 @@ def IR(ns):
 
     @ns
     class LocalVariableDeclaration(VariableDeclaration):
-        fields = (
+        node_fields = (
             ('type', Type),
             ('name', str),
         )
@@ -687,7 +692,7 @@ def IR(ns):
 
     @ns
     class PrimitiveTypeDeclaration(TypeDeclaration):
-        fields = (
+        node_fields = (
             ('name', str),
         )
 
@@ -762,7 +767,7 @@ def IR(ns):
     class StructOrClassDeclaration(TypeDeclaration):
         defn = None
         _fields = None
-        fields = (
+        node_fields = (
             ('extern', bool),
             ('module_name', str),
             ('short_name', str),
@@ -792,7 +797,7 @@ def IR(ns):
         def __init__(self, token, extern, this_type):
             super().__init__(token, extern, this_type)
 
-        fields = (
+        node_fields = (
             # Indicates whether we're in an 'extern' context.
             # E.g. we cannot throw exceptions from an extern
             # context. Also the calling convention is different.
@@ -842,7 +847,7 @@ def IR(ns):
 
     @ns
     class PrimitiveTypeDefinition(GlobalDefinition):
-        fields = ()
+        node_fields = ()
 
     @ns
     class Expression(Node):
@@ -862,7 +867,7 @@ def IR(ns):
 
     @ns
     class TypeExpression(PseudoExpression):
-        fields = (
+        node_fields = (
             ('type_value', Type),
         )
 
@@ -872,7 +877,7 @@ def IR(ns):
 
     @ns
     class Block(Expression, CollectionNode):
-        fields = (
+        node_fields = (
             ('decls', typeutil.List[LocalVariableDeclaration]),
             ('exprs', typeutil.List[Expression]),
         )
@@ -883,7 +888,7 @@ def IR(ns):
 
     @ns
     class FunctionName(Expression):
-        fields = (
+        node_fields = (
             ('decl', FunctionDeclaration),
         )
 
@@ -893,7 +898,7 @@ def IR(ns):
 
     @ns
     class LocalName(Expression):
-        fields = (
+        node_fields = (
             ('decl', LocalVariableDeclaration),
         )
 
@@ -903,7 +908,7 @@ def IR(ns):
 
     @ns
     class SetLocalName(Expression):
-        fields = (
+        node_fields = (
             ('decl', LocalVariableDeclaration),
             ('expr', Expression),
         )
@@ -914,7 +919,7 @@ def IR(ns):
 
     @ns
     class FieldDefinition(Node):
-        fields = (
+        node_fields = (
             ('extern', bool),
             ('type', Type),
             ('name', str),
@@ -922,7 +927,7 @@ def IR(ns):
 
     @ns
     class GetStructField(Expression):
-        fields = (
+        node_fields = (
             ('field_defn', FieldDefinition),
             ('expr', Expression),
         )
@@ -933,7 +938,7 @@ def IR(ns):
 
     @ns
     class SetStructField(Expression):
-        fields = (
+        node_fields = (
             ('field_defn', FieldDefinition),
             ('expr', Expression),
             ('valexpr', Expression),
@@ -945,7 +950,7 @@ def IR(ns):
 
     @ns
     class GetClassField(Expression):
-        fields = (
+        node_fields = (
             ('field_defn', FieldDefinition),
             ('expr', Expression),
         )
@@ -956,7 +961,7 @@ def IR(ns):
 
     @ns
     class SetClassField(Expression):
-        fields = (
+        node_fields = (
             ('field_defn', FieldDefinition),
             ('expr', Expression),
             ('valexpr', Expression),
@@ -968,7 +973,7 @@ def IR(ns):
 
     @ns
     class FunctionCall(Expression):
-        fields = (
+        node_fields = (
             ('from_extern', bool),  # iff we are calling form extern func
             ('to_extern', bool),    # iff are are calling an extern function
             ('type', Type),
@@ -978,13 +983,13 @@ def IR(ns):
 
     @ns
     class Malloc(Expression):
-        fields = (
+        node_fields = (
             ('type', Type),
         )
 
     @ns
     class This(Expression):
-        fields = (
+        node_fields = (
             ('cls', ClassDeclaration),
         )
 
@@ -996,7 +1001,7 @@ def IR(ns):
     class IntLiteral(Expression):
         type = PRIMITIVE_TYPE_MAP['int']
 
-        fields = (
+        node_fields = (
             ('value', int),
         )
 
@@ -1004,7 +1009,7 @@ def IR(ns):
     class DoubleLiteral(Expression):
         type = PRIMITIVE_TYPE_MAP['double']
 
-        fields = (
+        node_fields = (
             ('value', float),
         )
 
@@ -1012,13 +1017,13 @@ def IR(ns):
     class StringLiteral(Expression):
         type = PointerType(ConstType(PRIMITIVE_TYPE_MAP['char']))
 
-        fields = (
+        node_fields = (
             ('value', str),
         )
 
     @ns
     class PointerCast(Expression):
-        fields = (
+        node_fields = (
             ('type', PointerType),
             ('expr', Expression),
         )
@@ -1027,20 +1032,20 @@ def IR(ns):
     class ThrowStringLiteral(Expression):
         type = VOID
 
-        fields = (
+        node_fields = (
             ('value', str),
         )
 
     @ns
     class Include(Node):
-        fields = (
+        node_fields = (
             ('use_quotes', bool),
             ('value', str),
         )
 
     @ns
     class FromImport(Node):
-        fields = (
+        node_fields = (
             ('module_name', str),
             ('exported_name', str),
             ('alias', str),
@@ -1054,20 +1059,20 @@ def IR(ns):
 
     @ns
     class StructDefinition(StructOrClassDefinition):
-        fields = (
+        node_fields = (
             ('decl', StructDeclaration),
             ('fields', typeutil.Optional[typeutil.List[FieldDefinition]]),
         )
 
     @ns
     class DeleteHook(Node):
-        fields = (
+        node_fields = (
             ('body', Block),
         )
 
     @ns
     class ClassDefinition(StructOrClassDefinition):
-        fields = (
+        node_fields = (
             ('decl', ClassDeclaration),
             ('fields', typeutil.Optional[typeutil.List[FieldDefinition]]),
             ('delete_hook', DeleteHook),
@@ -1079,20 +1084,20 @@ def IR(ns):
 
     @ns
     class FunctionDefinition(GlobalDefinition):
-        fields = (
+        node_fields = (
             ('decl', FunctionDeclaration),
             ('body', typeutil.Optional[Block]),
         )
 
     @ns
     class GlobalVariableDefinition(GlobalDefinition):
-        fields = (
+        node_fields = (
             ('decl', GlobalVariableDeclaration),
         )
 
     @ns
     class Module(Node):
-        fields = (
+        node_fields = (
             ('name', str),
             ('includes', typeutil.List[Include]),
             ('imports', typeutil.List[FromImport]),
@@ -2046,7 +2051,7 @@ def C(ns):
         return module_name.replace('.', os.path.sep) + '.k.c'
 
     class TranslationUnit(IR.Node):
-        fields = (
+        node_fields = (
             ('name', str),
             ('h', str),
             ('c', str),
