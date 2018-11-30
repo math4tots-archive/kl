@@ -789,8 +789,8 @@ def IR(ns):
     class ExpressionContext(PseudoDeclaration):
         """Contains information needed for resolving expressions
         """
-        def __init__(self, token, extern, cls):
-            super().__init__(token, extern, cls)
+        def __init__(self, token, extern, this_type):
+            super().__init__(token, extern, this_type)
 
         fields = (
             # Indicates whether we're in an 'extern' context.
@@ -798,7 +798,7 @@ def IR(ns):
             # context. Also the calling convention is different.
             ('extern', bool),
 
-            ('cls', typeutil.Optional[ClassDeclaration])
+            ('this_type', typeutil.Optional[ClassDeclaration])
         )
 
     PRIMITIVE_TYPE_MAP = {
@@ -1661,13 +1661,10 @@ def parser(ns):
             @Promise
             def promise():
                 ec = scope['@ec']
-                if ec.cls is None:
+                if ec.this_type is None:
                     with scope.push(token):
-                        raise scope.error(
-                            f"this cannot be used outside of "
-                            f"a class"
-                        )
-                return IR.This(token, ec.cls)
+                        raise scope.error(f"'this' cannot be used here ")
+                return IR.This(token, ec.this_type)
             return promise
 
         def make_cast(scope, token, type, arg):
@@ -1823,7 +1820,7 @@ def parser(ns):
                     dest_scope['@ec'] = IR.ExpressionContext(
                         token,
                         extern=True,
-                        cls=decl,
+                        this_type=decl,
                     )
                     delete_hook_promise = pcall(
                         IR.DeleteHook,
@@ -1879,7 +1876,7 @@ def parser(ns):
             func_scope['@ec'] = IR.ExpressionContext(
                 token=token,
                 extern=extern,
-                cls=None,
+                this_type=None,
             )
             has_body = not consume('\n')
             decl_promise = Promise(lambda: IR.FunctionDeclaration(
