@@ -1233,6 +1233,22 @@ def parser(ns):
                         f'{expr.type} is not convertible to {type}')
             return expr
 
+        def from_import(self, token, module_name, exported_name, alias):
+            with self.push(token):
+                exported_defn = (
+                    self.load_scope_for(module_name)[exported_name]
+                )
+            self[alias] = exported_defn
+            return Promise.value(
+                IR.FromImport(token, module_name, exported_name, alias),
+            )
+
+    BUILTINS_MODULE_NAME = 'builtins'
+
+    _builtins_export_names = (
+        'String',
+    )
+
     @ns
     def parse(
             source: Source,
@@ -1321,13 +1337,7 @@ def parser(ns):
             expect('import')
             exported_name = expect_id()
             alias = expect_id() if consume('as') else exported_name
-            with scope.push(token):
-                exported_defn = (
-                    scope.load_scope_for(module_name)[exported_name]
-                )
-            scope[alias] = exported_defn
-            return Promise(lambda:
-                IR.FromImport(token, module_name, exported_name, alias))
+            return scope.from_import(token, module_name, exported_name, alias)
 
         def expect_name(name):
             if peek().type != 'NAME' or peek().value != name:
@@ -1934,21 +1944,35 @@ def parser(ns):
         importps = []
         defnps = []
 
+        implicit_builtins = True
         consume_all('\n')
         while at('#'):
             itoken = expect('#')
-            expect_name('include')
-            use_quotes = at('STRING')
-            if use_quotes:
-                ivalue = expect('STRING').value
+            if at('STRING') and peek().value == 'no builtins':
+                expect('STRING')
+                implicit_builtins = False
             else:
-                expect('<')
-                parts = []
-                while not consume('>'):
-                    parts.append(gettok().value)
-                ivalue = ''.join(parts)
+                expect_name('include')
+                use_quotes = at('STRING')
+                if use_quotes:
+                    ivalue = expect('STRING').value
+                else:
+                    expect('<')
+                    parts = []
+                    while not consume('>'):
+                        parts.append(gettok().value)
+                    ivalue = ''.join(parts)
+                includes.append(IR.Include(itoken, use_quotes, ivalue))
             consume_all('\n')
-            includes.append(IR.Include(itoken, use_quotes, ivalue))
+
+        if implicit_builtins:
+            for export_name in _builtins_export_names:
+                importps.append(module_scope.from_import(
+                    token=builtin_token,
+                    module_name=BUILTINS_MODULE_NAME,
+                    exported_name=export_name,
+                    alias=export_name,
+                ))
 
         while at('from'):
             importps.append(parse_import(module_scope))
