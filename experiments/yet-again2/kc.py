@@ -641,23 +641,12 @@ def IR(ns):
 
         @property
         def is_meta_type(self):
-            return isinstance(self, TypeType)
+            return isinstance(self, PseudoType)
 
-    @ns
-    class TypeType(Type):
-        """Type of an expression that a type rather than a value
-        """
-        def __init__(self, type: Type):
-            self.type = type
+    class PseudoType(Type):
+        """Type of expressions that aren't really expressions"""
 
-        def __eq__(self, other):
-            return type(self) is type(other) and self.type == other.type
-
-        def __hash__(self):
-            return hash((type(self), self.type))
-
-        def __repr__(self):
-            return f'TypeType({self.type})'
+    PSEUDO_TYPE = PseudoType()
 
     @ns
     class Declaration(Node):
@@ -682,7 +671,7 @@ def IR(ns):
         pass
 
     @ns
-    class Parameter(VariableDeclaration):
+    class BaseLocalVariableDeclaration(VariableDeclaration):
         node_fields = (
             ('type', Type),
             ('name', str),
@@ -691,7 +680,30 @@ def IR(ns):
         mutable = False
 
     @ns
-    class FunctionDefinition(GlobalDefinition, Declaration):
+    class Parameter(BaseLocalVariableDeclaration):
+        pass
+
+    @ns
+    class FunctionLike:
+        """
+        abstract
+            extern: bool
+            rtype: type
+            params: typeutil.List[Parameter]
+            vararg: bool
+            body: typeutil.Optional[Block]
+        """
+        @lazy(lambda: FunctionType)
+        def type(self):
+            return FunctionType(
+                self.extern,
+                self.rtype,
+                [p.type for p in self.params],
+                self.vararg,
+            )
+
+    @ns
+    class FunctionDefinition(GlobalDefinition, Declaration, FunctionLike):
         node_fields = (
             ('extern', bool),
             ('rtype', Type),
@@ -708,15 +720,6 @@ def IR(ns):
             return (
                 self.body_promise.resolve()
                     if self.body_promise else None
-            )
-
-        @lazy(lambda: FunctionType)
-        def type(self):
-            return FunctionType(
-                self.extern,
-                self.rtype,
-                [p.type for p in self.params],
-                self.vararg,
             )
 
     @ns
@@ -741,11 +744,48 @@ def IR(ns):
     class ClassDefinition(StructOrClassDefinition):
         node_fields = StructOrClassDefinition.node_fields + (
             ('delete_hook_promise', Promise),
+            ('static_method_promises', typeutil.List[Promise]),
         )
 
         @lazy(lambda: DeleteHook)
         def delete_hook(self):
             return self.delete_hook_promise.resolve()
+
+        @lazy(lambda: typeutil.List[StaticMethodDefinition])
+        def static_methods(self):
+            return [p.resolve() for p in self.static_method_promises]
+
+    @ns
+    class StaticMethodDefinition(Declaration, FunctionLike):
+        extern = False
+        node_fields = (
+            ('cls_promise', Promise),
+            ('rtype_promise', Promise),
+            ('name', str),
+            ('params_promise', Promise),
+            ('vararg_promise', Promise),
+            ('body_promise', Promise),
+        )
+
+        @lazy(lambda: Type)
+        def rtype(self):
+            return self.rtype_promise.resolve()
+
+        @lazy(lambda: ClassDefinition)
+        def cls(self):
+            return self.cls_promise.resolve()
+
+        @lazy(lambda: typeutil.List[Parameter])
+        def params(self):
+            return self.params_promise.resolve()
+
+        @lazy(lambda: bool)
+        def vararg(self):
+            return self.vararg_promise.resolve()
+
+        @lazy(lambda: Block)
+        def body(self):
+            return self.body_promise.resolve()
 
     @ns
     class DeleteHook(Node):
@@ -767,12 +807,7 @@ def IR(ns):
         )
 
     @ns
-    class LocalVariableDeclaration(VariableDeclaration):
-        node_fields = (
-            ('type', Type),
-            ('name', str),
-        )
-
+    class LocalVariableDeclaration(BaseLocalVariableDeclaration):
         mutable = True
 
     @ns
@@ -904,15 +939,25 @@ def IR(ns):
         """Expressions that are not themselves concrete values.
         """
 
-    @ns
-    class TypeExpression(PseudoExpression):
-        node_fields = (
-            ('type_value', Type),
-        )
-
         @property
         def type(self):
-            return TypeType(self.type_value)
+            return PSEUDO_TYPE
+
+    @ns
+    class TypeExpression(PseudoExpression):
+        pass
+
+    @ns
+    class ClassName(TypeExpression):
+        node_fields = (
+            ('cls', ClassDefinition),
+        )
+
+    @ns
+    class StaticMethodName(PseudoExpression):
+        node_fields = (
+            ('defn', StaticMethodDefinition),
+        )
 
     @ns
     class Block(Expression, CollectionNode):
@@ -944,7 +989,7 @@ def IR(ns):
     @ns
     class LocalName(Expression):
         node_fields = (
-            ('decl', LocalVariableDeclaration),
+            ('decl', BaseLocalVariableDeclaration),
         )
 
         @property
@@ -954,7 +999,7 @@ def IR(ns):
     @ns
     class SetLocalName(Expression):
         node_fields = (
-            ('decl', LocalVariableDeclaration),
+            ('decl', BaseLocalVariableDeclaration),
             ('expr', Expression),
         )
 
@@ -1025,6 +1070,18 @@ def IR(ns):
             ('f', Expression),
             ('args', typeutil.List[Expression]),
         )
+
+    @ns
+    class StaticMethodCall(Expression):
+        node_fields = (
+            ('from_extern', bool),
+            ('f', StaticMethodDefinition),
+            ('args', typeutil.List[Expression]),
+        )
+
+        @property
+        def type(self):
+            return self.f.rtype
 
     @ns
     class Malloc(Expression):
@@ -1420,7 +1477,9 @@ def parser(ns):
                 ptok = peek()
                 ptypep = parse_type(scope)
                 pname = expect_id()
-                paramps.append(pcall(IR.Parameter, ptok, ptypep, pname))
+                param_promise = pcall(IR.Parameter, ptok, ptypep, pname)
+                scope.set_promise(ptok, pname, param_promise)
+                paramps.append(param_promise)
                 if not consume(','):
                     expect(')')
                     break
@@ -1452,10 +1511,7 @@ def parser(ns):
             def promise():
                 decl = decl_promise.resolve()
                 expr = expr_promise.resolve()
-                assert isinstance(
-                    decl,
-                    (IR.LocalVariableDeclaration, IR.Parameter),
-                ), decl
+                assert isinstance(decl, IR.BaseLocalVariableDeclaration), decl
                 if not decl.mutable:
                     with scope.push(token), scope.push(decl.token):
                         raise scope.error(
@@ -1544,25 +1600,34 @@ def parser(ns):
             def promise():
                 f = function_promise.resolve()
                 raw_args = argsp.resolve()
-                if not isinstance(f.type, IR.FunctionType):
+                if isinstance(f.type, IR.FunctionType):
+                    args = IR.convert_args(f.type, scope, token, raw_args)
+                    return IR.FunctionCall(
+                        token,
+                        scope['@ec'].extern,
+                        f.type.extern,
+                        f.type.rtype,
+                        f,
+                        args,
+                    )
+                elif isinstance(f, IR.StaticMethodName):
+                    args = IR.convert_args(f.defn.type, scope, token, raw_args)
+                    return IR.StaticMethodCall(
+                        token,
+                        scope['@ec'].extern,
+                        f.defn,
+                        args,
+                    )
+                else:
                     with scope.push(token):
                         raise scope.error(f'{f.type} is not a function')
-                args = IR.convert_args(f.type, scope, token, raw_args)
-                return IR.FunctionCall(
-                    token,
-                    scope['@ec'].extern,
-                    f.type.extern,
-                    f.type.rtype,
-                    f,
-                    args,
-                )
             return promise
 
         def get_field_defn(scope, token, type, field_name):
             if not isinstance(type,
                     (IR.StructDefinition, IR.ClassDefinition)):
                 with scope.push(token):
-                    raise scope.error(f'{type} is not a struct type')
+                    raise scope.error(f'{type} is not a struct or class type')
             fields = [f for f in type.fields if f.name == field_name]
             if not fields:
                 with scope.push(token):
@@ -1571,18 +1636,30 @@ def parser(ns):
             field, = fields
             return field
 
+        def get_static_method(scope, token, cls, name):
+            for method in cls.static_methods:
+                if method.name == name:
+                    return method
+            with scope.push(token), scope.push(cls.token):
+                raise scope.error(
+                    f'No such static method with name {repr(name)}')
+
         def promise_get_field(scope, token, exprp, fname):
             @Promise
             def promise():
                 expr = exprp.resolve()
-                defn = get_field_defn(scope, token, expr.type, fname)
-                if isinstance(expr.type, IR.StructDefinition):
+                if isinstance(expr, IR.ClassName):
+                    defn = get_static_method(scope, token, expr.cls, fname)
+                    return IR.StaticMethodName(token, defn)
+                elif isinstance(expr.type, IR.StructDefinition):
+                    defn = get_field_defn(scope, token, expr.type, fname)
                     return IR.GetStructField(
                         token,
                         defn,
                         expr,
                     )
                 elif isinstance(expr.type, IR.ClassDefinition):
+                    defn = get_field_defn(scope, token, expr.type, fname)
                     return IR.GetClassField(
                         token,
                         defn,
@@ -1653,10 +1730,10 @@ def parser(ns):
                     defn = scope[name]
                 if isinstance(defn, IR.FunctionDefinition):
                     return IR.FunctionName(token, defn)
-                if isinstance(defn, IR.LocalVariableDeclaration):
+                if isinstance(defn, IR.BaseLocalVariableDeclaration):
                     return IR.LocalName(token, defn)
                 if isinstance(defn, IR.ClassDefinition):
-                    return IR.TypeExpression(token, defn)
+                    return IR.ClassName(token, defn)
                 with scope.push(token):
                     raise scope.error(f'{defn} is not a variable')
             return promise
@@ -1825,6 +1902,7 @@ def parser(ns):
             name = expect_id()
 
             field_promises = []
+            static_method_promises = []
 
             defn = IR.ClassDefinition(
                 token,
@@ -1833,6 +1911,7 @@ def parser(ns):
                 name,
                 field_promises,
                 Promise(lambda: delete_hook_ptr[0]),
+                static_method_promises,
             )
             outer_scope[name] = defn
 
@@ -1850,8 +1929,12 @@ def parser(ns):
                         delete_hook_ptr=delete_hook_ptr,
                         cls=defn,
                     )
+                elif consume('static'):
+                    static_method_promises.append(parse_static_method(
+                        class_scope, member_token, defn,
+                    ))
                 else:
-                    member_type_promise = parse_type(outer_scope)
+                    member_type_promise = parse_type(class_scope)
                     member_name = expect_id()
                     field_promises.append(pcall(
                         IR.FieldDefinition,
@@ -1882,6 +1965,35 @@ def parser(ns):
 
             return promise
 
+        def parse_static_method(class_scope, token, cls):
+            method_scope = Scope(class_scope)
+            rtype_promise = parse_type(class_scope)
+            name = expect_id()
+            params_and_vararg_promise = parse_params(method_scope)
+            params_promise = (
+                params_and_vararg_promise.map(lambda xs: xs[0])
+            )
+            vararg_promise = (
+                params_and_vararg_promise.map(lambda xs: xs[1])
+            )
+            method_scope['@ec'] = IR.ExpressionContext(
+                token=token,
+                extern=False,
+                this_type=None,
+            )
+            body_promise = parse_block(method_scope)
+            defn_promise = Promise.value(IR.StaticMethodDefinition(
+                token,
+                Promise.value(cls),
+                rtype_promise,
+                name,
+                params_promise,
+                vararg_promise,
+                body_promise,
+            ))
+            class_scope.set_promise(token, name, defn_promise)
+            return defn_promise
+
         def expect_delete_hook(scope, token, delete_hook_ptr, cls):
             if delete_hook_ptr[0]:
                 dtok = delete_hook_ptr[0].token
@@ -1899,15 +2011,15 @@ def parser(ns):
             )
             return delete_hook_ptr[0]
 
-        def parse_function(scope, token, extern, type_promise, name):
-            params_and_vararg_promise = parse_params(scope)
+        def parse_function(outer_scope, token, extern, type_promise, name):
+            func_scope = Scope(outer_scope)
+            params_and_vararg_promise = parse_params(func_scope)
             params_promise = (
                 params_and_vararg_promise.map(lambda xs: xs[0])
             )
             vararg_promise = (
                 params_and_vararg_promise.map(lambda xs: xs[1])
             )
-            func_scope = Scope(scope)
             func_scope['@ec'] = IR.ExpressionContext(
                 token=token,
                 extern=extern,
@@ -1924,7 +2036,7 @@ def parser(ns):
                     raw_body = raw_body_promise.resolve()
                     assert raw_body is not None
                     if defn.rtype != IR.VOID:
-                        body = scope.convert(raw_body, defn.rtype)
+                        body = outer_scope.convert(raw_body, defn.rtype)
                     else:
                         body = raw_body
                     return body
@@ -1941,7 +2053,7 @@ def parser(ns):
                 has_body,
                 body_promise,
             ))
-            scope.set_promise(token, name, defn_promise)
+            outer_scope.set_promise(token, name, defn_promise)
             return defn_promise
 
         def parse_global_var_defn(scope, token, extern, type_promise, name):
@@ -2039,7 +2151,6 @@ def C(ns):
     THIS_NAME = 'KLC_this'
     ENCODED_FUNCTION_PREFIX = 'KLCFN'
     ENCODED_GLOBAL_VARIABLE_PREFIX = 'KLCGV'
-    ENCODED_PARAM_VARIABLE_PREFIX = 'KLCPV'
     ENCODED_LOCAL_VARIABLE_PREFIX = 'KLCLV'
     ENCODED_STRUCT_PREFIX = 'KLCST'
     ENCODED_STRUCT_FIELD_PREFIX = 'KLCSF'
@@ -2049,6 +2160,7 @@ def C(ns):
     ENCODED_CLASS_DELETER_PREFIX = 'KLCCD'
     ENCODED_CLASS_STRUCT_PREFIX = 'KLCCS'
     ENCODED_CLASS_FIELD_PREFIX = 'KLCCF'
+    ENCODED_STATIC_METHOD_PREFIX = 'KLCSM'
     OUTPUT_PTR_NAME = 'KLC_output_ptr'
     CLASS_HEADER_FIELD_NAME = 'header'
     HEADER_STRUCT_NAME = 'KLC_Header'
@@ -2067,8 +2179,13 @@ def C(ns):
 
     encode_map = {
         '_': '_U',  # U for Underscore
+                    # underscore si the escape cahracter
+
         '.': '_D',  # D for Dot
+                    # For use in module names
+
         '#': '_H',  # H for Hashtag
+                    # For generating method names
     }
 
     def encode_char(c):
@@ -2384,6 +2501,9 @@ def C(ns):
                 fdecls += f'extern {declare(malloc_type, malloc_name)};'
                 fdecls += f'extern {declare(DELETER_TYPE, deleter_name)};'
 
+                for static_method in defn.static_methods:
+                    fdecls += f'extern {proto_for(static_method)};'
+
             else:
                 raise Fubar([], defn)
 
@@ -2482,6 +2602,13 @@ def C(ns):
         assert not defn.extern, defn
         return encode(defn.name, prefix=ENCODED_CLASS_FIELD_PREFIX)
 
+    def get_static_method_name(defn: IR.StaticMethodDefinition):
+        assert isinstance(defn, IR.StaticMethodDefinition), defn
+        return encode(
+            f'{defn.cls.module_name}.{defn.cls.short_name}#{defn.name}',
+            prefix=ENCODED_STATIC_METHOD_PREFIX,
+        )
+
     # Get the C name of variable with given declaration
     cvarname = Multimethod('cvarname')
 
@@ -2498,7 +2625,7 @@ def C(ns):
 
     @cvarname.on(IR.Parameter)
     def cvarname(self):
-        return encode(self.name, prefix=ENCODED_PARAM_VARIABLE_PREFIX)
+        return encode(self.name, prefix=ENCODED_LOCAL_VARIABLE_PREFIX)
 
     @cvarname.on(IR.LocalVariableDeclaration)
     def cvarname(self):
@@ -2514,6 +2641,10 @@ def C(ns):
                 prefix=ENCODED_FUNCTION_PREFIX,
             )
         )
+
+    @cvarname.on(IR.StaticMethodDefinition)
+    def cvarname(self):
+        return get_static_method_name(self)
 
     declare = Multimethod('declare')
 
@@ -2599,22 +2730,27 @@ def C(ns):
         # nothing actually needs to get emitted for this.
         pass
 
+    def emit_function_body(*, ctx, defn: IR.FunctionLike):
+        assert defn.body, defn
+        ctx.out += proto_for(defn)
+        with ctx.retain_scope() as after_release:
+            ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
+            retvar = E(defn.body, ctx)
+            if defn.rtype != IR.VOID:
+                ctx.retain(retvar)
+            if defn.extern:
+                if defn.rtype != IR.VOID:
+                    after_release += f'return {retvar};'
+            else:
+                if defn.rtype != IR.VOID:
+                    after_release += f'*{OUTPUT_PTR_NAME} = {retvar};'
+                after_release += f'return {ERROR_POINTER_NAME};'
+
+
     @D.on(IR.FunctionDefinition)
     def D(self, ctx):
         if self.body is not None:
-            ctx.out += proto_for(self)
-            with ctx.retain_scope() as after_release:
-                ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
-                retvar = E(self.body, ctx)
-                if self.rtype != IR.VOID:
-                    ctx.retain(retvar)
-                if self.extern:
-                    if self.rtype != IR.VOID:
-                        after_release += f'return {retvar};'
-                else:
-                    if self.rtype != IR.VOID:
-                        after_release += f'*{OUTPUT_PTR_NAME} = {retvar};'
-                    after_release += f'return {ERROR_POINTER_NAME};'
+            emit_function_body(ctx=ctx, defn=self)
 
     @D.on(IR.StructDefinition)
     def D(self, ctx):
@@ -2674,15 +2810,22 @@ def C(ns):
                     assert False, field
         ctx.out += '}'
 
+        for static_method in self.static_methods:
+            D(static_method, ctx)
+
+    @D.on(IR.StaticMethodDefinition)
+    def D(self, ctx):
+        emit_function_body(ctx=ctx, defn=self)
+
     proto_for = Multimethod('proto_for')
 
-    @proto_for.on(IR.FunctionDefinition)
+    @proto_for.on(IR.FunctionLike)
     def proto_for(self):
         return declare(
             self.type,
             cvarname(self),
             [
-                encode(p.name, prefix=ENCODED_PARAM_VARIABLE_PREFIX)
+                encode(p.name, prefix=ENCODED_LOCAL_VARIABLE_PREFIX)
                 for p in self.params
             ],
         )
@@ -2836,48 +2979,78 @@ def C(ns):
     def E(self, ctx):
         return f'"{escape_str(self.value)}"'
 
-    @E.on(IR.FunctionCall)
-    def E(self, ctx):
-        fvar = E(self.f, ctx)
-        argvars = ', '.join(E(arg, ctx) for arg in self.args)
+    def emit_function_call(
+            *,
+            ctx,
+            rtype,
+            args,
+            to_extern,
+            from_extern,
+            c_function_name):
+        argvars = ', '.join(E(arg, ctx) for arg in args)
 
-        if self.to_extern:
-            if self.type == IR.VOID:
-                ctx.out += f'{fvar}({argvars});'
+        if to_extern:
+            if rtype == IR.VOID:
+                ctx.out += f'{c_function_name}({argvars});'
                 return
             else:
                 # Function calls implicitly generate a retain,
                 # so there's no need to explicitly retain here.
                 # And of course, the release is implicit with
                 # the 'declare'.
-                retvar = ctx.declare(self.type)
-                ctx.out += f'{retvar} = {fvar}({argvars});'
+                retvar = ctx.declare(rtype)
+                ctx.out += f'{retvar} = {c_function_name}({argvars});'
                 return retvar
         else:
             # Function calls implicitly generate a retain,
             # so there's no need to explicitly retain here.
             # And of course, the release is implicit with
             # the 'declare'.
-            if self.type == IR.VOID:
+            if rtype == IR.VOID:
                 retvar = None
                 retvarp = 'NULL'
             else:
-                retvar = ctx.declare(self.type)
+                retvar = ctx.declare(rtype)
                 retvarp = f'&{retvar}'
 
             margvars = (
-                f'{retvarp}, {argvars}' if self.args else retvarp
+                f'{retvarp}, {argvars}' if args else retvarp
             )
 
-            ctx.out += f'{ERROR_POINTER_NAME} = {fvar}({margvars});'
+            ctx.out += (
+                f'{ERROR_POINTER_NAME} = {c_function_name}({margvars});'
+            )
             ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
             with ctx.push_indent(1):
-                if self.from_extern:
+                if from_extern:
                     ctx.out += f'KLC_panic_with_error({ERROR_POINTER_NAME});'
                 else:
                     ctx.jump_out_of_scope()
             ctx.out += '}'
             return retvar
+
+    @E.on(IR.FunctionCall)
+    def E(self, ctx):
+        fvar = E(self.f, ctx)
+        return emit_function_call(
+            ctx=ctx,
+            rtype=self.type,
+            args=self.args,
+            to_extern=self.to_extern,
+            from_extern=self.from_extern,
+            c_function_name=fvar,
+        )
+
+    @E.on(IR.StaticMethodCall)
+    def E(self, ctx):
+        return emit_function_call(
+            ctx=ctx,
+            rtype=self.type,
+            args=self.args,
+            to_extern=False,
+            from_extern=self.from_extern,
+            c_function_name=get_static_method_name(self.f),
+        )
 
     @E.on(IR.Malloc)
     def E(self, ctx):
