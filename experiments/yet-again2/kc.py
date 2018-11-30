@@ -1444,10 +1444,9 @@ def parser(ns):
             return expr
 
         def parse_block(parent_scope):
-            _check_has_expression_context(parent_scope)
             scope = Scope(parent_scope)
             token = expect('{')
-            declps = []
+            decl_promises = []
             expr_promises = []
             with skipping_newlines(False):
                 consume_all('\n')
@@ -1467,7 +1466,7 @@ def parser(ns):
                             decl_type_promise,
                             decl_name,
                         )
-                        declps.append(decl_promise)
+                        decl_promises.append(decl_promise)
                         scope.set_promise(
                             decl_token, decl_name, decl_promise)
                         if expr_promise is not None:
@@ -1480,21 +1479,29 @@ def parser(ns):
                     else:
                         expr_promises.append(parse_expression(scope))
                     consume_all('\n')
-            return Promise(lambda: IR.Block(
-                token,
-                [p.resolve() for p in declps],
-                [
-                    check_concrete_expression(scope, p.resolve())
-                    for p in expr_promises
-                ],
-            ))
+            @Promise
+            def promise():
+                _check_has_expression_context(parent_scope)
+                return IR.Block(
+                    token,
+                    [p.resolve() for p in decl_promises],
+                    [
+                        check_concrete_expression(scope, p.resolve())
+                        for p in expr_promises
+                    ],
+                )
+            return promise
 
         def _check_has_expression_context(scope):
             assert isinstance(scope['@ec'], IR.ExpressionContext)
 
         def parse_expression(scope):
-            _check_has_expression_context(scope)
-            return parse_postfix(scope)
+            promise = parse_postfix(scope)
+            @promise.map
+            def promise(expr):
+                _check_has_expression_context(scope)
+                return expr
+            return promise
 
         def parse_args(scope):
             argps = []
@@ -1680,7 +1687,6 @@ def parser(ns):
                 raise scope.error(
                     f'Only pointer casts are supported right now')
 
-
         def parse_primary(scope):
             token = peek()
             if consume('$'):
@@ -1725,19 +1731,6 @@ def parser(ns):
                 )
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
-
-        def promise_func(scope, token, decl_promise, body_promise):
-            @Promise
-            def promise():
-                decl = decl_promise.resolve()
-                raw_body = body_promise.resolve() if body_promise else None
-                if raw_body is not None and decl.rtype != IR.VOID:
-                    body = scope.convert(raw_body, decl.rtype)
-                else:
-                    body = raw_body
-
-                return IR.FunctionDefinition(token, decl, body)
-            return promise
 
         def check_fields(scope, fields, *, allow_retainable_fields):
             for field in fields:
@@ -1874,6 +1867,61 @@ def parser(ns):
             else:
                 return delete_hook_promise.resolve()
 
+        def parse_function(scope, token, extern, type_promise, name):
+            params_and_vararg_promise = parse_params(scope)
+            params_promise = (
+                params_and_vararg_promise.map(lambda xs: xs[0])
+            )
+            vararg_promise = (
+                params_and_vararg_promise.map(lambda xs: xs[1])
+            )
+            func_scope = Scope(scope)
+            func_scope['@ec'] = IR.ExpressionContext(
+                token=token,
+                extern=extern,
+                cls=None,
+            )
+            has_body = not consume('\n')
+            decl_promise = Promise(lambda: IR.FunctionDeclaration(
+                token,
+                extern,
+                type_promise.resolve(),
+                module_name,
+                name,
+                params_promise.resolve(),
+                vararg_promise.resolve(),
+                has_body,
+            ))
+            scope.set_promise(token, name, decl_promise)
+            body_promise = parse_block(func_scope) if has_body else None
+            @Promise
+            def promise():
+                decl = decl_promise.resolve()
+                raw_body = body_promise.resolve() if body_promise else None
+                if raw_body is not None and decl.rtype != IR.VOID:
+                    body = scope.convert(raw_body, decl.rtype)
+                else:
+                    body = raw_body
+                return IR.FunctionDefinition(token, decl, body)
+            return promise
+
+        def parse_global_var_defn(scope, token, extern, type_promise, name):
+            expect('\n')
+            decl_promise = pcall(
+                IR.GlobalVariableDeclaration,
+                token,
+                extern,
+                type_promise,
+                module_name,
+                name,
+            )
+            scope.set_promise(token, name, decl_promise)
+            return pcall(
+                IR.GlobalVariableDefinition,
+                token,
+                decl_promise,
+            )
+
         def parse_global(scope):
             token = peek()
             extern = bool(consume('extern'))
@@ -1889,55 +1937,12 @@ def parser(ns):
             else:
                 type_promise = parse_type(scope)
                 name = expect_id()
-                if consume('\n'):
-                    decl_promise = pcall(
-                        IR.GlobalVariableDeclaration,
-                        token,
-                        extern,
-                        type_promise,
-                        module_name,
-                        name,
-                    )
-                    scope.set_promise(token, name, decl_promise)
-                    return pcall(
-                        IR.GlobalVariableDefinition,
-                        token,
-                        decl_promise,
-                    )
+                if at('('):
+                    return parse_function(
+                        scope, token, extern, type_promise, name)
                 else:
-                    params_and_vararg_promise = parse_params(scope)
-                    params_promise = Promise(lambda:
-                        params_and_vararg_promise.resolve()[0])
-                    vararg_promise = Promise(lambda:
-                        params_and_vararg_promise.resolve()[1])
-                    has_body = not consume('\n')
-                    decl_promise = pcall(
-                        IR.FunctionDeclaration,
-                        token,
-                        extern,
-                        type_promise,
-                        module_name,
-                        name,
-                        params_promise,
-                        vararg_promise,
-                        has_body,
-                    )
-                    scope.set_promise(token, name, decl_promise)
-                    func_scope = Scope(scope)
-                    func_scope['@ec'] = IR.ExpressionContext(
-                        token=token,
-                        extern=extern,
-                        cls=None,
-                    )
-                    body_promise = (
-                        parse_block(func_scope) if has_body else None
-                    )
-                    return promise_func(
-                        scope=scope,
-                        token=token,
-                        decl_promise=decl_promise,
-                        body_promise=body_promise,
-                    )
+                    return parse_global_var_defn(
+                        scope, token, extern, type_promise, name)
 
         module_token = peek()
         includes = []
