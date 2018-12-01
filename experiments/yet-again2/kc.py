@@ -1195,7 +1195,7 @@ def IR(ns):
             builtin_token,
             True,
             'builtin',
-            'KLC_Header',
+            name,
             [],
         )
         return defn

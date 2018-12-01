@@ -13,20 +13,19 @@ char* KLC_CopyString(const char* s) {
   return ret;
 }
 
-void KLC_panic_with_error(void* errorp) {
-  KLC_Error* error = (KLC_Error*) errorp;
+void KLC_panic_with_error(KLC_Error* error) {
   fprintf(stderr, "ERROR: %s\n", error->message);
   exit(1);
 }
 
-void* KLC_new_error_with_message(const char* msg) {
+KLC_Error* KLC_new_error_with_message(const char* msg) {
   KLC_Error* error = malloc(sizeof(KLC_Error));
   error->message = KLC_CopyString(msg);
   return error;
 }
 
-const char* KLC_get_error_message(void* errorp) {
-  return ((KLC_Error*) errorp)->message;
+const char* KLC_get_error_message(KLC_Error* error) {
+  return error->message;
 }
 
 void KLC_retain(KLC_Header* obj) {
