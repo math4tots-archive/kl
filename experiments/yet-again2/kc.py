@@ -706,27 +706,7 @@ def IR(ns):
         )
 
     @ns
-    class StaticFunctionLike:
-        """
-        abstract
-            extern: bool
-            rtype: type
-            plist: ParameterList
-            vararg: bool
-            body: typeutil.Optional[Block]
-        """
-        @lazy(lambda: FunctionType)
-        def type(self):
-            return FunctionType(
-                self.extern,
-                self.rtype,
-                [p.type for p in self.plist.params],
-                self.plist.vararg,
-            )
-
-    @ns
-    class FunctionDefinition(
-            GlobalDefinition, Declaration, StaticFunctionLike):
+    class FunctionDefinition(GlobalDefinition, Declaration):
         node_fields = (
             ('extern', bool),
             ('rtype', Type),
@@ -742,6 +722,15 @@ def IR(ns):
             return (
                 self.body_promise.resolve()
                     if self.body_promise else None
+            )
+
+        @lazy(lambda: FunctionType)
+        def type(self):
+            return FunctionType(
+                self.extern,
+                self.rtype,
+                [p.type for p in self.plist.params],
+                self.plist.vararg,
             )
 
     @ns
@@ -778,8 +767,7 @@ def IR(ns):
             return [p.resolve() for p in self.static_method_promises]
 
     @ns
-    class StaticMethodDefinition(Declaration, StaticFunctionLike):
-        extern = False
+    class StaticMethodDefinition(Declaration):
         node_fields = (
             ('cls_promise', Promise),
             ('rtype_promise', Promise),
@@ -787,6 +775,15 @@ def IR(ns):
             ('plist_promise', Promise),
             ('body_promise', Promise),
         )
+
+        @lazy(lambda: FunctionType)
+        def type(self):
+            return FunctionType(
+                extern=False,
+                rtype=self.rtype,
+                paramtypes=[p.type for p in self.plist.params],
+                vararg=self.plist.vararg,
+            )
 
         @lazy(lambda: Type)
         def rtype(self):
@@ -2276,6 +2273,7 @@ def C(ns):
     THIS_NAME = 'KLC_this'
     ENCODED_FUNCTION_PREFIX = 'KLCFN'
     ENCODED_GLOBAL_VARIABLE_PREFIX = 'KLCGV'
+    ENCODED_LOCAL_PARAM_PREFIX = 'KLCLP'
     ENCODED_LOCAL_VARIABLE_PREFIX = 'KLCLV'
     ENCODED_STRUCT_PREFIX = 'KLCST'
     ENCODED_STRUCT_FIELD_PREFIX = 'KLCSF'
@@ -2738,9 +2736,16 @@ def C(ns):
     def get_static_method_name(defn: IR.StaticMethodDefinition):
         assert isinstance(defn, IR.StaticMethodDefinition), defn
         return encode(
-            f'{defn.cls.module_name}.{defn.cls.short_name}#{defn.name}',
+            f'{defn.cls.module_name}#{defn.cls.short_name}#{defn.name}',
             prefix=ENCODED_STATIC_METHOD_PREFIX,
         )
+
+    def encode_param_names(paramlist: IR.ParameterList):
+        assert isinstance(paramlist, IR.ParameterList), paramlist
+        return [
+            encode(p.name, prefix=ENCODED_LOCAL_PARAM_PREFIX)
+            for p in paramlist.params
+        ]
 
     # Get the C name of variable with given declaration
     cvarname = Multimethod('cvarname')
@@ -2758,6 +2763,11 @@ def C(ns):
 
     @cvarname.on(IR.Parameter)
     def cvarname(self):
+        # NOTE: It isn't a typo that we use ENCODED_LOCAL_VARIABLE_PREFIX
+        # here instead of ENCODED_LOCAL_PARAM_PREFIX.
+        # At the beginning of every function body, we copy over all
+        # parameters to local variables to avoid any possible
+        # retain/release issues related to mutating parameter values.
         return encode(self.name, prefix=ENCODED_LOCAL_VARIABLE_PREFIX)
 
     @cvarname.on(IR.LocalVariableDeclaration)
@@ -2867,26 +2877,58 @@ def C(ns):
         # nothing actually needs to get emitted for this.
         pass
 
-    def emit_function_body(*, ctx, defn: IR.StaticFunctionLike):
-        assert defn.body, defn
-        ctx.out += proto_for(defn)
+    def emit_function_body(
+            *,
+            ctx,
+            proto,
+            extern,
+            rtype,
+            start_callback,
+            body):
+        ctx.out += proto
         with ctx.retain_scope() as after_release:
             ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
-            retvar = E(defn.body, ctx)
-            if defn.rtype != IR.VOID:
+
+            # we have a callback here to allow callers to
+            # customize the way that they process arguments
+            start_callback(ctx)
+
+            retvar = E(body, ctx)
+            if rtype != IR.VOID:
                 ctx.retain(retvar)
-            if defn.extern:
-                if defn.rtype != IR.VOID:
+            if extern:
+                if rtype != IR.VOID:
                     after_release += f'return {retvar};'
             else:
-                if defn.rtype != IR.VOID:
+                if rtype != IR.VOID:
                     after_release += f'*{OUTPUT_PTR_NAME} = {retvar};'
                 after_release += f'return {ERROR_POINTER_NAME};'
+
+    def copy_params_to_locals(ctx, paramtypes, c_param_names, c_local_names):
+        # We copy over all the parameters to local variables
+        # so that we can treat them like normal local variables.
+        for param_type, param_name, local_name in zip(
+                paramtypes, c_param_names, c_local_names):
+            ctx.declare(param_type, local_name)
+            ctx.out += f'{local_name} = {param_name};'
+            ctx.retain(local_name)
 
     @D.on(IR.FunctionDefinition)
     def D(self, ctx):
         if self.body is not None:
-            emit_function_body(ctx=ctx, defn=self)
+            emit_function_body(
+                ctx=ctx,
+                proto=proto_for(self),
+                extern=self.extern,
+                rtype=self.rtype,
+                start_callback=lambda ctx: copy_params_to_locals(
+                    ctx=ctx,
+                    paramtypes=[p.type for p in self.plist.params],
+                    c_param_names=encode_param_names(self.plist),
+                    c_local_names=list(map(cvarname, self.plist.params)),
+                ),
+                body=self.body
+            )
 
     @D.on(IR.StructDefinition)
     def D(self, ctx):
@@ -2903,14 +2945,6 @@ def C(ns):
         proto_name = get_class_proto_name(self)
 
         ctx.static_fdecls += f'static {declare(malloc_type, malloc_name)};'
-        ctx.static_fdecls += f'static {declare(DELETER_TYPE, deleter_name)};'
-
-        ctx.out += f'KLC_Class {proto_name} = ' '{'
-        with ctx.push_indent(1):
-            ctx.out += f'"{self.module_name}",'
-            ctx.out += f'"{self.short_name}",'
-            ctx.out += f'&{deleter_name},'
-        ctx.out += '};'
 
         ctx.out += 'static ' + declare(malloc_type, malloc_name)
         ctx.out += '{'
@@ -2958,21 +2992,45 @@ def C(ns):
         for static_method in self.static_methods:
             D(static_method, ctx)
 
+        ctx.out += f'KLC_Class {proto_name} = ' '{'
+        with ctx.push_indent(1):
+            ctx.out += f'"{self.module_name}",'
+            ctx.out += f'"{self.short_name}",'
+            ctx.out += f'&{deleter_name},'
+        ctx.out += '};'
+
     @D.on(IR.StaticMethodDefinition)
     def D(self, ctx):
-        emit_function_body(ctx=ctx, defn=self)
+        emit_function_body(
+            ctx=ctx,
+            proto=proto_for(self),
+            extern=False,
+            rtype=self.rtype,
+            start_callback=lambda ctx: copy_params_to_locals(
+                ctx=ctx,
+                paramtypes=[p.type for p in self.plist.params],
+                c_param_names=encode_param_names(self.plist),
+                c_local_names=list(map(cvarname, self.plist.params)),
+            ),
+            body=self.body,
+        )
 
     proto_for = Multimethod('proto_for')
 
-    @proto_for.on(IR.StaticFunctionLike)
+    @proto_for.on(IR.FunctionDefinition)
     def proto_for(self):
         return declare(
             self.type,
             cvarname(self),
-            [
-                encode(p.name, prefix=ENCODED_LOCAL_VARIABLE_PREFIX)
-                for p in self.plist.params
-            ],
+            encode_param_names(self.plist),
+        )
+
+    @proto_for.on(IR.StaticMethodDefinition)
+    def proto_for(self):
+        return declare(
+            self.type,
+            cvarname(self),
+            encode_param_names(self.plist),
         )
 
     @proto_for.on(IR.GlobalVariableDefinition)
