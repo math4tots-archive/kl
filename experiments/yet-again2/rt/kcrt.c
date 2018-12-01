@@ -100,7 +100,8 @@ KLC_Error* KLC_var_to_ptr(KLC_Header** out, KLC_var v, KLC_Class* cls) {
     return KLC_new_error_with_message("Expected class type");
   }
   if (v.u.p->cls != cls) {
-    return KLC_new_error_with_message("Not correct class type");
+    return KLC_new_error_with_message(
+        "Tried to cast to incorrect class type");
   }
   *out = v.u.p;
   return NULL;

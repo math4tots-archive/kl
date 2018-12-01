@@ -957,15 +957,17 @@ def IR(ns):
 
     @_convert.on(VarType, PTD, Expression)
     def _convert(st, dt, expr, scope):
+        from_extern = scope['@ec'].extern
         if dt.name in INTEGRAL_TYPE_NAMES:
-            return CastVarToIntegral(expr.token, expr, dt)
+            return CastVarToIntegral(expr.token, from_extern, expr, dt)
         if dt.name in FLOAT_TYPE_NAMES:
-            return CastVarToFloat(expr.token, expr, dt)
+            return CastVarToFloat(expr.token, from_extern, expr, dt)
         raise convert_error(st, dt, expr, scope)
 
     @_convert.on(VarType, ClassDefinition, Expression)
     def _convert(st, dt, expr, scope):
-        return CastVarToClassRef(expr.token, expr, dt)
+        from_extern = scope['@ec'].extern
+        return CastVarToClassRef(expr.token, from_extern, expr, dt)
 
     @_convert.on(ClassDefinition, VarType, Expression)
     def _convert(st, dt, expr, scope):
@@ -1056,6 +1058,7 @@ def IR(ns):
     @ns
     class CastVarToIntegral(Expression):
         node_fields = (
+            ('from_extern', bool),
             ('expr', Expression),
             ('type', PrimitiveTypeDeclaration),
         )
@@ -1063,6 +1066,7 @@ def IR(ns):
     @ns
     class CastVarToFloat(Expression):
         node_fields = (
+            ('from_extern', bool),
             ('expr', Expression),
             ('type', PrimitiveTypeDeclaration),
         )
@@ -1070,6 +1074,7 @@ def IR(ns):
     @ns
     class CastVarToClassRef(Expression):
         node_fields = (
+            ('from_extern', bool),
             ('expr', Expression),
             ('type', ClassDefinition),
         )
@@ -3062,7 +3067,7 @@ def C(ns):
         ctx.out += f'{ERROR_POINTER_NAME} = KLC_var_to_int(&{tvar}, {vvar});'
         ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
         with ctx.push_indent(1):
-            ctx.throw_or_panic(from_extern=False)
+            ctx.throw_or_panic(from_extern=self.from_extern)
         ctx.out += '}'
         cdecl = declare(self.type, '')
         ctx.out += f'{retvar} = (({cdecl}) {tvar});'
@@ -3078,7 +3083,7 @@ def C(ns):
         )
         ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
         with ctx.push_indent(1):
-            ctx.throw_or_panic(from_extern=False)
+            ctx.throw_or_panic(from_extern=self.from_extern)
         ctx.out += '}'
         cdecl = declare(self.type, '')
         ctx.out += f'{retvar} = (({cdecl}) {tvar});'
@@ -3096,7 +3101,7 @@ def C(ns):
         )
         ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
         with ctx.push_indent(1):
-            ctx.throw_or_panic(from_extern=False)
+            ctx.throw_or_panic(from_extern=self.from_extern)
         ctx.out += '}'
         cdecl = declare(self.type, '')
         ctx.out += f'{retvar} = (({cdecl}) {tvar});'

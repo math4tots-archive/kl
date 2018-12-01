@@ -5,6 +5,8 @@ from c import free
 
 extern char* KLC_CopyString(char const* s)
 
+class Foo {}
+
 extern int main(int argc, char** argv) {
   String s = String("Hello world!")
   String s2 = String.fromCString("Hello world2")
@@ -14,5 +16,8 @@ extern int main(int argc, char** argv) {
   var vf = 1.4
   double f = vf
   String s3 = y
+  printf("Before\n")
+  Foo foo = y
+  printf("After\n")
   0
 }
