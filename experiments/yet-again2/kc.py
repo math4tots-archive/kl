@@ -699,12 +699,19 @@ def IR(ns):
         pass
 
     @ns
-    class FunctionLike:
+    class ParameterList(Node):
+        node_fields = (
+            ('params', typeutil.List[Parameter]),
+            ('vararg', bool),
+        )
+
+    @ns
+    class StaticFunctionLike:
         """
         abstract
             extern: bool
             rtype: type
-            params: typeutil.List[Parameter]
+            plist: ParameterList
             vararg: bool
             body: typeutil.Optional[Block]
         """
@@ -713,19 +720,19 @@ def IR(ns):
             return FunctionType(
                 self.extern,
                 self.rtype,
-                [p.type for p in self.params],
-                self.vararg,
+                [p.type for p in self.plist.params],
+                self.plist.vararg,
             )
 
     @ns
-    class FunctionDefinition(GlobalDefinition, Declaration, FunctionLike):
+    class FunctionDefinition(
+            GlobalDefinition, Declaration, StaticFunctionLike):
         node_fields = (
             ('extern', bool),
             ('rtype', Type),
             ('module_name', str),
             ('short_name', str),
-            ('params', typeutil.List[Parameter]),
-            ('vararg', bool),
+            ('plist', ParameterList),
             ('has_body', bool),
             ('body_promise', typeutil.Optional[Promise]),
         )
@@ -771,14 +778,13 @@ def IR(ns):
             return [p.resolve() for p in self.static_method_promises]
 
     @ns
-    class StaticMethodDefinition(Declaration, FunctionLike):
+    class StaticMethodDefinition(Declaration, StaticFunctionLike):
         extern = False
         node_fields = (
             ('cls_promise', Promise),
             ('rtype_promise', Promise),
             ('name', str),
-            ('params_promise', Promise),
-            ('vararg_promise', Promise),
+            ('plist_promise', Promise),
             ('body_promise', Promise),
         )
 
@@ -790,13 +796,9 @@ def IR(ns):
         def cls(self):
             return self.cls_promise.resolve()
 
-        @lazy(lambda: typeutil.List[Parameter])
-        def params(self):
-            return self.params_promise.resolve()
-
-        @lazy(lambda: bool)
-        def vararg(self):
-            return self.vararg_promise.resolve()
+        @lazy(lambda: ParameterList)
+        def plist(self):
+            return self.plist_promise.resolve()
 
         @lazy(lambda: Block)
         def body(self):
@@ -930,15 +932,22 @@ def IR(ns):
             return scope.error(f'{st} is not convertible to {dt}')
 
     @_convert.on(PTD, PTD, Expression)
-    def _convert(source_type, dest_type, expr, scope):
-        if source_type == dest_type:
+    def _convert(st, dt, expr, scope):
+        if st == dt:
             return expr
 
-        pair = (source_type.name, dest_type.name)
+        pair = (st.name, dt.name)
 
         if pair in (
                 ('int', 'long'),
-                ('int', 'size_t')):
+                ('int', 'size_t'),
+                ('int', 'unsigned long')):
+            return expr
+
+        if frozenset(pair) in frozenset(map(frozenset, [
+                ['unsigned char', 'char'],
+                ['signed char', 'char'],
+                ['unsigned char', 'signed char']])):
             return expr
 
         raise convert_error(st, dt, expr, scope)
@@ -1572,8 +1581,8 @@ def parser(ns):
                     break
             return type_promise
 
-        def parse_params(scope):
-            expect('(')
+        def parse_param_list(scope):
+            token = expect('(')
             paramps = []
             vararg = False
             while not consume(')'):
@@ -1590,7 +1599,9 @@ def parser(ns):
                 if not consume(','):
                     expect(')')
                     break
-            return Promise(lambda: ([p.resolve() for p in paramps], vararg))
+            return Promise(lambda: IR.ParameterList(
+                token, [p.resolve() for p in paramps], vararg,
+            ))
 
         def at_variable_declaration():
             if peek().type in lexer.C_PRIMITIVE_TYPE_SPECIFIERS:
@@ -2097,13 +2108,7 @@ def parser(ns):
             method_scope = Scope(class_scope)
             rtype_promise = parse_type(class_scope)
             name = expect_id()
-            params_and_vararg_promise = parse_params(method_scope)
-            params_promise = (
-                params_and_vararg_promise.map(lambda xs: xs[0])
-            )
-            vararg_promise = (
-                params_and_vararg_promise.map(lambda xs: xs[1])
-            )
+            plist_promise = parse_param_list(method_scope)
             method_scope['@ec'] = IR.ExpressionContext(
                 token=token,
                 extern=False,
@@ -2115,8 +2120,7 @@ def parser(ns):
                 Promise.value(cls),
                 rtype_promise,
                 name,
-                params_promise,
-                vararg_promise,
+                plist_promise,
                 body_promise,
             ))
             class_scope.set_promise(token, name, defn_promise)
@@ -2141,13 +2145,7 @@ def parser(ns):
 
         def parse_function(outer_scope, token, extern, type_promise, name):
             func_scope = Scope(outer_scope)
-            params_and_vararg_promise = parse_params(func_scope)
-            params_promise = (
-                params_and_vararg_promise.map(lambda xs: xs[0])
-            )
-            vararg_promise = (
-                params_and_vararg_promise.map(lambda xs: xs[1])
-            )
+            plist_promise = parse_param_list(func_scope)
             func_scope['@ec'] = IR.ExpressionContext(
                 token=token,
                 extern=extern,
@@ -2176,8 +2174,7 @@ def parser(ns):
                 type_promise.resolve(),
                 module_name,
                 name,
-                params_promise.resolve(),
-                vararg_promise.resolve(),
+                plist_promise.resolve(),
                 has_body,
                 body_promise,
             ))
@@ -2867,7 +2864,7 @@ def C(ns):
         # nothing actually needs to get emitted for this.
         pass
 
-    def emit_function_body(*, ctx, defn: IR.FunctionLike):
+    def emit_function_body(*, ctx, defn: IR.StaticFunctionLike):
         assert defn.body, defn
         ctx.out += proto_for(defn)
         with ctx.retain_scope() as after_release:
@@ -2882,7 +2879,6 @@ def C(ns):
                 if defn.rtype != IR.VOID:
                     after_release += f'*{OUTPUT_PTR_NAME} = {retvar};'
                 after_release += f'return {ERROR_POINTER_NAME};'
-
 
     @D.on(IR.FunctionDefinition)
     def D(self, ctx):
@@ -2965,14 +2961,14 @@ def C(ns):
 
     proto_for = Multimethod('proto_for')
 
-    @proto_for.on(IR.FunctionLike)
+    @proto_for.on(IR.StaticFunctionLike)
     def proto_for(self):
         return declare(
             self.type,
             cvarname(self),
             [
                 encode(p.name, prefix=ENCODED_LOCAL_VARIABLE_PREFIX)
-                for p in self.params
+                for p in self.plist.params
             ],
         )
 
