@@ -17,7 +17,11 @@ extern int main(int argc, char** argv) {
   double f = vf
   String s3 = y
   printf("Before\n")
-  Foo foo = y
+  Foo foo = $(Foo)
+  var vfoo = foo
+  ${
+    Foo foo2 = vfoo
+  }
   printf("After\n")
   0
 }
