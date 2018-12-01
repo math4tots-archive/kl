@@ -8,8 +8,8 @@ from c import strlen
 extern char* KLC_CopyString(char const* s)
 
 class String {
-  char* buffer
-  size_t size
+  char* _buffer
+  size_t _size
 
   static String new(char const* cstr) {
     String.fromCString(cstr)
@@ -17,12 +17,16 @@ class String {
 
   static String fromCString(char const* cstr) {
     String ret = $(String)
-    ret.buffer = KLC_CopyString(cstr)
-    ret.size = strlen(cstr)
+    ret._buffer = KLC_CopyString(cstr)
+    ret._size = strlen(cstr)
     ret
   }
 
+  size_t size() {
+    this._size
+  }
+
   delete {
-    free(static_cast(void*, this.buffer))
+    free(static_cast(void*, this._buffer))
   }
 }

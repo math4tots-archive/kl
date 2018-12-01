@@ -756,6 +756,7 @@ def IR(ns):
         node_fields = StructOrClassDefinition.node_fields + (
             ('delete_hook_promise', Promise),
             ('static_method_promises', typeutil.List[Promise]),
+            ('instance_method_promises', typeutil.List[Promise]),
         )
 
         @lazy(lambda: DeleteHook)
@@ -765,6 +766,10 @@ def IR(ns):
         @lazy(lambda: typeutil.List[StaticMethodDefinition])
         def static_methods(self):
             return [p.resolve() for p in self.static_method_promises]
+
+        @lazy(lambda: typeutil.List[InstanceMethodDefinition])
+        def instance_methods(self):
+            return [p.resolve() for p in self.instance_method_promises]
 
     @ns
     class StaticMethodDefinition(Declaration):
@@ -784,6 +789,32 @@ def IR(ns):
                 paramtypes=[p.type for p in self.plist.params],
                 vararg=self.plist.vararg,
             )
+
+        @lazy(lambda: Type)
+        def rtype(self):
+            return self.rtype_promise.resolve()
+
+        @lazy(lambda: ClassDefinition)
+        def cls(self):
+            return self.cls_promise.resolve()
+
+        @lazy(lambda: ParameterList)
+        def plist(self):
+            return self.plist_promise.resolve()
+
+        @lazy(lambda: Block)
+        def body(self):
+            return self.body_promise.resolve()
+
+    @ns
+    class InstanceMethodDefinition(Declaration):
+        node_fields = (
+            ('cls_promise', Promise),
+            ('rtype_promise', Promise),
+            ('name', str),
+            ('plist_promise', Promise),  # does not include 'this'
+            ('body_promise', Promise),
+        )
 
         @lazy(lambda: Type)
         def rtype(self):
@@ -956,35 +987,38 @@ def IR(ns):
     INTEGRAL_TYPE_NAMES = (
         'char', 'short', 'int', 'long', 'size_t', 'ptrdiff_t',
     )
+    ns(INTEGRAL_TYPE_NAMES, 'INTEGRAL_TYPE_NAMES')
 
     FLOAT_TYPE_NAMES = (
         'float', 'double',
     )
+    ns(FLOAT_TYPE_NAMES, 'FLOAT_TYPE_NAMES')
+
+    VAR_CONVERTIBLE_TYPE_NAMES = frozenset(
+        {'void'} | set(INTEGRAL_TYPE_NAMES) | set(FLOAT_TYPE_NAMES))
 
     @_convert.on(VarType, PTD, Expression)
     def _convert(st, dt, expr, scope):
         from_extern = scope['@ec'].extern
-        if dt.name in INTEGRAL_TYPE_NAMES:
-            return CastVarToIntegral(expr.token, from_extern, expr, dt)
-        if dt.name in FLOAT_TYPE_NAMES:
-            return CastVarToFloat(expr.token, from_extern, expr, dt)
+        if dt.name in VAR_CONVERTIBLE_TYPE_NAMES:
+            return Cast(expr.token, from_extern, expr, dt)
         raise convert_error(st, dt, expr, scope)
 
     @_convert.on(VarType, ClassDefinition, Expression)
     def _convert(st, dt, expr, scope):
         from_extern = scope['@ec'].extern
-        return CastVarToClassRef(expr.token, from_extern, expr, dt)
+        return Cast(expr.token, from_extern, expr, dt)
 
     @_convert.on(ClassDefinition, VarType, Expression)
     def _convert(st, dt, expr, scope):
-        return CastClassRefToVar(expr.token, expr, st)
+        from_extern = scope['@ec'].extern
+        return Cast(expr.token, from_extern, expr, dt)
 
     @_convert.on(PTD, VarType, Expression)
     def _convert(st, dt, expr, scope):
-        if st.name in INTEGRAL_TYPE_NAMES:
-            return CastIntegralToVar(expr.token, expr, st)
-        if st.name in FLOAT_TYPE_NAMES:
-            return CastFloatToVar(expr.token, expr, st)
+        from_extern = scope['@ec'].extern
+        if st.name in VAR_CONVERTIBLE_TYPE_NAMES:
+            return Cast(expr.token, from_extern, expr, dt)
         raise convert_error(st, dt, expr, scope)
 
     @_convert.on(Type, Type, Expression)
@@ -1031,54 +1065,11 @@ def IR(ns):
             return self.exprs[-1].type if self.exprs else VOID
 
     @ns
-    class CastIntegralToVar(Expression):
-        node_fields = (
-            ('expr', Expression),
-            ('itype', PrimitiveTypeDefinition),
-        )
-
-        type = VAR_TYPE
-
-    @ns
-    class CastFloatToVar(Expression):
-        node_fields = (
-            ('expr', Expression),
-            ('itype', PrimitiveTypeDefinition),
-        )
-
-        type = VAR_TYPE
-
-    @ns
-    class CastClassRefToVar(Expression):
-        node_fields = (
-            ('expr', Expression),
-            ('itype', ClassDefinition),
-        )
-
-        type = VAR_TYPE
-
-    @ns
-    class CastVarToIntegral(Expression):
+    class Cast(Expression):
         node_fields = (
             ('from_extern', bool),
             ('expr', Expression),
-            ('type', PrimitiveTypeDefinition),
-        )
-
-    @ns
-    class CastVarToFloat(Expression):
-        node_fields = (
-            ('from_extern', bool),
-            ('expr', Expression),
-            ('type', PrimitiveTypeDefinition),
-        )
-
-    @ns
-    class CastVarToClassRef(Expression):
-        node_fields = (
-            ('from_extern', bool),
-            ('expr', Expression),
-            ('type', ClassDefinition),
+            ('type', Type),
         )
 
     @ns
@@ -2035,6 +2026,7 @@ def parser(ns):
 
             field_promises = []
             static_method_promises = []
+            instance_method_promises = []
 
             defn = IR.ClassDefinition(
                 token,
@@ -2044,6 +2036,7 @@ def parser(ns):
                 field_promises,
                 Promise(lambda: delete_hook_ptr[0]),
                 static_method_promises,
+                instance_method_promises,
             )
             outer_scope[name] = defn
 
@@ -2068,14 +2061,31 @@ def parser(ns):
                 else:
                     member_type_promise = parse_type(class_scope)
                     member_name = expect_id()
-                    field_promises.append(pcall(
-                        IR.FieldDefinition,
-                        member_token,
-                        False,
-                        member_type_promise,
-                        member_name,
-                    ))
-                    expect('\n')
+                    if at('('):
+                        instance_method_promises.append(
+                            parse_instance_method(
+                                class_scope,
+                                member_token,
+                                defn,
+                                member_type_promise,
+                                member_name,
+                            )
+                        )
+                    else:
+                        field_promise = pcall(
+                            IR.FieldDefinition,
+                            member_token,
+                            False,
+                            member_type_promise,
+                            member_name,
+                        )
+                        field_promises.append(field_promise)
+                        class_scope.set_promise(
+                            member_token,
+                            member_name,
+                            field_promise,
+                        )
+                        expect('\n')
                 consume_all('\n')
 
             if delete_hook_ptr[0] is None:
@@ -2087,7 +2097,9 @@ def parser(ns):
             @Promise
             def promise():
                 fields = defn.fields
-                check_member_names(outer_scope, fields)
+                # We don't need to call 'check_member_names' because
+                # if there is a member name conflict,
+                # class_scope.set_promise would've thrown something.
                 check_fields(
                     outer_scope,
                     fields,
@@ -2097,9 +2109,30 @@ def parser(ns):
 
             return promise
 
-        def parse_static_method(class_scope, token, cls):
+        def parse_instance_method(
+                class_scope, token, cls, rtype_promise, name):
             method_scope = Scope(class_scope)
+            plist_promise = parse_param_list(method_scope)
+            method_scope['@ec'] = IR.ExpressionContext(
+                token=token,
+                extern=False,
+                this_type=cls,
+            )
+            body_promise = parse_block(method_scope)
+            defn_promise = Promise.value(IR.InstanceMethodDefinition(
+                token,
+                Promise.value(cls),
+                rtype_promise,
+                name,
+                plist_promise,
+                body_promise,
+            ))
+            class_scope.set_promise(token, name, defn_promise)
+            return defn_promise
+
+        def parse_static_method(class_scope, token, cls):
             rtype_promise = parse_type(class_scope)
+            method_scope = Scope(class_scope)
             name = expect_id()
             plist_promise = parse_param_list(method_scope)
             method_scope['@ec'] = IR.ExpressionContext(
@@ -2279,9 +2312,13 @@ def C(ns):
     ENCODED_CLASS_DELETER_PREFIX = 'KLCCD'
     ENCODED_CLASS_STRUCT_PREFIX = 'KLCCS'
     ENCODED_CLASS_FIELD_PREFIX = 'KLCCF'
+    ENCODED_METHOD_LIST_PREFIX = 'KLCML'
     ENCODED_STATIC_METHOD_PREFIX = 'KLCSM'
+    ENCODED_INSTANCE_METHOD_PREFIX = 'KLCIM'
     OUTPUT_PTR_NAME = 'KLC_output_ptr'
     CLASS_HEADER_FIELD_NAME = 'header'
+    METHOD_PARAM_ARGC_NAME = 'KLC_argc'
+    METHOD_PARAM_ARGV_NAME = 'KLC_argv'
     HEADER_STRUCT_NAME = 'KLC_Header'
     ERROR_POINTER_NAME = 'KLC_error'
     ERROR_POINTER_TYPE = IR.ERROR_POINTER_TYPE
@@ -2292,6 +2329,15 @@ def C(ns):
         paramtypes=[
             HEADER_POINTER_TYPE,
             IR.PointerType(HEADER_POINTER_TYPE),
+        ],
+        vararg=False,
+    )
+    METHOD_TYPE = IR.FunctionType(
+        extern=False,
+        rtype=IR.VAR_TYPE,
+        paramtypes=[
+            IR.PRIMITIVE_TYPE_MAP['int'],
+            IR.PointerType(IR.VAR_TYPE),
         ],
         vararg=False,
     )
@@ -2725,6 +2771,13 @@ def C(ns):
             prefix=ENCODED_CLASS_STRUCT_PREFIX,
         )
 
+    def get_method_list_name(defn: IR.ClassDefinition):
+        return qualify(
+            defn.module_name,
+            defn.short_name,
+            prefix=ENCODED_METHOD_LIST_PREFIX,
+        )
+
     def get_class_c_struct_field_name(defn: IR.FieldDefinition):
         assert not defn.extern, defn
         return encode(defn.name, prefix=ENCODED_CLASS_FIELD_PREFIX)
@@ -2734,6 +2787,13 @@ def C(ns):
         return encode(
             f'{defn.cls.module_name}#{defn.cls.short_name}#{defn.name}',
             prefix=ENCODED_STATIC_METHOD_PREFIX,
+        )
+
+    def get_instance_method_name(defn: IR.InstanceMethodDefinition):
+        assert isinstance(defn, IR.InstanceMethodDefinition), defn
+        return encode(
+            f'{defn.cls.module_name}#{defn.cls.short_name}#{defn.name}',
+            prefix=ENCODED_INSTANCE_METHOD_PREFIX,
         )
 
     def encode_param_names(paramlist: IR.ParameterList):
@@ -2784,6 +2844,10 @@ def C(ns):
     @cvarname.on(IR.StaticMethodDefinition)
     def cvarname(self):
         return get_static_method_name(self)
+
+    @cvarname.on(IR.InstanceMethodDefinition)
+    def cvarname(self):
+        return get_instance_method_name(self)
 
     declare = Multimethod('declare')
 
@@ -2901,6 +2965,8 @@ def C(ns):
                 after_release += f'return {ERROR_POINTER_NAME};'
 
     def copy_params_to_locals(ctx, paramtypes, c_param_names, c_local_names):
+        assert len(paramtypes) == len(c_local_names), c_local_names
+        assert len(c_param_names) == len(c_local_names), c_local_names
         # We copy over all the parameters to local variables
         # so that we can treat them like normal local variables.
         for param_type, param_name, local_name in zip(
@@ -2939,6 +3005,7 @@ def C(ns):
         delete_hook_type = get_delete_hook_type(self)
         deleter_name = get_class_deleter_name(self)
         proto_name = get_class_proto_name(self)
+        method_list_name = get_method_list_name(self)
 
         ctx.static_fdecls += f'static {declare(malloc_type, malloc_name)};'
 
@@ -2988,11 +3055,34 @@ def C(ns):
         for static_method in self.static_methods:
             D(static_method, ctx)
 
+        for instance_method in self.instance_methods:
+            D(instance_method, ctx)
+
+        if self.instance_methods:
+            ctx.out += f'KLC_MethodEntry {method_list_name}[] = ' '{'
+            with ctx.push_indent(1):
+                for instance_method in self.instance_methods:
+                    ctx.out += '{'
+                    with ctx.push_indent(1):
+                        method_c_name = get_instance_method_name(instance_method)
+                        ctx.out += f'"{instance_method.name}",'
+                        ctx.out += f'&{method_c_name},'
+                    ctx.out += '},'
+            ctx.out += '};'
+
         ctx.out += f'KLC_Class {proto_name} = ' '{'
         with ctx.push_indent(1):
             ctx.out += f'"{self.module_name}",'
             ctx.out += f'"{self.short_name}",'
             ctx.out += f'&{deleter_name},'
+            if self.instance_methods:
+                ctx.out += (
+                    f'sizeof({method_list_name})/sizeof(KLC_MethodEntry),'
+                )
+                ctx.out += f'{method_list_name},'
+            else:
+                ctx.out += '0,'
+                ctx.out += 'NULL,'
         ctx.out += '};'
 
     @D.on(IR.StaticMethodDefinition)
@@ -3011,6 +3101,62 @@ def C(ns):
             body=self.body,
         )
 
+    @D.on(IR.InstanceMethodDefinition)
+    def D(self, ctx):
+        token = self.token
+        emit_function_body(
+            ctx=ctx,
+            proto=proto_for(self),
+            extern=False,
+            rtype=IR.VAR_TYPE,
+            start_callback=lambda ctx: copy_method_params_to_locals(
+                ctx=ctx,
+                this_type=self.cls,
+                paramtypes=[p.type for p in self.plist.params],
+                c_local_names=list(map(cvarname, self.plist.params)),
+            ),
+            body=IR.Cast(token,
+                False,
+                IR.Cast(token, False, self.body, self.rtype),
+                IR.VAR_TYPE,
+            ),
+        )
+
+    def copy_method_params_to_locals(
+            ctx, this_type, paramtypes, c_local_names):
+        assert len(paramtypes) == len(c_local_names), c_local_names
+        argc = len(c_local_names)
+        ctx.out += f'if ({METHOD_PARAM_ARGC_NAME} != 1 + {argc})' '{'
+        with ctx.push_indent(1):
+            ctx.out += (
+                f'{ERROR_POINTER_NAME} = '
+                f'KLC_new_error_with_message("Method expected '
+                f'1 + {argc} args");'
+            )
+            ctx.throw_or_panic(from_extern=False)
+        ctx.out += '}'
+        ctx.declare(this_type, THIS_NAME)
+        converted_this_name = cast_c_name(
+            ctx=ctx,
+            st=IR.VAR_TYPE,
+            dt=this_type,
+            c_name=f'{METHOD_PARAM_ARGV_NAME}[0]',
+            from_extern=False,
+        )
+        ctx.out += f'{THIS_NAME} = {converted_this_name};'
+        ctx.retain(THIS_NAME)
+        for i, (t, c_name) in enumerate(zip(paramtypes, c_local_names), 1):
+            ctx.declare(t, c_name)
+            converted_name = cast_c_name(
+                ctx=ctx,
+                st=IR.VAR_TYPE,
+                dt=t,
+                c_name=f'{METHOD_PARAM_ARGV_NAME}[{i}]',
+                from_extern=False,
+            )
+            ctx.out += f'{c_name} = {converted_name};'
+            ctx.retain(c_name)
+
     proto_for = Multimethod('proto_for')
 
     @proto_for.on(IR.FunctionDefinition)
@@ -3027,6 +3173,14 @@ def C(ns):
             self.type,
             cvarname(self),
             encode_param_names(self.plist),
+        )
+
+    @proto_for.on(IR.InstanceMethodDefinition)
+    def proto_for(self):
+        return declare(
+            METHOD_TYPE,
+            cvarname(self),
+            [METHOD_PARAM_ARGC_NAME, METHOD_PARAM_ARGV_NAME],
         )
 
     @proto_for.on(IR.GlobalVariableDefinition)
@@ -3090,75 +3244,88 @@ def C(ns):
     def E(self, ctx):
         return cvarname(self.decl)
 
-    @E.on(IR.CastIntegralToVar)
+    @E.on(IR.Cast)
     def E(self, ctx):
-        ivar = E(self.expr, ctx)
+        return cast_expr(ctx, self.expr, self.type, self.from_extern)
+
+    def cast_expr(ctx, expr, dt, from_extern):
+        c_name = E(expr, ctx)
+        return cast_c_name(ctx, expr.type, dt, c_name, from_extern)
+
+    def cast_c_name(ctx, st, dt, c_name, from_extern):
+        if st == dt:
+            return c_name
+        else:
+            return _cast(st, dt, c_name, ctx, from_extern)
+
+    _cast = Multimethod('_cast', 2)
+
+    @_cast.on(IR.PrimitiveTypeDefinition, type(IR.VAR_TYPE))
+    def _cast(st, dt, c_name, ctx, from_extern):
+        if st == IR.VOID:
+            return ctx.declare(IR.VAR_TYPE)
+
+        if st.name in IR.INTEGRAL_TYPE_NAMES:
+            convert_func = 'KLC_var_from_int'
+        elif st.name in IR.FLOAT_TYPE_NAMES:
+            convert_func = 'KLC_var_from_float'
+        else:
+            assert False, st
+
         retvar = ctx.declare(IR.VAR_TYPE)
-        ctx.out += f'{retvar} = KLC_var_from_int({ivar});'
+        ctx.out += f'{retvar} = {convert_func}({c_name});'
         return retvar
 
-    @E.on(IR.CastFloatToVar)
-    def E(self, ctx):
-        ivar = E(self.expr, ctx)
-        retvar = ctx.declare(IR.VAR_TYPE)
-        ctx.out += f'{retvar} = KLC_var_from_float({ivar});'
-        return retvar
-
-    @E.on(IR.CastClassRefToVar)
-    def E(self, ctx):
-        cvar = E(self.expr, ctx)
-        retvar = ctx.declare(IR.VAR_TYPE)
-        ctx.out += f'{retvar} = KLC_var_from_ptr((KLC_Header*) {cvar});'
-        ctx.retain(retvar);
-        return retvar
-
-    @E.on(IR.CastVarToIntegral)
-    def E(self, ctx):
-        vvar = E(self.expr, ctx)
-        tvar = ctx.declare(IR.PRIMITIVE_TYPE_MAP['KLC_int'])
-        retvar = ctx.declare(self.type)
-        ctx.out += f'{ERROR_POINTER_NAME} = KLC_var_to_int(&{tvar}, {vvar});'
-        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
-        with ctx.push_indent(1):
-            ctx.throw_or_panic(from_extern=self.from_extern)
-        ctx.out += '}'
-        cdecl = declare(self.type, '')
-        ctx.out += f'{retvar} = (({cdecl}) {tvar});'
-        return retvar
-
-    @E.on(IR.CastVarToFloat)
-    def E(self, ctx):
-        vvar = E(self.expr, ctx)
-        tvar = ctx.declare(IR.PRIMITIVE_TYPE_MAP['KLC_float'])
-        retvar = ctx.declare(self.type)
-        ctx.out += (
-            f'{ERROR_POINTER_NAME} = KLC_var_to_float(&{tvar}, {vvar});'
-        )
-        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
-        with ctx.push_indent(1):
-            ctx.throw_or_panic(from_extern=self.from_extern)
-        ctx.out += '}'
-        cdecl = declare(self.type, '')
-        ctx.out += f'{retvar} = (({cdecl}) {tvar});'
-        return retvar
-
-    @E.on(IR.CastVarToClassRef)
-    def E(self, ctx):
-        class_proto_name = get_class_proto_name(self.type)
-        vvar = E(self.expr, ctx)
+    @_cast.on(type(IR.VAR_TYPE), IR.ClassDefinition)
+    def _cast(st, dt, c_name, ctx, from_extern):
+        proto_name = get_class_proto_name(dt)
         tvar = ctx.declare(HEADER_POINTER_TYPE)
-        retvar = ctx.declare(self.type)
+        retvar = ctx.declare(dt)
         ctx.out += (
             f'{ERROR_POINTER_NAME} = '
-            f'KLC_var_to_ptr(&{tvar}, {vvar}, &{class_proto_name});'
+            f'KLC_var_to_ptr(&{tvar}, {c_name}, &{proto_name});'
         )
-        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
-        with ctx.push_indent(1):
-            ctx.throw_or_panic(from_extern=self.from_extern)
-        ctx.out += '}'
-        cdecl = declare(self.type, '')
+        cdecl = declare(dt, '')
         ctx.out += f'{retvar} = (({cdecl}) {tvar});'
         ctx.retain(retvar)
+        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
+        with ctx.push_indent(1):
+            ctx.throw_or_panic(from_extern=from_extern)
+        ctx.out += '}'
+        return retvar
+
+    @_cast.on(type(IR.VAR_TYPE), IR.PrimitiveTypeDefinition)
+    def _cast(st, dt, c_name, ctx, from_extern):
+
+        if dt == IR.VOID:
+            return
+
+        if dt.name in IR.INTEGRAL_TYPE_NAMES:
+            convert_func = 'KLC_var_to_int'
+            extract_type = IR.PRIMITIVE_TYPE_MAP['KLC_int']
+        elif dt.name in IR.FLOAT_TYPE_NAMES:
+            convert_func = 'KLC_var_to_float'
+            extract_type = IR.PRIMITIVE_TYPE_MAP['KLC_float']
+        else:
+            assert False, dt
+
+        vvar = c_name
+        tvar = ctx.declare(extract_type)
+        retvar = ctx.declare(dt)
+        ctx.out += f'{ERROR_POINTER_NAME} = {convert_func}(&{tvar}, {vvar});'
+        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
+        with ctx.push_indent(1):
+            ctx.throw_or_panic(from_extern=from_extern)
+        ctx.out += '}'
+        cdecl = declare(dt, '')
+        ctx.out += f'{retvar} = (({cdecl}) {tvar});'
+        return retvar
+
+    @_cast.on(IR.ClassDefinition, type(IR.VAR_TYPE))
+    def _cast(st, dt, c_name, ctx, from_extern):
+        retvar = ctx.declare(IR.VAR_TYPE)
+        ctx.out += f'{retvar} = KLC_var_from_ptr((KLC_Header*) {c_name});'
+        ctx.retain(retvar);
         return retvar
 
     def _get_struct_field_chain(expr):

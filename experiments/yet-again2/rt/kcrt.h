@@ -14,7 +14,7 @@ typedef struct KLC_MethodEntry KLC_MethodEntry;
 typedef struct KLC_Class KLC_Class;
 typedef struct KLC_var KLC_var;
 typedef void KLC_Deleter(KLC_Header*, KLC_Header**);
-typedef KLC_Error* KLC_Method(int, KLC_var*);
+typedef KLC_Error* KLC_Method(KLC_var*, int, KLC_var*);
 
 struct KLC_Header {
   size_t refcnt;
