@@ -2378,6 +2378,8 @@ def C(ns):
 
         def __init__(self):
             self.out = FractalStringBuilder(0)
+            self.includes = self.out.spawn()
+            self.static_fdecls = self.out.spawn()
             self.next_temp_var_id = 0
 
             # Map of declared C local variables to their types
@@ -2640,8 +2642,9 @@ def C(ns):
 
     def translate_source(module: IR.Module) -> str:
         ctx = Context()
-        ctx.out += f'#include "{relative_header_path_from_name(module.name)}"'
-        ctx.static_fdecls = ctx.out.spawn()
+        ctx.includes += (
+            f'#include "{relative_header_path_from_name(module.name)}"'
+        )
         for defn in module.definitions:
             D(defn, ctx)
         return str(ctx.out)
