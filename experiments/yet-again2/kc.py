@@ -696,7 +696,7 @@ def IR(ns):
 
     @ns
     class Parameter(BaseLocalVariableDeclaration):
-        pass
+        mutable = True
 
     @ns
     class ParameterList(Node):
