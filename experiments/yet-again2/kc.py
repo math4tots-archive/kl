@@ -630,6 +630,17 @@ def IR(ns):
         pass
 
     @ns
+    class Expression(Node):
+        """
+        abstract
+            type: Type
+        """
+
+        @property
+        def is_pseudo_expression(self):
+            return isinstance(self, PseudoExpression)
+
+    @ns
     class Type:
         """Marker class for what values indicate Types.
         """
@@ -896,43 +907,38 @@ def IR(ns):
     VOIDP = PointerType(VOID)
     ns(VOIDP, 'VOIDP')
 
-    convertible = Multimethod('convertible', 2)
-    ns(convertible, 'convertible')
+    @ns
+    def convert(*, expr, dest_type, scope):
+        if expr.type == dest_type:
+            return expr
 
-    @convertible.on(PrimitiveTypeDeclaration, PrimitiveTypeDeclaration)
-    def convertible(a, b):
-        return a == b or (
-            (a.name, b.name) in {
+        return _convert(expr.type, dest_type, expr, scope)
+
+    _convert = Multimethod('_convert', 3)
+    ns(_convert, '_convert')
+
+    PTD = PrimitiveTypeDeclaration
+
+    @_convert.on(PTD, PTD, Expression)
+    def _convert(source_type, dest_type, expr, scope):
+        if source_type == dest_type:
+            return expr
+
+        pair = (source_type.name, dest_type.name)
+
+        if pair in (
                 ('int', 'long'),
-                ('int', 'size_t'),
-                ('long', 'size_t'),
-            }
-        ) or (
-            frozenset((a.name, b.name)) in set(map(frozenset, [
-                ['char', 'unsigned char'],
-                ['char', 'signed char'],
-                ['unsigned char', 'signed char'],
-            ]))
-        )
+                ('int', 'size_t')):
+            return expr
 
-    @convertible.on(Type, Type)
-    def convertible(a, b):
-        return a == b
+    @_convert.on(Type, Type, Expression)
+    def _convert(a, b, expr, scope):
+        with scope.push(expr.token):
+            raise scope.error(f'{a} is not convertible to {b}')
 
     @ns
     class PrimitiveTypeDefinition(GlobalDefinition):
         node_fields = ()
-
-    @ns
-    class Expression(Node):
-        """
-        abstract
-            type: Type
-        """
-
-        @property
-        def is_pseudo_expression(self):
-            return isinstance(self, PseudoExpression)
 
     @ns
     class PseudoExpression(Expression):
@@ -1313,11 +1319,7 @@ def parser(ns):
             Returns a version of expr that's ensured to be of type 'type'.
             If this conversion is not allowed, raises an error.
             """
-            if not IR.convertible(expr.type, type):
-                with self.push(expr.token):
-                    raise self.error(
-                        f'{expr.type} is not convertible to {type}')
-            return expr
+            return IR.convert(expr=expr, dest_type=type, scope=self)
 
         def from_import(self, token, module_name, exported_name, alias):
             with self.push(token):
