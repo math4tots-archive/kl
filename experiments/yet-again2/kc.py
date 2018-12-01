@@ -825,7 +825,7 @@ def IR(ns):
         mutable = True
 
     @ns
-    class PrimitiveTypeDeclaration(TypeDeclaration):
+    class PrimitiveTypeDefinition(TypeDeclaration, GlobalDefinition):
         node_fields = (
             ('name', str),
         )
@@ -895,7 +895,7 @@ def IR(ns):
             return (self.base,)
 
     PRIMITIVE_TYPE_MAP = {
-        t: PrimitiveTypeDeclaration(builtin_token, t)
+        t: PrimitiveTypeDefinition(builtin_token, t)
         for t in list(lexer.PRIMITIVE_TYPE_NAMES) + ['KLC_int', 'KLC_float']
     }
     ns(PRIMITIVE_TYPE_MAP, 'PRIMITIVE_TYPE_MAP')
@@ -922,7 +922,7 @@ def IR(ns):
     _convert = Multimethod('_convert', 3)
     ns(_convert, '_convert')
 
-    PTD = PrimitiveTypeDeclaration
+    PTD = PrimitiveTypeDefinition
 
     def convert_error(st, dt, expr, scope):
         with scope.push(expr.token):
@@ -992,10 +992,6 @@ def IR(ns):
         raise convert_error(st, dt, expr, scope)
 
     @ns
-    class PrimitiveTypeDefinition(GlobalDefinition):
-        node_fields = ()
-
-    @ns
     class PseudoExpression(Expression):
         """Expressions that are not themselves concrete values.
         """
@@ -1038,7 +1034,7 @@ def IR(ns):
     class CastIntegralToVar(Expression):
         node_fields = (
             ('expr', Expression),
-            ('itype', PrimitiveTypeDeclaration),
+            ('itype', PrimitiveTypeDefinition),
         )
 
         type = VAR_TYPE
@@ -1047,7 +1043,7 @@ def IR(ns):
     class CastFloatToVar(Expression):
         node_fields = (
             ('expr', Expression),
-            ('itype', PrimitiveTypeDeclaration),
+            ('itype', PrimitiveTypeDefinition),
         )
 
         type = VAR_TYPE
@@ -1066,7 +1062,7 @@ def IR(ns):
         node_fields = (
             ('from_extern', bool),
             ('expr', Expression),
-            ('type', PrimitiveTypeDeclaration),
+            ('type', PrimitiveTypeDefinition),
         )
 
     @ns
@@ -1074,7 +1070,7 @@ def IR(ns):
         node_fields = (
             ('from_extern', bool),
             ('expr', Expression),
-            ('type', PrimitiveTypeDeclaration),
+            ('type', PrimitiveTypeDefinition),
         )
 
     @ns
@@ -2201,8 +2197,8 @@ def parser(ns):
             if consume('typedef'):
                 expect('*')
                 name = expect_id()
-                scope[name] = IR.PrimitiveTypeDeclaration(token, name)
-                return Promise.value(IR.PrimitiveTypeDefinition(token))
+                scope[name] = defn = IR.PrimitiveTypeDefinition(token, name)
+                return Promise.value(defn)
             elif consume('struct'):
                 return parse_struct(scope, token, extern)
             elif consume('class'):
@@ -2791,7 +2787,7 @@ def C(ns):
 
     declare = Multimethod('declare')
 
-    @declare.on(IR.PrimitiveTypeDeclaration)
+    @declare.on(IR.PrimitiveTypeDefinition)
     def declare(self, name):
         return f'{self.name} {name}'.strip()
 
@@ -3376,7 +3372,7 @@ def C(ns):
     def init_expr_for(self):
         return 'NULL'
 
-    @init_expr_for.on(IR.PrimitiveTypeDeclaration)
+    @init_expr_for.on(IR.PrimitiveTypeDefinition)
     def init_expr_for(self):
         return '0'
 
