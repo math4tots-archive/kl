@@ -55,3 +55,69 @@ void KLC_partial_release(KLC_Header* obj, KLC_Header** delete_queue) {
     }
   }
 }
+
+void KLC_retain_var(KLC_var v) {
+  if (v.tag == KLC_TAG_POINTER) {
+    KLC_retain(v.u.p);
+  }
+}
+
+void KLC_release_var(KLC_var v) {
+  if (v.tag == KLC_TAG_POINTER) {
+    KLC_release(v.u.p);
+  }
+}
+
+void KLC_partial_release_var(KLC_var v, KLC_Header** delete_queue) {
+  if (v.tag == KLC_TAG_POINTER) {
+    KLC_partial_release(v.u.p, delete_queue);
+  }
+}
+
+KLC_var KLC_var_from_ptr(KLC_Header* p) {
+  KLC_var ret;
+  ret.tag = KLC_TAG_POINTER;
+  ret.u.p = p;
+  return ret;
+}
+
+KLC_var KLC_var_from_int(KLC_int i) {
+  KLC_var ret;
+  ret.tag = KLC_TAG_INT;
+  ret.u.i = i;
+  return ret;
+}
+
+KLC_var KLC_var_from_float(KLC_float f) {
+  KLC_var ret;
+  ret.tag = KLC_TAG_FLOAT;
+  ret.u.f = f;
+  return ret;
+}
+
+KLC_Error* KLC_var_to_ptr(KLC_Header** out, KLC_var v, KLC_Class* cls) {
+  if (v.tag != KLC_TAG_POINTER) {
+    return KLC_new_error_with_message("Expected class type");
+  }
+  if (v.u.p->cls != cls) {
+    return KLC_new_error_with_message("Not correct class type");
+  }
+  *out = v.u.p;
+  return NULL;
+}
+
+KLC_Error* KLC_var_to_int(KLC_int* out, KLC_var v) {
+  if (v.tag != KLC_TAG_INT) {
+    return KLC_new_error_with_message("Expected integral type");
+  }
+  *out = v.u.i;
+  return NULL;
+}
+
+KLC_Error* KLC_var_to_float(KLC_float* out, KLC_var v) {
+  if (v.tag != KLC_TAG_FLOAT) {
+    return KLC_new_error_with_message("Expected float type");
+  }
+  *out = v.u.f;
+  return NULL;
+}

@@ -654,6 +654,10 @@ def IR(ns):
         def is_meta_type(self):
             return isinstance(self, PseudoType)
 
+    @ns
+    class Retainable:
+        "Type mixin that indicates the given type is reference counted"
+
     class PseudoType(Type):
         """Type of expressions that aren't really expressions"""
 
@@ -752,7 +756,7 @@ def IR(ns):
         complete = False
 
     @ns
-    class ClassDefinition(StructOrClassDefinition):
+    class ClassDefinition(StructOrClassDefinition, Retainable):
         node_fields = StructOrClassDefinition.node_fields + (
             ('delete_hook_promise', Promise),
             ('static_method_promises', typeutil.List[Promise]),
@@ -838,10 +842,6 @@ def IR(ns):
             return f'{type(self).__name__}{self._proxy}'
 
     @ns
-    class Retainable:
-        "Type mixin that indicates the given type is reference counted"
-
-    @ns
     class PointerType(Type, ProxyMixin):
         def __init__(self, base):
             self.base = base
@@ -897,7 +897,7 @@ def IR(ns):
 
     PRIMITIVE_TYPE_MAP = {
         t: PrimitiveTypeDeclaration(builtin_token, t)
-        for t in lexer.PRIMITIVE_TYPE_NAMES
+        for t in list(lexer.PRIMITIVE_TYPE_NAMES) + ['KLC_int', 'KLC_float']
     }
     ns(PRIMITIVE_TYPE_MAP, 'PRIMITIVE_TYPE_MAP')
 
@@ -906,6 +906,12 @@ def IR(ns):
 
     VOIDP = PointerType(VOID)
     ns(VOIDP, 'VOIDP')
+
+    class VarType(Type, Retainable):
+        pass
+
+    VAR_TYPE = VarType()
+    ns(VAR_TYPE, 'VAR_TYPE')
 
     @ns
     def convert(*, expr, dest_type, scope):
@@ -919,6 +925,10 @@ def IR(ns):
 
     PTD = PrimitiveTypeDeclaration
 
+    def convert_error(st, dt, expr, scope):
+        with scope.push(expr.token):
+            return scope.error(f'{st} is not convertible to {dt}')
+
     @_convert.on(PTD, PTD, Expression)
     def _convert(source_type, dest_type, expr, scope):
         if source_type == dest_type:
@@ -931,10 +941,47 @@ def IR(ns):
                 ('int', 'size_t')):
             return expr
 
+        raise convert_error(st, dt, expr, scope)
+
+    @_convert.on(VarType, VarType, Expression)
+    def _convert(st, dt, expr, scope):
+        return expr
+
+    INTEGRAL_TYPE_NAMES = (
+        'char', 'short', 'int', 'long', 'size_t', 'ptrdiff_t',
+    )
+
+    FLOAT_TYPE_NAMES = (
+        'float', 'double',
+    )
+
+    @_convert.on(VarType, PTD, Expression)
+    def _convert(st, dt, expr, scope):
+        if dt.name in INTEGRAL_TYPE_NAMES:
+            return CastVarToIntegral(expr.token, expr, dt)
+        if dt.name in FLOAT_TYPE_NAMES:
+            return CastVarToFloat(expr.token, expr, dt)
+        raise convert_error(st, dt, expr, scope)
+
+    @_convert.on(VarType, ClassDefinition, Expression)
+    def _convert(st, dt, expr, scope):
+        return CastVarToClassRef(expr.token, expr, dt)
+
+    @_convert.on(ClassDefinition, VarType, Expression)
+    def _convert(st, dt, expr, scope):
+        return CastClassRefToVar(expr.token, expr, st)
+
+    @_convert.on(PTD, VarType, Expression)
+    def _convert(st, dt, expr, scope):
+        if st.name in INTEGRAL_TYPE_NAMES:
+            return CastIntegralToVar(expr.token, expr, st)
+        if st.name in FLOAT_TYPE_NAMES:
+            return CastFloatToVar(expr.token, expr, st)
+        raise convert_error(st, dt, expr, scope)
+
     @_convert.on(Type, Type, Expression)
-    def _convert(a, b, expr, scope):
-        with scope.push(expr.token):
-            raise scope.error(f'{a} is not convertible to {b}')
+    def _convert(st, dt, expr, scope):
+        raise convert_error(st, dt, expr, scope)
 
     @ns
     class PrimitiveTypeDefinition(GlobalDefinition):
@@ -978,6 +1025,54 @@ def IR(ns):
         @property
         def type(self):
             return self.exprs[-1].type if self.exprs else VOID
+
+    @ns
+    class CastIntegralToVar(Expression):
+        node_fields = (
+            ('expr', Expression),
+            ('itype', PrimitiveTypeDeclaration),
+        )
+
+        type = VAR_TYPE
+
+    @ns
+    class CastFloatToVar(Expression):
+        node_fields = (
+            ('expr', Expression),
+            ('itype', PrimitiveTypeDeclaration),
+        )
+
+        type = VAR_TYPE
+
+    @ns
+    class CastClassRefToVar(Expression):
+        node_fields = (
+            ('expr', Expression),
+            ('itype', ClassDefinition),
+        )
+
+        type = VAR_TYPE
+
+    @ns
+    class CastVarToIntegral(Expression):
+        node_fields = (
+            ('expr', Expression),
+            ('type', PrimitiveTypeDeclaration),
+        )
+
+    @ns
+    class CastVarToFloat(Expression):
+        node_fields = (
+            ('expr', Expression),
+            ('type', PrimitiveTypeDeclaration),
+        )
+
+    @ns
+    class CastVarToClassRef(Expression):
+        node_fields = (
+            ('expr', Expression),
+            ('type', ClassDefinition),
+        )
 
     @ns
     class FunctionName(Expression):
@@ -1457,6 +1552,8 @@ def parser(ns):
                 type_promise = (
                     Promise.value(IR.PRIMITIVE_TYPE_MAP[name])
                 )
+            elif consume('var'):
+                type_promise = Promise.value(IR.VAR_TYPE)
             else:
                 name = expect_id()
                 type_promise = promise_type_from_name(scope, token, name)
@@ -1494,6 +1591,9 @@ def parser(ns):
             if peek().type in lexer.C_PRIMITIVE_TYPE_SPECIFIERS:
                 return True
 
+            if peek().type == 'var':
+                return True
+
             # Whitelist a few patterns as being the start
             # of a variable declaration
             seqs = [
@@ -1521,7 +1621,8 @@ def parser(ns):
                     with scope.push(token), scope.push(decl.token):
                         raise scope.error(
                             f'Tried to assign to non-mutable variable')
-                return IR.SetLocalName(token, decl, expr)
+                return IR.SetLocalName(
+                    token, decl, scope.convert(expr, decl.type))
             return promise
 
         def check_concrete_expression(scope, expr):
@@ -2357,6 +2458,12 @@ def C(ns):
         def jump_out_of_scope(self):
             self.out += f'goto {self._exit_jump_label};'
 
+        def throw_or_panic(self, from_extern):
+            if from_extern:
+                self.out += f'KLC_panic_with_error({ERROR_POINTER_NAME});'
+            else:
+                self.jump_out_of_scope()
+
         def retain(self, cname, out=None):
             assert cname is None or cname in self._scope, cname
             if cname is not None:
@@ -2393,12 +2500,16 @@ def C(ns):
     def _retain(type, cname):
         if isinstance(type, IR.ClassDefinition):
             return f'KLC_retain((KLC_Header*) {cname});'
+        elif type == IR.VAR_TYPE:
+            return f'KLC_retain_var({cname});'
         else:
             return ''
 
     def _release(type, cname):
         if isinstance(type, IR.ClassDefinition):
             return f'KLC_release((KLC_Header*) {cname});'
+        elif type == IR.VAR_TYPE:
+            return f'KLC_release_var({cname});'
         else:
             return ''
 
@@ -2679,6 +2790,10 @@ def C(ns):
         struct_name = get_class_struct_name(self)
         return f'{struct_name}* {name}'.strip()
 
+    @declare.on(type(IR.VAR_TYPE))
+    def declare(self, name):
+        return f'KLC_var {name}'.strip()
+
     @declare.on(IR.PointerType)
     def declare(self, name):
         return declare(self.base, f' *{name}'.strip())
@@ -2822,10 +2937,15 @@ def C(ns):
             ctx.out += f'{delete_hook_name}(obj);'
             for field in retainable_fields:
                 if isinstance(field.type, IR.ClassDefinition):
-                    c_field_name = get_class_c_struct_field_name (field)
+                    c_field_name = get_class_c_struct_field_name(field)
                     ctx.out += (
                         f'KLC_partial_release('
                         f'(KLC_Header*) obj->{c_field_name}, dq);'
+                    )
+                elif field.type == IR.VAR_TYPE:
+                    c_field_name = get_class_c_struct_field_name(field)
+                    ctx.out += (
+                        f'KLC_partial_release_var(obj->{c_field_name}, dq);'
                     )
                 else:
                     assert False, field
@@ -2912,6 +3032,77 @@ def C(ns):
     def E(self, ctx):
         return cvarname(self.decl)
 
+    @E.on(IR.CastIntegralToVar)
+    def E(self, ctx):
+        ivar = E(self.expr, ctx)
+        retvar = ctx.declare(IR.VAR_TYPE)
+        ctx.out += f'{retvar} = KLC_var_from_int({ivar});'
+        return retvar
+
+    @E.on(IR.CastFloatToVar)
+    def E(self, ctx):
+        ivar = E(self.expr, ctx)
+        retvar = ctx.declare(IR.VAR_TYPE)
+        ctx.out += f'{retvar} = KLC_var_from_float({ivar});'
+        return retvar
+
+    @E.on(IR.CastClassRefToVar)
+    def E(self, ctx):
+        cvar = E(self.expr, ctx)
+        retvar = ctx.declare(IR.VAR_TYPE)
+        ctx.out += f'{retvar} = KLC_var_from_ptr((KLC_Header*) {cvar});'
+        ctx.retain(retvar);
+        return retvar
+
+    @E.on(IR.CastVarToIntegral)
+    def E(self, ctx):
+        vvar = E(self.expr, ctx)
+        tvar = ctx.declare(IR.PRIMITIVE_TYPE_MAP['KLC_int'])
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{ERROR_POINTER_NAME} = KLC_var_to_int(&{tvar}, {vvar});'
+        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
+        with ctx.push_indent(1):
+            ctx.throw_or_panic(from_extern=False)
+        ctx.out += '}'
+        cdecl = declare(self.type, '')
+        ctx.out += f'{retvar} = (({cdecl}) {tvar});'
+        return retvar
+
+    @E.on(IR.CastVarToFloat)
+    def E(self, ctx):
+        vvar = E(self.expr, ctx)
+        tvar = ctx.declare(IR.PRIMITIVE_TYPE_MAP['KLC_float'])
+        retvar = ctx.declare(self.type)
+        ctx.out += (
+            f'{ERROR_POINTER_NAME} = KLC_var_to_float(&{tvar}, {vvar});'
+        )
+        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
+        with ctx.push_indent(1):
+            ctx.throw_or_panic(from_extern=False)
+        ctx.out += '}'
+        cdecl = declare(self.type, '')
+        ctx.out += f'{retvar} = (({cdecl}) {tvar});'
+        return retvar
+
+    @E.on(IR.CastVarToClassRef)
+    def E(self, ctx):
+        class_proto_name = get_class_proto_name(self.type)
+        vvar = E(self.expr, ctx)
+        tvar = ctx.declare(HEADER_POINTER_TYPE)
+        retvar = ctx.declare(self.type)
+        ctx.out += (
+            f'{ERROR_POINTER_NAME} = '
+            f'KLC_var_to_ptr(&{tvar}, {vvar}, &{class_proto_name});'
+        )
+        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
+        with ctx.push_indent(1):
+            ctx.throw_or_panic(from_extern=False)
+        ctx.out += '}'
+        cdecl = declare(self.type, '')
+        ctx.out += f'{retvar} = (({cdecl}) {tvar});'
+        ctx.retain(retvar)
+        return retvar
+
     def _get_struct_field_chain(expr):
         reverse_field_chain = []
         while isinstance(expr, IR.GetStructField):
@@ -2985,6 +3176,12 @@ def C(ns):
         ctx.out += f'{retvar} = {self.value};'
         return retvar
 
+    @E.on(IR.DoubleLiteral)
+    def E(self, ctx):
+        retvar = ctx.declare(IR.PRIMITIVE_TYPE_MAP['double'])
+        ctx.out += f'{retvar} = {self.value};'
+        return retvar
+
     def escape_str(s):
         return (
             s
@@ -3043,10 +3240,7 @@ def C(ns):
             )
             ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
             with ctx.push_indent(1):
-                if from_extern:
-                    ctx.out += f'KLC_panic_with_error({ERROR_POINTER_NAME});'
-                else:
-                    ctx.jump_out_of_scope()
+                ctx.throw_or_panic(from_extern=from_extern)
             ctx.out += '}'
             return retvar
 
@@ -3111,6 +3305,10 @@ def C(ns):
     @init_expr_for.on(IR.ClassDefinition)
     def init_expr_for(self):
         return 'NULL'
+
+    @init_expr_for.on(type(IR.VAR_TYPE))
+    def init_expr_for(self):
+        return '{0, {0}}'
 
     @init_expr_for.on(IR.PointerType)
     def init_expr_for(self):

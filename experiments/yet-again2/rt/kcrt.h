@@ -43,11 +43,14 @@ const char* KLC_get_error_message(KLC_Error*);
 void KLC_retain(KLC_Header*);
 void KLC_release(KLC_Header*);
 void KLC_partial_release(KLC_Header*, KLC_Header**);
+void KLC_retain_var(KLC_var);
+void KLC_release_var(KLC_var);
+void KLC_partial_release_var(KLC_var, KLC_Header**);
 
 KLC_var KLC_var_from_ptr(KLC_Header* p);
 KLC_var KLC_var_from_int(KLC_int i);
 KLC_var KLC_var_from_float(KLC_float f);
-KLC_Error* KLC_var_to_ptr(KLC_Header** out, KLC_var v);
+KLC_Error* KLC_var_to_ptr(KLC_Header** out, KLC_var v, KLC_Class*);
 KLC_Error* KLC_var_to_int(KLC_int* out, KLC_var v);
 KLC_Error* KLC_var_to_float(KLC_float* out, KLC_var v);
 
