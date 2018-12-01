@@ -10,9 +10,11 @@ typedef ptrdiff_t KLC_int;  /* TODO: This is unsatisfactory */
 typedef double KLC_float;
 typedef struct KLC_Error KLC_Error;
 typedef struct KLC_Header KLC_Header;
+typedef struct KLC_MethodEntry KLC_MethodEntry;
 typedef struct KLC_Class KLC_Class;
 typedef struct KLC_var KLC_var;
 typedef void KLC_Deleter(KLC_Header*, KLC_Header**);
+typedef KLC_Error* KLC_Method(int, KLC_var*);
 
 struct KLC_Header {
   size_t refcnt;
@@ -20,10 +22,17 @@ struct KLC_Header {
   KLC_Header* next; /* for stackless release with partial_release */
 };
 
+struct KLC_MethodEntry {
+  const char*const name;
+  KLC_Method* method;
+};
+
 struct KLC_Class {
   const char*const module_name;
   const char*const short_name;
   KLC_Deleter*const deleter;
+  const size_t number_of_methods;
+  KLC_MethodEntry* methods;
 };
 
 struct KLC_var {
