@@ -999,26 +999,22 @@ def IR(ns):
 
     @_convert.on(VarType, PTD, Expression)
     def _convert(st, dt, expr, scope):
-        from_extern = scope['@ec'].extern
         if dt.name in VAR_CONVERTIBLE_TYPE_NAMES:
-            return Cast(expr.token, from_extern, expr, dt)
+            return Cast(expr.token, expr, dt)
         raise convert_error(st, dt, expr, scope)
 
     @_convert.on(VarType, ClassDefinition, Expression)
     def _convert(st, dt, expr, scope):
-        from_extern = scope['@ec'].extern
-        return Cast(expr.token, from_extern, expr, dt)
+        return Cast(expr.token, expr, dt)
 
     @_convert.on(ClassDefinition, VarType, Expression)
     def _convert(st, dt, expr, scope):
-        from_extern = scope['@ec'].extern
-        return Cast(expr.token, from_extern, expr, dt)
+        return Cast(expr.token, expr, dt)
 
     @_convert.on(PTD, VarType, Expression)
     def _convert(st, dt, expr, scope):
-        from_extern = scope['@ec'].extern
         if st.name in VAR_CONVERTIBLE_TYPE_NAMES:
-            return Cast(expr.token, from_extern, expr, dt)
+            return Cast(expr.token, expr, dt)
         raise convert_error(st, dt, expr, scope)
 
     @_convert.on(Type, Type, Expression)
@@ -1067,7 +1063,6 @@ def IR(ns):
     @ns
     class Cast(Expression):
         node_fields = (
-            ('from_extern', bool),
             ('expr', Expression),
             ('type', Type),
         )
@@ -1166,7 +1161,6 @@ def IR(ns):
     @ns
     class FunctionCall(Expression):
         node_fields = (
-            ('from_extern', bool),  # iff we are calling form extern func
             ('to_extern', bool),    # iff are are calling an extern function
             ('type', Type),
             ('f', Expression),
@@ -1176,7 +1170,6 @@ def IR(ns):
     @ns
     class StaticMethodCall(Expression):
         node_fields = (
-            ('from_extern', bool),
             ('f', StaticMethodDefinition),
             ('args', typeutil.List[Expression]),
         )
@@ -1720,7 +1713,6 @@ def parser(ns):
                     args = IR.convert_args(f.type, scope, token, raw_args)
                     return IR.FunctionCall(
                         token,
-                        scope['@ec'].extern,
                         f.type.extern,
                         f.type.rtype,
                         f,
@@ -1730,7 +1722,6 @@ def parser(ns):
                     args = IR.convert_args(f.defn.type, scope, token, raw_args)
                     return IR.StaticMethodCall(
                         token,
-                        scope['@ec'].extern,
                         f.defn,
                         args,
                     )
@@ -1741,7 +1732,6 @@ def parser(ns):
                     args = IR.convert_args(defn.type, scope, token, raw_args)
                     return IR.StaticMethodCall(
                         token,
-                        scope['@ec'].extern,
                         defn,
                         args,
                     )
@@ -3219,8 +3209,7 @@ def C(ns):
                 c_local_names=list(map(cvarname, self.plist.params)),
             ),
             body=IR.Cast(token,
-                False,
-                IR.Cast(token, False, self.body, self.rtype),
+                IR.Cast(token, self.body, self.rtype),
                 IR.VAR_TYPE,
             ),
         )
@@ -3241,7 +3230,6 @@ def C(ns):
             st=IR.VAR_TYPE,
             dt=this_type,
             c_name=f'{METHOD_PARAM_ARGV_NAME}[0]',
-            from_extern=False,
         )
         ctx.out += f'{THIS_NAME} = {converted_this_name};'
         ctx.retain(THIS_NAME)
@@ -3253,7 +3241,6 @@ def C(ns):
                 st=IR.VAR_TYPE,
                 dt=t,
                 c_name=f'{METHOD_PARAM_ARGV_NAME}[{i}]',
-                from_extern=False,
             )
             ctx.out += f'{c_name} = {converted_name};'
             ctx.retain(c_name)
@@ -3347,23 +3334,23 @@ def C(ns):
 
     @E.on(IR.Cast)
     def E(self, ctx):
-        return cast_expr(ctx, self.expr, self.type, self.from_extern)
+        return cast_expr(ctx, self.expr, self.type)
 
-    def cast_expr(ctx, expr, dt, from_extern):
+    def cast_expr(ctx, expr, dt):
         c_name = E(expr, ctx)
         return cast_c_name(
-            ctx, expr.token, expr.type, dt, c_name, from_extern)
+            ctx, expr.token, expr.type, dt, c_name)
 
-    def cast_c_name(ctx, token, st, dt, c_name, from_extern):
+    def cast_c_name(ctx, token, st, dt, c_name):
         if st == dt:
             return c_name
         else:
-            return _cast(st, dt, c_name, ctx, token, from_extern)
+            return _cast(st, dt, c_name, ctx, token)
 
     _cast = Multimethod('_cast', 2)
 
     @_cast.on(IR.PrimitiveTypeDefinition, type(IR.VAR_TYPE))
-    def _cast(st, dt, c_name, ctx, token, from_extern):
+    def _cast(st, dt, c_name, ctx, token):
         if st == IR.VOID:
             return ctx.declare(IR.VAR_TYPE)
 
@@ -3379,7 +3366,7 @@ def C(ns):
         return retvar
 
     @_cast.on(type(IR.VAR_TYPE), IR.ClassDefinition)
-    def _cast(st, dt, c_name, ctx, token, from_extern):
+    def _cast(st, dt, c_name, ctx, token):
         proto_name = get_class_proto_name(dt)
         tvar = ctx.declare(HEADER_POINTER_TYPE)
         retvar = ctx.declare(dt)
@@ -3396,7 +3383,7 @@ def C(ns):
         return retvar
 
     @_cast.on(type(IR.VAR_TYPE), IR.PrimitiveTypeDefinition)
-    def _cast(st, dt, c_name, ctx, token, from_extern):
+    def _cast(st, dt, c_name, ctx, token):
 
         if dt == IR.VOID:
             return
@@ -3425,7 +3412,7 @@ def C(ns):
         return retvar
 
     @_cast.on(IR.ClassDefinition, type(IR.VAR_TYPE))
-    def _cast(st, dt, c_name, ctx, token, from_extern):
+    def _cast(st, dt, c_name, ctx, token):
         retvar = ctx.declare(IR.VAR_TYPE)
         ctx.out += f'{retvar} = KLC_var_from_ptr((KLC_Header*) {c_name});'
         ctx.retain(retvar);
@@ -3543,7 +3530,6 @@ def C(ns):
             rtype,
             args,
             to_extern,
-            from_extern,
             c_function_name):
         argvars = ', '.join(E(arg, ctx) for arg in args)
 
@@ -3593,7 +3579,6 @@ def C(ns):
             rtype=self.type,
             args=self.args,
             to_extern=self.to_extern,
-            from_extern=self.from_extern,
             c_function_name=fvar,
         )
 
@@ -3605,7 +3590,6 @@ def C(ns):
             rtype=self.type,
             args=self.args,
             to_extern=False,
-            from_extern=self.from_extern,
             c_function_name=get_static_method_name(self.f),
         )
 
