@@ -1370,8 +1370,6 @@ def IR(ns):
             ('extern', bool),
 
             ('this_type', typeutil.Optional[ClassDefinition]),
-
-            ('inside_delete', bool),
         )
 
     def new_builtin_extern_struct(name):
