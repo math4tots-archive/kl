@@ -17,8 +17,8 @@ class String {
 
   static String fromCString(char const* cstr) {
     String ret = $(String)
-    ret._buffer = KLC_CopyString(cstr)
-    ret._size = strlen(cstr)
+    ret->_buffer = KLC_CopyString(cstr)
+    ret->_size = strlen(cstr)
     ret
   }
 
@@ -27,6 +27,6 @@ class String {
   }
 
   delete {
-    free(static_cast(void*, this._buffer))
+    free(static_cast(void*, this->_buffer))
   }
 }

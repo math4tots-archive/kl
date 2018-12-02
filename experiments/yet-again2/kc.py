@@ -367,7 +367,7 @@ def lexer(ns):
 
     SYMBOLS = tuple(reversed(sorted([
       '\n',
-      '||', '&&', '|', '&', '<<', '>>', '~', '...', '$',
+      '||', '&&', '|', '&', '<<', '>>', '~', '...', '$', '->',
       ';', '#', '?', ':', '!', '++', '--',  # '**',
       '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
       '>', '<=', '>=', '!=', '(', ')', '{', '}', '[', ']',
@@ -1781,7 +1781,18 @@ def parser(ns):
                         defn,
                         expr,
                     )
-                elif isinstance(expr.type, IR.ClassDefinition):
+                else:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'{expr.type} is not a struct or class type'
+                        )
+            return promise
+
+        def promise_get_field_arrow(scope, token, exprp, fname):
+            @Promise
+            def promise():
+                expr = exprp.resolve()
+                if isinstance(expr.type, IR.ClassDefinition):
                     defn = get_field_defn(scope, token, expr.type, fname)
                     return IR.GetClassField(
                         token,
@@ -1791,7 +1802,7 @@ def parser(ns):
                 else:
                     with scope.push(token):
                         raise scope.error(
-                            f'{expr.type} is not a struct or class type'
+                            f'{expr.type} is not a class type'
                         )
             return promise
 
@@ -1808,7 +1819,20 @@ def parser(ns):
                         expr,
                         val,
                     )
-                elif isinstance(expr.type, IR.ClassDefinition):
+                else:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'{expr.type} is not a struct or class type'
+                        )
+            return promise
+
+        def promise_set_field_arrow(scope, token, exprp, fname, valp):
+            @Promise
+            def promise():
+                expr = exprp.resolve()
+                defn = get_field_defn(scope, token, expr.type, fname)
+                val = scope.convert(valp.resolve(), defn.type)
+                if isinstance(expr.type, IR.ClassDefinition):
                     return IR.SetClassField(
                         token,
                         defn,
@@ -1818,7 +1842,7 @@ def parser(ns):
                 else:
                     with scope.push(token):
                         raise scope.error(
-                            f'{expr.type} is not a struct or class type'
+                            f'{expr.type} is not a class type'
                         )
             return promise
 
@@ -1842,6 +1866,15 @@ def parser(ns):
                             scope, token, expr, name, valp)
                     else:
                         expr = promise_get_field(scope, token, expr, name)
+                elif consume('->'):
+                    name = expect_id()
+                    if consume('='):
+                        valp = parse_expression(scope)
+                        expr = promise_set_field_arrow(
+                            scope, token, expr, name, valp)
+                    else:
+                        expr = promise_get_field_arrow(
+                            scope, token, expr, name)
                 else:
                     break
             return expr
