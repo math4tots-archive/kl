@@ -1161,7 +1161,6 @@ def IR(ns):
     @ns
     class FunctionCall(Expression):
         node_fields = (
-            ('to_extern', bool),    # iff are are calling an extern function
             ('type', Type),
             ('f', Expression),
             ('args', typeutil.List[Expression]),
@@ -1713,7 +1712,6 @@ def parser(ns):
                     args = IR.convert_args(f.type, scope, token, raw_args)
                     return IR.FunctionCall(
                         token,
-                        f.type.extern,
                         f.type.rtype,
                         f,
                         args,
@@ -3529,11 +3527,11 @@ def C(ns):
             token,
             rtype,
             args,
-            to_extern,
+            extern,
             c_function_name):
         argvars = ', '.join(E(arg, ctx) for arg in args)
 
-        if to_extern:
+        if extern:
             if rtype == IR.VOID:
                 ctx.out += f'{c_function_name}({argvars});'
                 return
@@ -3578,7 +3576,7 @@ def C(ns):
             token=self.token,
             rtype=self.type,
             args=self.args,
-            to_extern=self.to_extern,
+            extern=self.f.type.extern,
             c_function_name=fvar,
         )
 
@@ -3589,7 +3587,7 @@ def C(ns):
             token=self.token,
             rtype=self.type,
             args=self.args,
-            to_extern=False,
+            extern=False,
             c_function_name=get_static_method_name(self.f),
         )
 
