@@ -21,6 +21,7 @@ extern int main(int argc, char** argv) {
   var vfoo = foo
   ${
     Foo foo2 = vfoo
+    Foo f3 = y
   }
   printf("After\n")
   0

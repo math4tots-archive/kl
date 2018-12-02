@@ -2375,6 +2375,8 @@ def C(ns):
     HEADER_POINTER_TYPE = IR.HEADER_POINTER_TYPE
     STACK_POINTER_TYPE = IR.STACK_POINTER_TYPE
     STACK_POINTER_NAME = 'KLC_stack'
+    DEBUG_FUNC_NAME_NAME = 'KLC_debug_func_name'
+    DEBUG_FILE_NAME_NAME = 'KLC_debug_file_name'
     DELETER_TYPE = IR.FunctionType(
         extern=True,
         rtype=IR.VOID,
@@ -2472,6 +2474,7 @@ def C(ns):
             self.out = FractalStringBuilder(0)
             self.includes = self.out.spawn()
             self.static_fdecls = self.out.spawn()
+            self.static_vars = self.out.spawn()
             self.next_temp_var_id = 0
 
             # Map of declared C local variables to their types
@@ -2744,6 +2747,10 @@ def C(ns):
         ctx.includes += (
             f'#include "{relative_header_path_from_name(module.name)}"'
         )
+        ctx.static_vars += (
+            f'static const char* {DEBUG_FILE_NAME_NAME} = '
+            f'"{module.token.source.filename}";'
+        )
         for defn in module.definitions:
             D(defn, ctx)
         return str(ctx.out)
@@ -3000,6 +3007,7 @@ def C(ns):
     def emit_function_body(
             *,
             ctx,
+            debug_name,
             proto,
             extern,
             rtype,
@@ -3007,6 +3015,10 @@ def C(ns):
             body):
         ctx.out += proto
         with ctx.retain_scope() as after_release:
+            ctx.out += (
+                f'static const char* {DEBUG_FUNC_NAME_NAME} = '
+                f'"{debug_name}";'
+            )
             ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
             if extern:
                 ctx.declare(STACK_POINTER_TYPE, STACK_POINTER_NAME)
@@ -3039,11 +3051,30 @@ def C(ns):
             ctx.out += f'{local_name} = {param_name};'
             ctx.retain(local_name)
 
+    get_global_defn_name = Multimethod('get_global_defn_name')
+
+    @get_global_defn_name.on(IR.FunctionDefinition)
+    def get_global_defn_name(self):
+        return f'{self.module_name}#{self.short_name}'
+
+    @get_global_defn_name.on(IR.ClassDefinition)
+    def get_global_defn_name(self):
+        return f'{self.module_name}#{self.short_name}'
+
+    @get_global_defn_name.on(IR.StaticMethodDefinition)
+    def get_global_defn_name(self):
+        return f'{get_global_defn_name(self.cls)}#{self.name}'
+
+    @get_global_defn_name.on(IR.InstanceMethodDefinition)
+    def get_global_defn_name(self):
+        return f'{get_global_defn_name(self.cls)}#{self.name}'
+
     @D.on(IR.FunctionDefinition)
     def D(self, ctx):
         if self.body is not None:
             emit_function_body(
                 ctx=ctx,
+                debug_name=self.short_name,
                 proto=proto_for(self),
                 extern=self.extern,
                 rtype=self.rtype,
@@ -3153,6 +3184,7 @@ def C(ns):
     def D(self, ctx):
         emit_function_body(
             ctx=ctx,
+            debug_name=f'{self.cls.short_name}.{self.name}',
             proto=proto_for(self),
             extern=False,
             rtype=self.rtype,
@@ -3170,11 +3202,13 @@ def C(ns):
         token = self.token
         emit_function_body(
             ctx=ctx,
+            debug_name=f'{self.cls.short_name}.{self.name}',
             proto=proto_for(self),
             extern=False,
             rtype=IR.VAR_TYPE,
             start_callback=lambda ctx: copy_method_params_to_locals(
                 ctx=ctx,
+                token=self.token,
                 this_type=self.cls,
                 paramtypes=[p.type for p in self.plist.params],
                 c_local_names=list(map(cvarname, self.plist.params)),
@@ -3187,7 +3221,7 @@ def C(ns):
         )
 
     def copy_method_params_to_locals(
-            ctx, this_type, paramtypes, c_local_names):
+            ctx, token, this_type, paramtypes, c_local_names):
         assert len(paramtypes) == len(c_local_names), c_local_names
         argc = len(c_local_names)
         ctx.out += f'if ({METHOD_PARAM_ARGC_NAME} != 1 + {argc})' '{'
@@ -3198,6 +3232,7 @@ def C(ns):
         ctx.declare(this_type, THIS_NAME)
         converted_this_name = cast_c_name(
             ctx=ctx,
+            token=token,
             st=IR.VAR_TYPE,
             dt=this_type,
             c_name=f'{METHOD_PARAM_ARGV_NAME}[0]',
@@ -3209,6 +3244,7 @@ def C(ns):
             ctx.declare(t, c_name)
             converted_name = cast_c_name(
                 ctx=ctx,
+                token=token,
                 st=IR.VAR_TYPE,
                 dt=t,
                 c_name=f'{METHOD_PARAM_ARGV_NAME}[{i}]',
@@ -3310,18 +3346,19 @@ def C(ns):
 
     def cast_expr(ctx, expr, dt, from_extern):
         c_name = E(expr, ctx)
-        return cast_c_name(ctx, expr.type, dt, c_name, from_extern)
+        return cast_c_name(
+            ctx, expr.token, expr.type, dt, c_name, from_extern)
 
-    def cast_c_name(ctx, st, dt, c_name, from_extern):
+    def cast_c_name(ctx, token, st, dt, c_name, from_extern):
         if st == dt:
             return c_name
         else:
-            return _cast(st, dt, c_name, ctx, from_extern)
+            return _cast(st, dt, c_name, ctx, token, from_extern)
 
     _cast = Multimethod('_cast', 2)
 
     @_cast.on(IR.PrimitiveTypeDefinition, type(IR.VAR_TYPE))
-    def _cast(st, dt, c_name, ctx, from_extern):
+    def _cast(st, dt, c_name, ctx, token, from_extern):
         if st == IR.VOID:
             return ctx.declare(IR.VAR_TYPE)
 
@@ -3337,15 +3374,16 @@ def C(ns):
         return retvar
 
     @_cast.on(type(IR.VAR_TYPE), IR.ClassDefinition)
-    def _cast(st, dt, c_name, ctx, from_extern):
+    def _cast(st, dt, c_name, ctx, token, from_extern):
         proto_name = get_class_proto_name(dt)
         tvar = ctx.declare(HEADER_POINTER_TYPE)
         retvar = ctx.declare(dt)
-        ctx.out += (
-            f'{ERROR_POINTER_NAME} = '
-            f'KLC_var_to_ptr({STACK_POINTER_NAME}, '
-            f'&{tvar}, {c_name}, &{proto_name});'
-        )
+        with stack_trace_entry(ctx, token):
+            ctx.out += (
+                f'{ERROR_POINTER_NAME} = '
+                f'KLC_var_to_ptr({STACK_POINTER_NAME}, '
+                f'&{tvar}, {c_name}, &{proto_name});'
+            )
         cdecl = declare(dt, '')
         ctx.out += f'{retvar} = (({cdecl}) {tvar});'
         ctx.retain(retvar)
@@ -3356,7 +3394,7 @@ def C(ns):
         return retvar
 
     @_cast.on(type(IR.VAR_TYPE), IR.PrimitiveTypeDefinition)
-    def _cast(st, dt, c_name, ctx, from_extern):
+    def _cast(st, dt, c_name, ctx, token, from_extern):
 
         if dt == IR.VOID:
             return
@@ -3373,10 +3411,12 @@ def C(ns):
         vvar = c_name
         tvar = ctx.declare(extract_type)
         retvar = ctx.declare(dt)
-        ctx.out += (
-            f'{ERROR_POINTER_NAME} = {convert_func}({STACK_POINTER_NAME}, '
-            f'&{tvar}, {vvar});'
-        )
+        with stack_trace_entry(ctx, token):
+            ctx.out += (
+                f'{ERROR_POINTER_NAME} = '
+                f'{convert_func}({STACK_POINTER_NAME}, '
+                f'&{tvar}, {vvar});'
+            )
         ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
         with ctx.push_indent(1):
             ctx.throw_or_panic(from_extern=from_extern)
@@ -3386,7 +3426,7 @@ def C(ns):
         return retvar
 
     @_cast.on(IR.ClassDefinition, type(IR.VAR_TYPE))
-    def _cast(st, dt, c_name, ctx, from_extern):
+    def _cast(st, dt, c_name, ctx, token, from_extern):
         retvar = ctx.declare(IR.VAR_TYPE)
         ctx.out += f'{retvar} = KLC_var_from_ptr((KLC_Header*) {c_name});'
         ctx.retain(retvar);
@@ -3486,9 +3526,21 @@ def C(ns):
     def E(self, ctx):
         return f'"{escape_str(self.value)}"'
 
+    @contextlib.contextmanager
+    def stack_trace_entry(ctx, token):
+        ctx.out += (
+            f'KLC_stack_push({STACK_POINTER_NAME}, '
+            f'{DEBUG_FILE_NAME_NAME}, '
+            f'{DEBUG_FUNC_NAME_NAME}, '
+            f'{token.lineno});'
+        )
+        yield
+        ctx.out += f'KLC_stack_pop({STACK_POINTER_NAME});'
+
     def emit_function_call(
             *,
             ctx,
+            token,
             rtype,
             args,
             to_extern,
@@ -3506,7 +3558,8 @@ def C(ns):
                 # And of course, the release is implicit with
                 # the 'declare'.
                 retvar = ctx.declare(rtype)
-                ctx.out += f'{retvar} = {c_function_name}({argvars});'
+                with stack_trace_entry(ctx, token):
+                    ctx.out += f'{retvar} = {c_function_name}({argvars});'
                 return retvar
         else:
             # Function calls implicitly generate a retain,
@@ -3540,6 +3593,7 @@ def C(ns):
         fvar = E(self.f, ctx)
         return emit_function_call(
             ctx=ctx,
+            token=self.token,
             rtype=self.type,
             args=self.args,
             to_extern=self.to_extern,
@@ -3551,6 +3605,7 @@ def C(ns):
     def E(self, ctx):
         return emit_function_call(
             ctx=ctx,
+            token=self.token,
             rtype=self.type,
             args=self.args,
             to_extern=False,

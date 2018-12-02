@@ -7,10 +7,13 @@ typedef struct KLC_StackEntry KLC_StackEntry;
 
 struct KLC_Error {
   char* message;
+  size_t stack_entry_count;
+  KLC_StackEntry* stack;
 };
 
 struct KLC_StackEntry {
-  const char* name;
+  const char* file_name;
+  const char* function_name;
   size_t line_number;
 };
 
@@ -37,14 +40,49 @@ void KLC_delete_stack(KLC_Stack* stack) {
   free(stack);
 }
 
+void KLC_stack_push(
+    KLC_Stack* stack,
+    const char* file_name,
+    const char* function_name,
+    size_t ln) {
+  if (stack->size == stack->cap) {
+    stack->cap = stack->cap == 0 ? 32 : (stack->cap * 2);
+    stack->buffer = (KLC_StackEntry*) realloc(
+      stack->buffer, sizeof(KLC_StackEntry) * stack->cap);
+  }
+  stack->size++;
+  stack->buffer[stack->size - 1].file_name = file_name;
+  stack->buffer[stack->size - 1].function_name = function_name;
+  stack->buffer[stack->size - 1].line_number = ln;
+}
+
+void KLC_stack_pop(KLC_Stack* stack) {
+  stack->size--;
+}
+
 void KLC_panic_with_error(KLC_Error* error) {
+  size_t i;
   fprintf(stderr, "ERROR: %s\n", error->message);
+  for (i = 0; i < error->stack_entry_count; i++) {
+    fprintf(
+      stderr,
+      "  File \"%s\", line %lu, in %s\n",
+      error->stack[i].file_name,
+      (unsigned long) error->stack[i].line_number,
+      error->stack[i].function_name
+    );
+  }
   exit(1);
 }
 
 KLC_Error* KLC_new_error_with_message(KLC_Stack* stack, const char* msg) {
   KLC_Error* error = malloc(sizeof(KLC_Error));
+  size_t stack_entry_count = stack->size;
+  size_t nbytes = sizeof(KLC_StackEntry) * stack_entry_count;
   error->message = KLC_CopyString(msg);
+  error->stack_entry_count = stack_entry_count;
+  error->stack = (KLC_StackEntry*) malloc(nbytes);
+  memcpy(error->stack, stack->buffer, nbytes);
   return error;
 }
 

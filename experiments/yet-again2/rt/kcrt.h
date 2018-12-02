@@ -49,6 +49,8 @@ char* KLC_CopyString(const char* s);
 
 KLC_Stack* KLC_new_stack();
 void KLC_delete_stack(KLC_Stack*);
+void KLC_stack_push(KLC_Stack*, const char*, const char*, size_t);
+void KLC_stack_pop(KLC_Stack*);
 
 void KLC_panic_with_error(KLC_Error* error);
 KLC_Error* KLC_new_error_with_message(KLC_Stack*, const char*);
