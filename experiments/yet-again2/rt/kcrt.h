@@ -9,12 +9,13 @@
 typedef ptrdiff_t KLC_int;  /* TODO: This is unsatisfactory */
 typedef double KLC_float;
 typedef struct KLC_Error KLC_Error;
+typedef struct KLC_Stack KLC_Stack;
 typedef struct KLC_Header KLC_Header;
 typedef struct KLC_MethodEntry KLC_MethodEntry;
 typedef struct KLC_Class KLC_Class;
 typedef struct KLC_var KLC_var;
 typedef void KLC_Deleter(KLC_Header*, KLC_Header**);
-typedef KLC_Error* KLC_Method(KLC_var*, int, KLC_var*);
+typedef KLC_Error* KLC_Method(KLC_Stack*, KLC_var*, int, KLC_var*);
 
 struct KLC_Header {
   size_t refcnt;
@@ -45,8 +46,12 @@ struct KLC_var {
 };
 
 char* KLC_CopyString(const char* s);
+
+KLC_Stack* KLC_new_stack();
+void KLC_delete_stack(KLC_Stack*);
+
 void KLC_panic_with_error(KLC_Error* error);
-KLC_Error* KLC_new_error_with_message(const char*);
+KLC_Error* KLC_new_error_with_message(KLC_Stack*, const char*);
 const char* KLC_get_error_message(KLC_Error*);
 
 void KLC_retain(KLC_Header*);
@@ -59,8 +64,8 @@ void KLC_partial_release_var(KLC_var, KLC_Header**);
 KLC_var KLC_var_from_ptr(KLC_Header* p);
 KLC_var KLC_var_from_int(KLC_int i);
 KLC_var KLC_var_from_float(KLC_float f);
-KLC_Error* KLC_var_to_ptr(KLC_Header** out, KLC_var v, KLC_Class*);
-KLC_Error* KLC_var_to_int(KLC_int* out, KLC_var v);
-KLC_Error* KLC_var_to_float(KLC_float* out, KLC_var v);
+KLC_Error* KLC_var_to_ptr(KLC_Stack*, KLC_Header** out, KLC_var, KLC_Class*);
+KLC_Error* KLC_var_to_int(KLC_Stack*, KLC_int* out, KLC_var);
+KLC_Error* KLC_var_to_float(KLC_Stack*, KLC_float* out, KLC_var);
 
 #endif/*kcrt_h*/

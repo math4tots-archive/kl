@@ -1311,6 +1311,10 @@ def IR(ns):
     ns(ERROR_TYPE, 'ERROR_TYPE')
     ns(PointerType(ERROR_TYPE), 'ERROR_POINTER_TYPE')
 
+    STACK_TYPE = new_builtin_extern_struct('KLC_Stack')
+    ns(STACK_TYPE, 'STACK_TYPE')
+    ns(PointerType(STACK_TYPE), 'STACK_POINTER_TYPE')
+
 
 @Namespace
 def parser(ns):
@@ -2369,6 +2373,8 @@ def C(ns):
     ERROR_POINTER_NAME = 'KLC_error'
     ERROR_POINTER_TYPE = IR.ERROR_POINTER_TYPE
     HEADER_POINTER_TYPE = IR.HEADER_POINTER_TYPE
+    STACK_POINTER_TYPE = IR.STACK_POINTER_TYPE
+    STACK_POINTER_NAME = 'KLC_stack'
     DELETER_TYPE = IR.FunctionType(
         extern=True,
         rtype=IR.VOID,
@@ -2586,6 +2592,13 @@ def C(ns):
                 yield
             finally:
                 self.out = old_out
+
+        def set_error_pointer(self, message):
+            escaped = escape_str(message)
+            self.out += (
+                f'{ERROR_POINTER_NAME} = KLC_new_error_with_message('
+                f'{STACK_POINTER_NAME}, "{escaped}");'
+            )
 
     def _retain(type, cname):
         if isinstance(type, IR.ClassDefinition):
@@ -2936,9 +2949,10 @@ def C(ns):
         else:
             rtype = ERROR_POINTER_TYPE
             pnames = None if pnames is None else (
-                [OUTPUT_PTR_NAME] + list(pnames)
+                [STACK_POINTER_NAME, OUTPUT_PTR_NAME] + list(pnames)
             )
             paramtypes = [
+                STACK_POINTER_TYPE,
                 IR.PointerType(self.rtype)
             ] + list(self.paramtypes)
             return declare_raw_c_functype(
@@ -2994,6 +3008,9 @@ def C(ns):
         ctx.out += proto
         with ctx.retain_scope() as after_release:
             ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
+            if extern:
+                ctx.declare(STACK_POINTER_TYPE, STACK_POINTER_NAME)
+                ctx.out += f'{STACK_POINTER_NAME} = KLC_new_stack();'
 
             # we have a callback here to allow callers to
             # customize the way that they process arguments
@@ -3003,6 +3020,7 @@ def C(ns):
             if rtype != IR.VOID:
                 ctx.retain(retvar)
             if extern:
+                after_release += f'KLC_delete_stack({STACK_POINTER_NAME});'
                 if rtype != IR.VOID:
                     after_release += f'return {retvar};'
             else:
@@ -3174,11 +3192,7 @@ def C(ns):
         argc = len(c_local_names)
         ctx.out += f'if ({METHOD_PARAM_ARGC_NAME} != 1 + {argc})' '{'
         with ctx.push_indent(1):
-            ctx.out += (
-                f'{ERROR_POINTER_NAME} = '
-                f'KLC_new_error_with_message("Method expected '
-                f'1 + {argc} args");'
-            )
+            ctx.set_error_pointer(f'Method expected 1 + {argc} args')
             ctx.throw_or_panic(from_extern=False)
         ctx.out += '}'
         ctx.declare(this_type, THIS_NAME)
@@ -3329,7 +3343,8 @@ def C(ns):
         retvar = ctx.declare(dt)
         ctx.out += (
             f'{ERROR_POINTER_NAME} = '
-            f'KLC_var_to_ptr(&{tvar}, {c_name}, &{proto_name});'
+            f'KLC_var_to_ptr({STACK_POINTER_NAME}, '
+            f'&{tvar}, {c_name}, &{proto_name});'
         )
         cdecl = declare(dt, '')
         ctx.out += f'{retvar} = (({cdecl}) {tvar});'
@@ -3358,7 +3373,10 @@ def C(ns):
         vvar = c_name
         tvar = ctx.declare(extract_type)
         retvar = ctx.declare(dt)
-        ctx.out += f'{ERROR_POINTER_NAME} = {convert_func}(&{tvar}, {vvar});'
+        ctx.out += (
+            f'{ERROR_POINTER_NAME} = {convert_func}({STACK_POINTER_NAME}, '
+            f'&{tvar}, {vvar});'
+        )
         ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
         with ctx.push_indent(1):
             ctx.throw_or_panic(from_extern=from_extern)
@@ -3502,8 +3520,10 @@ def C(ns):
                 retvar = ctx.declare(rtype)
                 retvarp = f'&{retvar}'
 
+            protcol_args = f'{STACK_POINTER_NAME}, {retvarp}'
+
             margvars = (
-                f'{retvarp}, {argvars}' if args else retvarp
+                f'{protcol_args}, {argvars}' if args else protcol_args
             )
 
             ctx.out += (
@@ -3555,11 +3575,7 @@ def C(ns):
 
     @E.on(IR.ThrowStringLiteral)
     def E(self, ctx):
-        escaped = escape_str(self.value)
-        ctx.out += (
-            f'{ERROR_POINTER_NAME} = '
-            f'KLC_new_error_with_message("{escaped}");'
-        )
+        ctx.set_error_pointer(self.value)
         ctx.jump_out_of_scope()
 
     @E.on(IR.FunctionName)
