@@ -1175,8 +1175,8 @@ def IR(ns):
     @ns
     class GetStructField(Expression):
         node_fields = (
+            ('expr', ValueExpression),
             ('field_defn', FieldDefinition),
-            ('expr', Expression),
         )
 
         @property
@@ -1186,8 +1186,8 @@ def IR(ns):
     @ns
     class SetStructField(Expression):
         node_fields = (
-            ('field_defn', FieldDefinition),
             ('expr', Expression),
+            ('field_defn', FieldDefinition),
             ('valexpr', Expression),
         )
 
@@ -1864,8 +1864,8 @@ def parser(ns):
                     defn = get_field_defn(scope, token, expr.type, fname)
                     return IR.GetStructField(
                         token,
-                        defn,
                         expr,
+                        defn,
                     )
                 elif isinstance(expr.type, IR.ClassDefinition):
                     return IR.InstanceMethodReference(
@@ -1907,8 +1907,8 @@ def parser(ns):
                 if isinstance(expr.type, IR.StructDefinition):
                     return IR.SetStructField(
                         token,
-                        defn,
                         expr,
+                        defn,
                         val,
                     )
                 else:
