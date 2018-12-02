@@ -2554,14 +2554,14 @@ def C(ns):
                 self.out = old_out
                 self._exit_jump_label = old_exit_jump_label
 
+        def jump_on_error(self):
+            self.out += f'if ({ERROR_POINTER_NAME}) ' '{'
+            with self.push_indent(1):
+                self.jump_out_of_scope()
+            self.out += '}'
+
         def jump_out_of_scope(self):
             self.out += f'goto {self._exit_jump_label};'
-
-        def throw_or_panic(self, from_extern):
-            if from_extern:
-                self.out += f'KLC_panic_with_error({ERROR_POINTER_NAME});'
-            else:
-                self.jump_out_of_scope()
 
         def retain(self, cname, out=None):
             assert cname is None or cname in self._scope, cname
@@ -3033,6 +3033,11 @@ def C(ns):
                 ctx.retain(retvar)
             if extern:
                 after_release += f'KLC_delete_stack({STACK_POINTER_NAME});'
+                after_release += f'if ({ERROR_POINTER_NAME}) ' '{'
+                after_release += (
+                    f'  KLC_panic_with_error({ERROR_POINTER_NAME});'
+                )
+                after_release += '}'
                 if rtype != IR.VOID:
                     after_release += f'return {retvar};'
             else:
@@ -3227,7 +3232,7 @@ def C(ns):
         ctx.out += f'if ({METHOD_PARAM_ARGC_NAME} != 1 + {argc})' '{'
         with ctx.push_indent(1):
             ctx.set_error_pointer(f'Method expected 1 + {argc} args')
-            ctx.throw_or_panic(from_extern=False)
+            ctx.jump_out_of_scope()
         ctx.out += '}'
         ctx.declare(this_type, THIS_NAME)
         converted_this_name = cast_c_name(
@@ -3387,10 +3392,7 @@ def C(ns):
         cdecl = declare(dt, '')
         ctx.out += f'{retvar} = (({cdecl}) {tvar});'
         ctx.retain(retvar)
-        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
-        with ctx.push_indent(1):
-            ctx.throw_or_panic(from_extern=from_extern)
-        ctx.out += '}'
+        ctx.jump_on_error()
         return retvar
 
     @_cast.on(type(IR.VAR_TYPE), IR.PrimitiveTypeDefinition)
@@ -3417,10 +3419,7 @@ def C(ns):
                 f'{convert_func}({STACK_POINTER_NAME}, '
                 f'&{tvar}, {vvar});'
             )
-        ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
-        with ctx.push_indent(1):
-            ctx.throw_or_panic(from_extern=from_extern)
-        ctx.out += '}'
+        ctx.jump_on_error()
         cdecl = declare(dt, '')
         ctx.out += f'{retvar} = (({cdecl}) {tvar});'
         return retvar
@@ -3582,10 +3581,7 @@ def C(ns):
             ctx.out += (
                 f'{ERROR_POINTER_NAME} = {c_function_name}({margvars});'
             )
-            ctx.out += f'if ({ERROR_POINTER_NAME}) ' '{'
-            with ctx.push_indent(1):
-                ctx.throw_or_panic(from_extern=from_extern)
-            ctx.out += '}'
+            ctx.jump_on_error()
             return retvar
 
     @E.on(IR.FunctionCall)

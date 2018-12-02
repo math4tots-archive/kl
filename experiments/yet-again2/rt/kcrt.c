@@ -72,6 +72,7 @@ void KLC_panic_with_error(KLC_Error* error) {
       error->stack[i].function_name
     );
   }
+  KLC_delete_error(error);
   exit(1);
 }
 
@@ -84,6 +85,12 @@ KLC_Error* KLC_new_error_with_message(KLC_Stack* stack, const char* msg) {
   error->stack = (KLC_StackEntry*) malloc(nbytes);
   memcpy(error->stack, stack->buffer, nbytes);
   return error;
+}
+
+void KLC_delete_error(KLC_Error* error) {
+  free(error->message);
+  free(error->stack);
+  free(error);
 }
 
 const char* KLC_get_error_message(KLC_Error* error) {
