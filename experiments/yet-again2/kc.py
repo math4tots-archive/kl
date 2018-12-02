@@ -223,44 +223,69 @@ def pcall(f, *mixed_args):
 
 @Namespace
 def typeutil(ns):
+    @ns
     class FakeType(object):
         @property
         def __name__(self):
             return repr(self)
 
-    class ListType(FakeType):
+    class SingleArgumentFakeType(FakeType):
         def __init__(self, subtype):
             self.subtype = subtype
 
         def __getitem__(self, subtype):
-            return ListType(subtype)
+            return type(self)(subtype)
 
+        def __repr__(self):
+            return f'{type(self).__name__}[{self.subtype.__name__}]'
+
+    class ListType(SingleArgumentFakeType):
         def __instancecheck__(self, obj):
             return (
                 isinstance(obj, list) and
                 all(isinstance(x, self.subtype) for x in obj))
 
-        def __repr__(self):
-            return 'List[%s]' % (self.subtype.__name__, )
-
     List = ListType(object)
     ns(List, 'List')
 
-    class OptionalType(FakeType):
-        def __init__(self, subtype):
-            self.subtype = subtype
+    class NonEmptyListType(ListType):
+        def __instancecheck__(self, obj):
+            return super().__instancecheck__(obj) and obj
 
-        def __getitem__(self, subtype):
-            return OptionalType(subtype)
+    NonEmptyList = NonEmptyListType(object)
+    ns(NonEmptyList, 'NonEmptyList')
 
+    class OptionalType(SingleArgumentFakeType):
         def __instancecheck__(self, obj):
             return obj is None or isinstance(obj, self.subtype)
 
-        def __repr__(self):
-            return 'Optional[%s]' % (self.subtype.__name__, )
-
     Optional = OptionalType(object)
     ns(Optional, 'Optional')
+
+    class AndType(FakeType):
+        def __init__(self, subtypes):
+            self.subtypes = subtypes
+
+        def __getitem__(self, subtypes):
+            assert isinstance(subtypes, tuple), subtypes
+            return type(self)(subtypes)
+
+        def __repr__(self):
+            subtypes = ','.join(map(repr, self.subtypes))
+            return f'And[{subtypes}]'
+
+        def __instancecheck__(self, obj):
+            return all(isinstance(obj, t) for t in self.subtypes)
+
+    And = AndType([object])
+    ns(And, 'And')
+
+    class NotType(SingleArgumentFakeType):
+        def __instancecheck__(self, obj):
+            return not isinstance(obj, self.subtype)
+
+    Not = NotType(object)
+    ns(Not, 'Not')
 
 
 @Namespace
@@ -640,6 +665,15 @@ def IR(ns):
         def is_pseudo_expression(self):
             return isinstance(self, PseudoExpression)
 
+        class _WithVarType(typeutil.FakeType):
+            def __instancecheck__(self, obj):
+                return (
+                    isinstance(obj, Expression) and
+                    obj.type == VAR_TYPE
+                )
+
+        WITH_VAR_TYPE = _WithVarType()
+
     @ns
     class Type:
         """Marker class for what values indicate Types.
@@ -946,11 +980,30 @@ def IR(ns):
     ns(VAR_TYPE, 'VAR_TYPE')
 
     @ns
-    def convert(*, expr, dest_type, scope):
-        if expr.type == dest_type:
+    def to_value_expr(*, expr, scope):
+        if isinstance(expr, ValueExpression):
             return expr
 
-        return _convert(expr.type, dest_type, expr, scope)
+        if isinstance(expr, InstanceMethodReference):
+            return IR.InstanceMethodCall(
+                expr.token,
+                f'__GET{expr.name}',
+                [expr.owner],
+            )
+
+        with scope.push(expr.token):
+            raise scope.error(f'{expr} is not a value expression')
+
+    @ns
+    def convert(*, expr, dest_type, scope):
+
+        value_expr = to_value_expr(expr=expr, scope=scope)
+        assert isinstance(value_expr, ValueExpression), value_expr
+
+        if value_expr.type == dest_type:
+            return value_expr
+
+        return _convert(value_expr.type, dest_type, value_expr, scope)
 
     _convert = Multimethod('_convert', 3)
     ns(_convert, '_convert')
@@ -1032,6 +1085,11 @@ def IR(ns):
         def type(self):
             return PSEUDO_TYPE
 
+    ValueExpression = typeutil.And[
+        Expression,
+        typeutil.Not[PseudoExpression],
+    ]
+
     @ns
     class TypeExpression(PseudoExpression):
         pass
@@ -1055,7 +1113,7 @@ def IR(ns):
     class Block(Expression, CollectionNode):
         node_fields = (
             ('decls', typeutil.List[LocalVariableDeclaration]),
-            ('exprs', typeutil.List[Expression]),
+            ('exprs', typeutil.List[ValueExpression]),
         )
 
         @property
@@ -1065,12 +1123,12 @@ def IR(ns):
     @ns
     class Cast(Expression):
         node_fields = (
-            ('expr', Expression),
+            ('expr', ValueExpression),
             ('type', Type),
         )
 
     @ns
-    class FunctionName(Expression):
+    class FunctionName(PseudoExpression):
         node_fields = (
             ('defn', FunctionDefinition),
         )
@@ -1099,7 +1157,7 @@ def IR(ns):
     class SetLocalName(Expression):
         node_fields = (
             ('decl', BaseLocalVariableDeclaration),
-            ('expr', Expression),
+            ('expr', ValueExpression),
         )
 
         @property
@@ -1178,6 +1236,24 @@ def IR(ns):
         @property
         def type(self):
             return self.f.rtype
+
+    @ns
+    class InstanceMethodReference(PseudoExpression):
+        type = VAR_TYPE
+
+        node_fields = (
+            ('owner', Expression.WITH_VAR_TYPE),
+            ('name', str),
+        )
+
+    @ns
+    class InstanceMethodCall(Expression):
+        type = VAR_TYPE
+
+        node_fields = (
+            ('name', str),
+            ('args', typeutil.NonEmptyList[Expression.WITH_VAR_TYPE]),
+        )
 
     @ns
     class Malloc(Expression):
@@ -1688,6 +1764,13 @@ def parser(ns):
             assert isinstance(scope['@ec'], IR.ExpressionContext)
 
         def parse_expression(scope):
+            promise = parse_expression_or_pseudo_expression(scope)
+            return promise.map(lambda expr: IR.to_value_expr(
+                expr=expr,
+                scope=scope,
+            ))
+
+        def parse_expression_or_pseudo_expression(scope):
             promise = parse_postfix(scope)
             @promise.map
             def promise(expr):
@@ -1735,6 +1818,15 @@ def parser(ns):
                         defn,
                         args,
                     )
+                elif isinstance(f, IR.InstanceMethodReference):
+                    args = [f.owner] + [
+                        scope.convert(arg, IR.VAR_TYPE) for arg in raw_args
+                    ]
+                    return IR.InstanceMethodCall(
+                        token,
+                        f.name,
+                        args,
+                    )
                 else:
                     with scope.push(token):
                         raise scope.error(f'{f.type} is not a function')
@@ -1774,6 +1866,12 @@ def parser(ns):
                         token,
                         defn,
                         expr,
+                    )
+                elif isinstance(expr.type, IR.ClassDefinition):
+                    return IR.InstanceMethodReference(
+                        token,
+                        scope.convert(expr, IR.VAR_TYPE),
+                        fname,
                     )
                 else:
                     with scope.push(token):
@@ -2367,6 +2465,7 @@ def C(ns):
     STACK_POINTER_NAME = 'KLC_stack'
     DEBUG_FUNC_NAME_NAME = 'KLC_debug_func_name'
     DEBUG_FILE_NAME_NAME = 'KLC_debug_file_name'
+    CALL_METHOD_FUNCTION_NAME = 'KLC_call_method'
     DELETER_TYPE = IR.FunctionType(
         extern=True,
         rtype=IR.VOID,
@@ -3208,7 +3307,8 @@ def C(ns):
                 paramtypes=[p.type for p in self.plist.params],
                 c_local_names=list(map(cvarname, self.plist.params)),
             ),
-            body=IR.Cast(token,
+            body=IR.Cast(
+                token,
                 IR.Cast(token, self.body, self.rtype),
                 IR.VAR_TYPE,
             ),
@@ -3348,6 +3448,14 @@ def C(ns):
             return _cast(st, dt, c_name, ctx, token)
 
     _cast = Multimethod('_cast', 2)
+
+    @_cast.on(IR.PrimitiveTypeDefinition, IR.PrimitiveTypeDefinition)
+    def _cast(st, dt, c_name, ctx, token):
+        assert st != IR.VOID and dt != IR.VOID, (st, dt)
+        retvar = ctx.declare(dt)
+        cdecl = declare(dt, '')
+        ctx.out += f'{retvar} = (({cdecl}) {c_name});'
+        return retvar
 
     @_cast.on(IR.PrimitiveTypeDefinition, type(IR.VAR_TYPE))
     def _cast(st, dt, c_name, ctx, token):
@@ -3528,10 +3636,10 @@ def C(ns):
             ctx,
             token,
             rtype,
-            args,
+            c_args,
             extern,
             c_function_name):
-        argvars = ', '.join(E(arg, ctx) for arg in args)
+        argvars = ', '.join(c_args)
 
         if extern:
             if rtype == IR.VOID:
@@ -3561,7 +3669,7 @@ def C(ns):
             protcol_args = f'{STACK_POINTER_NAME}, {retvarp}'
 
             margvars = (
-                f'{protcol_args}, {argvars}' if args else protcol_args
+                f'{protcol_args}, {argvars}' if c_args else protcol_args
             )
 
             ctx.out += (
@@ -3577,7 +3685,7 @@ def C(ns):
             ctx=ctx,
             token=self.token,
             rtype=self.type,
-            args=self.args,
+            c_args=[E(arg, ctx) for arg in self.args],
             extern=self.f.type.extern,
             c_function_name=fvar,
         )
@@ -3588,9 +3696,35 @@ def C(ns):
             ctx=ctx,
             token=self.token,
             rtype=self.type,
-            args=self.args,
+            c_args=[E(arg, ctx) for arg in self.args],
             extern=False,
             c_function_name=get_static_method_name(self.f),
+        )
+
+    @E.on(IR.InstanceMethodCall)
+    def E(self, ctx):
+        # Including the 'this' argument, self.args should never be
+        # empty.
+        assert self.args, self.args
+        c_arg_names = [E(arg, ctx) for arg in self.args]
+
+        arg_array_name = ctx._new_unique_cname()
+        ctx._decls += f'KLC_var {arg_array_name}[{len(self.args)}];'
+
+        for i, c_arg_name in enumerate(c_arg_names):
+            ctx.out += f'{arg_array_name}[{i}] = {c_arg_name};'
+
+        return emit_function_call(
+            ctx=ctx,
+            token=self.token,
+            rtype=IR.VAR_TYPE,
+            c_args=[
+                f'"{escape_str(self.name)}"',
+                str(len(self.args)),
+                arg_array_name,
+            ],
+            extern=False,
+            c_function_name=CALL_METHOD_FUNCTION_NAME,
         )
 
     @E.on(IR.Malloc)

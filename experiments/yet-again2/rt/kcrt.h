@@ -71,4 +71,8 @@ KLC_Error* KLC_var_to_ptr(KLC_Stack*, KLC_Header** out, KLC_var, KLC_Class*);
 KLC_Error* KLC_var_to_int(KLC_Stack*, KLC_int* out, KLC_var);
 KLC_Error* KLC_var_to_float(KLC_Stack*, KLC_float* out, KLC_var);
 
+KLC_Class* KLC_get_class(KLC_var);
+KLC_MethodEntry* KLC_find_method(KLC_Class*, const char*);
+KLC_Error* KLC_call_method(KLC_Stack*, KLC_var*, const char*, int, KLC_var*);
+
 #endif/*kcrt_h*/

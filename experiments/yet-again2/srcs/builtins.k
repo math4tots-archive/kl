@@ -22,7 +22,11 @@ class String {
     ret
   }
 
-  size_t getSize() {
+  long normalMethod() {
+    95189
+  }
+
+  size_t __GETsize() {
     _size
   }
 

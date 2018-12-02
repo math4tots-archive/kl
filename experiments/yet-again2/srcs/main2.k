@@ -20,7 +20,9 @@ extern int main(int argc, char** argv) {
   Foo foo = $(Foo)
   var vfoo = foo
   ${
-    long size = s.getSize()
+    long normalMethod = s.normalMethod()
+    printf("s.normalMethod() = %lu\n", normalMethod)
+    long size = s.size
     printf("size = %ld\n", size)
   }
   ${

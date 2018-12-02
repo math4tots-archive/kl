@@ -192,3 +192,57 @@ KLC_Error* KLC_var_to_float(KLC_Stack* stack, KLC_float* out, KLC_var v) {
   *out = v.u.f;
   return NULL;
 }
+
+KLC_Class* KLC_get_class(KLC_var v) {
+  switch (v.tag) {
+    case KLC_TAG_POINTER:
+      if (v.u.p) {
+        return v.u.p->cls;
+      }
+  }
+  return NULL;
+}
+
+KLC_MethodEntry* KLC_find_method(KLC_Class* cls, const char* name) {
+  size_t lower = 0;
+  size_t upper = cls->number_of_methods;
+  if (cls->number_of_methods == 0) {
+    return NULL;
+  }
+  for (;;) {
+    size_t mid = (lower + upper) / 2;
+    int cmp = strcmp(cls->methods[mid].name, name);
+    if (cmp == 0) {
+      return cls->methods + mid;
+    } else if (lower == mid) {
+      break;
+    } else if (cmp < 0) {
+      upper = mid;
+    } else {
+      lower = mid;
+    }
+  }
+  return NULL;
+}
+
+KLC_Error* KLC_call_method(
+    KLC_Stack* stack, KLC_var* out, const char* name, int argc, KLC_var* argv) {
+  KLC_Class* cls;
+  KLC_MethodEntry* method_entry;
+  if (argc < 1) {
+    return KLC_new_error_with_message(stack, "FUBAR: KLC_call_method with argc < 1");
+  }
+  /* TODO: Method call for primitive types */
+  cls = KLC_get_class(argv[0]);
+  if (!cls) {
+    int* p = NULL;
+    int i = *p;
+    printf("i = %d\n", i);
+    return KLC_new_error_with_message(stack, "FUBAR: Could not get class for method call");
+  }
+  method_entry = KLC_find_method(cls, name);
+  if (!method_entry) {
+    return KLC_new_error_with_message(stack, "Method not found");
+  }
+  return method_entry->method(stack, out, argc, argv);
+}
