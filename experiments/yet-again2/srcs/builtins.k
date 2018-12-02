@@ -22,7 +22,7 @@ class String {
     ret
   }
 
-  size_t size() {
+  size_t getSize() {
     _size
   }
 

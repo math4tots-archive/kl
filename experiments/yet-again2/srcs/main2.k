@@ -20,6 +20,10 @@ extern int main(int argc, char** argv) {
   Foo foo = $(Foo)
   var vfoo = foo
   ${
+    long size = s.getSize()
+    printf("size = %ld\n", size)
+  }
+  ${
     Foo foo2 = vfoo
     Foo f3 = y
   }
