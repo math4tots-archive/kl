@@ -1110,7 +1110,7 @@ def IR(ns):
             return self.decl.type
 
     @ns
-    class FieldDefinition(Node):
+    class FieldDefinition(Declaration):
         node_fields = (
             ('extern', bool),
             ('type', Type),
@@ -1143,8 +1143,8 @@ def IR(ns):
     @ns
     class GetClassField(Expression):
         node_fields = (
-            ('field_defn', FieldDefinition),
             ('expr', Expression),
+            ('field_defn', FieldDefinition),
         )
 
         @property
@@ -1423,6 +1423,12 @@ def parser(ns):
             return Promise.value(
                 IR.FromImport(token, module_name, exported_name, alias),
             )
+
+        def get_this_type(self):
+            this_type = self['@ec'].this_type
+            if this_type is None:
+                raise scope.error(f'Not inside class instance context')
+            return this_type
 
     BUILTINS_MODULE_NAME = 'builtins'
 
@@ -1779,8 +1785,8 @@ def parser(ns):
                     defn = get_field_defn(scope, token, expr.type, fname)
                     return IR.GetClassField(
                         token,
-                        defn,
                         expr,
+                        defn,
                     )
                 else:
                     with scope.push(token):
@@ -1851,6 +1857,13 @@ def parser(ns):
                     return IR.LocalName(token, defn)
                 if isinstance(defn, IR.ClassDefinition):
                     return IR.ClassName(token, defn)
+                if isinstance(defn, IR.FieldDefinition):
+                    this_type = scope.get_this_type()
+                    return IR.GetClassField(
+                        token,
+                        IR.This(token, this_type),
+                        defn,
+                    )
                 with scope.push(token):
                     raise scope.error(f'{defn} is not a variable')
             return promise

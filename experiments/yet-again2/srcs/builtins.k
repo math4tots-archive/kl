@@ -23,7 +23,7 @@ class String {
   }
 
   size_t size() {
-    this._size
+    _size
   }
 
   delete {
