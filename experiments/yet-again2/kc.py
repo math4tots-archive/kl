@@ -570,20 +570,36 @@ def IR(ns):
 
     @ns
     class Node(object):
-        def __init__(self, token, *args):
+        def __init__(self, token, *args, **kwargs):
+            cls = type(self)
             self.token = token
-            for (fname, ftype), arg in zip(type(self).node_fields, args):
+            node_fields = list(cls.node_fields)
+
+            def set_arg(fname, ftype, arg):
                 if not isinstance(arg, ftype):
                     raise TypeError(
-                        'Expected type of %r to be %r, but got %r' % (
-                            fname, ftype, arg))
+                        f'Expected type of {key} for {cls.__name__} '
+                        f'to be {ftype} but got {arg}')
                 setattr(self, fname, arg)
-            if len(type(self).node_fields) != len(args):
-                raise TypeError('%s expects %s arguments, but got %s' % (
-                    type(self).__name__,
-                    len(type(self).node_fields),
-                    len(args),
-                ))
+
+            for key, arg in kwargs.items():
+                for field in node_fields:
+                    if field[0] == key:
+                        break
+                else:
+                    raise TypeError(
+                        f'{key} is not a field for {cls.__name__}')
+                fname, ftype = field
+                node_fields = [f for f in node_fields if f is not field]
+                set_arg(fname, ftype, arg)
+
+            if len(args) < len(node_fields):
+                raise TypeError(f'Too few arguments for {cls.__name__}')
+            elif len(args) > len(node_fields):
+                raise TypeError(f'Too many arguments for {cls.__name__}')
+
+            for (fname, ftype), arg in zip(node_fields, args):
+                set_arg(fname, ftype, arg)
 
         def __repr__(self):
             return '%s(%s)' % (
@@ -1347,16 +1363,15 @@ def IR(ns):
     class ExpressionContext(PseudoDeclaration):
         """Contains information needed for resolving expressions
         """
-        def __init__(self, token, extern, this_type):
-            super().__init__(token, extern, this_type)
-
         node_fields = (
             # Indicates whether we're in an 'extern' context.
             # E.g. we cannot throw exceptions from an extern
             # context. Also the calling convention is different.
             ('extern', bool),
 
-            ('this_type', typeutil.Optional[ClassDefinition])
+            ('this_type', typeutil.Optional[ClassDefinition]),
+
+            ('inside_delete', bool),
         )
 
     def new_builtin_extern_struct(name):

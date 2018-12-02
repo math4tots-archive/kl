@@ -15,3 +15,6 @@ This is all I'm shooting for right now.
   Syntax idea: use 'delete <expr>' form to
   manually 'partial_release' a var or object.
   This feature is necessary to implement a 'List' type.
+* Create function KLC_format(const char*, ...) that will
+  return a new string from format string and args.
+  This would be very useful for debugging stuff.
