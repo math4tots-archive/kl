@@ -644,11 +644,11 @@ def IR(ns):
     class Type:
         """Marker class for what values indicate Types.
         """
-
-        # Only 'complete' types can be directly declared.
-        # This is mostly to prevent structs from being declared
-        # before their definition is processed.
-        complete = True
+        # Only 'declarable' types can be directly declared
+        # (e.g. as local variable or field).
+        # Most types are declarable, but function types are not,
+        # and struct types are not until they are defined
+        declarable = True
 
         @property
         def is_meta_type(self):
@@ -749,7 +749,7 @@ def IR(ns):
 
     @ns
     class StructDefinition(StructOrClassDefinition):
-        complete = False
+        declarable = False
 
     @ns
     class ClassDefinition(StructOrClassDefinition, Retainable):
@@ -882,6 +882,8 @@ def IR(ns):
 
     @ns
     class FunctionType(Type, ProxyMixin):
+        declarable = False
+
         def __init__(self, extern, rtype, paramtypes, vararg):
             self.extern = extern
             self.rtype = rtype
@@ -1995,10 +1997,10 @@ def parser(ns):
 
         def check_fields(scope, fields, *, allow_retainable_fields):
             for field in fields:
-                if not field.type.complete:
+                if not field.type.declarable:
                     with scope.push(field.token):
                         raise scope.error(
-                            f'{field.type} is an incomplete type'
+                            f'{field.type} is not declarable'
                         )
                 elif (not allow_retainable_fields and
                         isinstance(field.type, IR.Retainable)):
@@ -2053,7 +2055,7 @@ def parser(ns):
                 fields = defn.fields
                 check_member_names(scope, fields)
                 check_fields(scope, fields, allow_retainable_fields=False)
-                defn.complete = True
+                defn.declarable = True
                 return defn
 
             return promise
