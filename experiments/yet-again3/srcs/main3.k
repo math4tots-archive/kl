@@ -35,6 +35,7 @@ extern c_int main() {
   SomeClass someClass = SomeClass()
   someClass.someInstanceMethod()
   someClass.someOtherInstanceMethod()
+  someClass.someInstanceMethodOnObject()
 
   static_cast(c_int, 0)
 }

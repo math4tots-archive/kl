@@ -1736,6 +1736,7 @@ def parser(ns):
             return this_type
 
     BUILTINS_MODULE_NAME = 'builtins'
+    ROOT_TRAIT_NAME = 'Object'
 
     _builtins_export_names = (
         'String',
@@ -2623,31 +2624,54 @@ def parser(ns):
             return promise
 
         def parse_traits(scope):
-            token_and_names = []
+            start_token = peek()
             if consume('('):
+                token_and_names = []
                 while not consume(')'):
                     token = peek()
                     token_and_names.append([token, expect_id()])
                     if not consume(','):
                         expect(')')
                         break
+            else:
+                token_and_names = None
 
             @Promise
             def promise():
-                traits = []
-                for token, name in token_and_names:
-                    with scope.push(token):
-                        trait = scope[name]
-                        if not isinstance(trait, IR.TraitDefinition):
-                            with scope.push(trait.token):
-                                raise scope.error(f'{name} is not a trait')
-                        if not trait.defined:
-                            with scope.push(trait.token):
-                                raise scope.error(
-                                    f'Base traits must be defined '
-                                    f'before any class or trait that '
-                                    f'derives from it')
-                    traits.append(trait)
+                if token_and_names is not None:
+                    traits = []
+                    for token, name in token_and_names:
+                        with scope.push(token):
+                            trait = scope[name]
+                            if not isinstance(trait, IR.TraitDefinition):
+                                with scope.push(trait.token):
+                                    raise scope.error(
+                                        f'{name} is not a trait')
+                            if not trait.defined:
+                                with scope.push(trait.token):
+                                    raise scope.error(
+                                        f'Base traits must be defined '
+                                        f'before any class or trait that '
+                                        f'derives from it')
+                        traits.append(trait)
+                elif implicit_builtins:
+                    # If 'builtins' is implicitly being pulled in,
+                    root_trait = (
+                        scope
+                            .load_scope_for(BUILTINS_MODULE_NAME)
+                            [ROOT_TRAIT_NAME]
+                    )
+                    if not isinstance(root_trait, IR.TraitDefinition):
+                        with scope.push(root_trait.token):
+                            raise scope.error(f'Root trait is not a trait!')
+                    return [root_trait]
+                else:
+                    with scope.push(start_token):
+                        raise scope.error(
+                            f'If implicit builtins is disabled, '
+                            f'an explicit traits list must be specified '
+                            f'even if it is empty.'
+                        )
                 return traits
 
             return promise
@@ -3350,6 +3374,9 @@ def C(ns):
 
                 for static_method in defn.static_methods:
                     fdecls += f'extern {proto_for(static_method)};'
+
+                for instance_method in defn.instance_methods:
+                    fdecls += f'extern {proto_for(instance_method)};'
 
             else:
                 raise Fubar([], defn)

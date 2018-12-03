@@ -15,10 +15,13 @@ extern void KLC_var_array_clear_range(void* buffer, size_t begin, size_t end)
 extern var KLC_var_array_get(void* buffer, size_t i)
 extern void KLC_var_array_set(void* buffer, size_t i, var value)
 
-trait Object {
+trait Object() {
+  int someInstanceMethodOnObject() {
+    printf("Inside someInstanceMethodOnObject\n")
+  }
 }
 
-class String {
+class String(Object) {
   c_char* _buffer
   size_t _size
 
@@ -46,8 +49,7 @@ class String {
   }
 }
 
-
-class List {
+class List(Object) {
   int _size
   int _cap
   void* _buffer
