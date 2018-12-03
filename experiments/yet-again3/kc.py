@@ -3816,8 +3816,6 @@ def C(ns):
             ctx.out += f'KLC_MethodEntry {method_list_name}[] = ' '{'
             with ctx.push_indent(1):
                 for instance_method in sorted_instance_methods:
-                    if self.short_name == 'SomeClass':
-                        print(instance_method.name)
                     ctx.out += '{'
                     with ctx.push_indent(1):
                         method_c_name = (
