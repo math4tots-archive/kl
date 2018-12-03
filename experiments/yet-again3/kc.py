@@ -1228,11 +1228,7 @@ def IR(ns):
     ]
 
     @ns
-    class TypeExpression(PseudoExpression):
-        pass
-
-    @ns
-    class TraitOrClassName(TypeExpression):
+    class TraitOrClassName(PseudoExpression):
         node_fields = (
             ('cls', TraitOrClassDefinition),
         )
