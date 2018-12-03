@@ -9,15 +9,15 @@ extern void free(void* p)
 
 struct Foo {
   Baz b
-  int x
-  extern long y
+  c_int x
+  extern c_long y
 }
 
-extern void asdf(unsigned char c) {
+extern void asdf(c_unsigned_char c) {
 }
 
 struct C {
-  int d
+  c_int d
 }
 
 struct B {
@@ -36,18 +36,18 @@ class Animal {
 class Food {
 }
 
-extern int main() {
+extern c_int main() {
   Foo foo
   printf("foo.x = %d\n", foo.x)
   foo.x = 15
   printf("foo.x = %d\n", foo.x)
-  void* fp = malloc(3)
-  unsigned long i = 14
+  void* fp = malloc(static_cast(size_t, 3))
+  c_unsigned_long i = static_cast(c_unsigned_long, 14)
   printf("fp = %p\n", fp)
   free(fp)
 
   ${
-    signed char c
+    c_signed_char c
     asdf(c)
   }
 
@@ -65,5 +65,5 @@ extern int main() {
   }
 
   sayhi()
-  0
+  static_cast(c_int, 0)
 }

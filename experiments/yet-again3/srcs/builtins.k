@@ -5,7 +5,7 @@ from c import malloc
 from c import free
 from c import strlen
 
-extern char* KLC_CopyString(char const* s)
+extern c_char* KLC_CopyString(c_char const* s)
 
 // Helper functions for implementing class List
 extern void* KLC_realloc_var_array(void* buffer, size_t old_cap, size_t new_cap)
@@ -16,21 +16,21 @@ extern var KLC_var_array_get(void* buffer, size_t i)
 extern void KLC_var_array_set(void* buffer, size_t i, var value)
 
 class String {
-  char* _buffer
+  c_char* _buffer
   size_t _size
 
-  static String new(char const* cstr) {
+  static String new(c_char const* cstr) {
     String.fromCString(cstr)
   }
 
-  static String fromCString(char const* cstr) {
+  static String fromCString(c_char const* cstr) {
     String ret = $(String)
     ret->_buffer = KLC_CopyString(cstr)
     ret->_size = strlen(cstr)
     ret
   }
 
-  long normalMethod() {
+  c_long normalMethod() {
     95189
   }
 

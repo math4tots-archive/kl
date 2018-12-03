@@ -949,6 +949,10 @@ def IR(ns):
             self.rtype = rtype
             self.paramtypes = tuple(paramtypes)
             self.vararg = vararg
+            assert isinstance(
+                list(self.paramtypes),
+                typeutil.List[Type],
+            ), self.paramtypes
 
         @property
         def _proxy(self):
@@ -987,50 +991,79 @@ def IR(ns):
         def _proxy(self):
             return (self.base,)
 
-    INTEGRAL_TYPE_NAMES = (
-        'char', 'short', 'int', 'long', 'size_t', 'ptrdiff_t',
-    )
-    ns(INTEGRAL_TYPE_NAMES, 'INTEGRAL_TYPE_NAMES')
+    def nptype(c_name):
+        return PrimitiveTypeDefinition(builtin_token, c_name)
 
-    FLOAT_TYPE_NAMES = (
-        'float', 'double',
-    )
-    ns(FLOAT_TYPE_NAMES, 'FLOAT_TYPE_NAMES')
+    VOID = nptype('void')
+    ns(VOID, 'VOID')
 
-    VAR_CONVERTIBLE_TYPE_NAMES = frozenset(
-        {'void'} | set(INTEGRAL_TYPE_NAMES) | set(FLOAT_TYPE_NAMES))
+    INT = nptype('KLC_int')
+    ns(INT, 'INT')
 
-    PRIMITIVE_TYPE_MAP = {
-        t: PrimitiveTypeDefinition(builtin_token, t)
-        for t in set(
-            list(lexer.PRIMITIVE_TYPE_NAMES) +
-            list(INTEGRAL_TYPE_NAMES) +
-            list(FLOAT_TYPE_NAMES) +
-            ['KLC_int', 'KLC_float']
-        )
+    FLOAT = nptype('KLC_float')
+    ns(FLOAT, 'FLOAT')
+
+    NUMERIC_TYPES = {INT, FLOAT}
+
+    VOIDP = PointerType(VOID)
+    ns(VOIDP, 'VOIDP')
+
+    c_type_name_map = {
+        'c_char': 'char',
+        'c_unsigned_char': 'unsigned char',
+        'c_signed_char': 'signed char',
+        'c_short': 'short',
+        'c_unsigned_short': 'unsigned short',
+        'c_int': 'int',
+        'c_unsigned_int': 'unsigned int',
+        'c_long': 'long',
+        'c_unsigned_long': 'unsigned long',
+        'size_t': 'size_t',
+        'ptrdiff_t': 'ptrdiff_t',
+        'c_float': 'float',
+        'c_double': 'double',
     }
-    ns(PRIMITIVE_TYPE_MAP, 'PRIMITIVE_TYPE_MAP')
 
-    INTEGRAL_TYPES = {
-        t for t in PRIMITIVE_TYPE_MAP.values()
-            if t.name in INTEGRAL_TYPE_NAMES
+    c_type_map = {
+        kc_name: nptype(c_name)
+            for kc_name, c_name in c_type_name_map.items()
+    }
+    ns(c_type_map, 'c_type_map')
+
+    for kc_name, ptype in c_type_map.items():
+        ns(ptype, kc_name)
+
+    CHAR_TYPES = {
+        c_type_map['c_char'],
+        c_type_map['c_signed_char'],
+        c_type_map['c_unsigned_char'],
+    }
+    ns(CHAR_TYPES, 'CHAR_TYPES')
+
+    INTEGRAL_TYPES = CHAR_TYPES | {
+        INT,
+        c_type_map['c_short'],
+        c_type_map['c_unsigned_short'],
+        c_type_map['c_int'],
+        c_type_map['c_unsigned_int'],
+        c_type_map['c_long'],
+        c_type_map['c_unsigned_long'],
+        c_type_map['size_t'],
+        c_type_map['ptrdiff_t'],
     }
     ns(INTEGRAL_TYPES, 'INTEGRAL_TYPES')
 
     FLOAT_TYPES = {
-        t for t in PRIMITIVE_TYPE_MAP.values()
-            if t.name in FLOAT_TYPE_NAMES
+        FLOAT,
+        c_type_map['c_float'],
+        c_type_map['c_double'],
     }
     ns(FLOAT_TYPES, 'FLOAT_TYPES')
 
     NUMERIC_TYPES = INTEGRAL_TYPES | FLOAT_TYPES
     ns(NUMERIC_TYPES, 'NUMERIC_TYPES')
 
-    VOID = PRIMITIVE_TYPE_MAP['void']
-    ns(VOID, 'VOID')
-
-    VOIDP = PointerType(VOID)
-    ns(VOIDP, 'VOIDP')
+    VAR_CONVERTIBLE_TYPES = {VOID} | NUMERIC_TYPES
 
     class VarType(Type, Retainable):
         pass
@@ -1080,17 +1113,14 @@ def IR(ns):
 
         pair = (st.name, dt.name)
 
-        if pair in (
-                ('int', 'long'),
-                ('int', 'size_t'),
-                ('int', 'unsigned long')):
-            return expr
+        if st in INTEGRAL_TYPES and dt == INT:
+            return Cast(expr.token, expr, dt)
 
-        if frozenset(pair) in frozenset(map(frozenset, [
-                ['unsigned char', 'char'],
-                ['signed char', 'char'],
-                ['unsigned char', 'signed char']])):
-            return expr
+        if st in FLOAT_TYPES and dt == FLOAT:
+            return Cast(expr.token, expr, dt)
+
+        if st in CHAR_TYPES and dt in CHAR_TYPES:
+            return Cast(expr.token, expr, dt)
 
         raise convert_error(st, dt, expr, scope)
 
@@ -1100,7 +1130,7 @@ def IR(ns):
 
     @_convert.on(VarType, PTD, Expression)
     def _convert(st, dt, expr, scope):
-        if dt.name in VAR_CONVERTIBLE_TYPE_NAMES:
+        if dt in VAR_CONVERTIBLE_TYPES:
             return Cast(expr.token, expr, dt)
         raise convert_error(st, dt, expr, scope)
 
@@ -1114,7 +1144,7 @@ def IR(ns):
 
     @_convert.on(PTD, VarType, Expression)
     def _convert(st, dt, expr, scope):
-        if st.name in VAR_CONVERTIBLE_TYPE_NAMES:
+        if st in VAR_CONVERTIBLE_TYPES:
             return Cast(expr.token, expr, dt)
         raise convert_error(st, dt, expr, scope)
 
@@ -1364,15 +1394,15 @@ def IR(ns):
 
     @ns
     class IntLiteral(Expression):
-        type = PRIMITIVE_TYPE_MAP['int']
+        type = INT
 
         node_fields = (
             ('value', int),
         )
 
     @ns
-    class DoubleLiteral(Expression):
-        type = PRIMITIVE_TYPE_MAP['double']
+    class FloatLiteral(Expression):
+        type = FLOAT
 
         node_fields = (
             ('value', float),
@@ -1380,11 +1410,13 @@ def IR(ns):
 
     @ns
     class StringLiteral(Expression):
-        type = PointerType(ConstType(PRIMITIVE_TYPE_MAP['char']))
-
         node_fields = (
             ('value', str),
         )
+
+        @lazy(lambda: Type)
+        def type(self):
+            return PointerType(ConstType(IR.c_char))
 
     @ns
     class ThrowStringLiteral(Expression):
@@ -1687,6 +1719,8 @@ def parser(ns):
         def promise_type_from_name(scope, token, name):
             @Promise
             def promise():
+                if name not in scope and name in IR.c_type_map:
+                    return IR.c_type_map[name]
                 with scope.push(token):
                     type = scope[name]
                 if not isinstance(type, IR.Type):
@@ -1696,23 +1730,7 @@ def parser(ns):
             return promise
 
         def parse_type(scope):
-            token = peek()
-            if token.type in lexer.C_PRIMITIVE_TYPE_SPECIFIERS:
-                parts = [gettok().type]
-                while peek().type in lexer.C_PRIMITIVE_TYPE_SPECIFIERS:
-                    parts.append(gettok().type)
-                name = ' '.join(parts)
-                if name not in IR.PRIMITIVE_TYPE_MAP:
-                    with scope.push(token):
-                        raise scope.error(f'{repr(name)} is not a type')
-                type_promise = (
-                    Promise.value(IR.PRIMITIVE_TYPE_MAP[name])
-                )
-            elif consume('var'):
-                type_promise = Promise.value(IR.VAR_TYPE)
-            else:
-                name = expect_id()
-                type_promise = promise_type_from_name(scope, token, name)
+            type_promise = parse_root_type(scope)
             while True:
                 token = peek()
                 if consume('*'):
@@ -1722,6 +1740,19 @@ def parser(ns):
                 else:
                     break
             return type_promise
+
+        def parse_root_type(scope):
+            token = peek()
+            if consume('int'):
+                return Promise.value(IR.INT)
+            elif consume('float'):
+                return Promise.value(IR.FLOAT)
+            elif consume('void'):
+                return Promise.value(IR.VOID)
+            elif consume('var'):
+                return Promise.value(IR.VAR_TYPE)
+            name = expect_id()
+            return promise_type_from_name(scope, token, name)
 
         def parse_param_list(scope):
             token = expect('(')
@@ -1784,7 +1815,7 @@ def parser(ns):
                 # TODO: Figure out a better story for tuthiness.
                 return IR.PrimitiveUnop(
                     token,
-                    IR.PRIMITIVE_TYPE_MAP['int'],
+                    IR.c_int,
                     '!!',
                     expr,
                 )
@@ -1955,7 +1986,7 @@ def parser(ns):
                         left.type == right.type):
                     return IR.PrimitiveBinop(
                         token,
-                        IR.PRIMITIVE_TYPE_MAP['int'],
+                        IR.INT,
                         op,
                         left,
                         right,
@@ -2316,7 +2347,7 @@ def parser(ns):
             if consume('INT'):
                 return Promise.value(IR.IntLiteral(token, token.value))
             if consume('FLOAT'):
-                return Promise.value(IR.DoubleLiteral(token, token.value))
+                return Promise.value(IR.FloatLiteral(token, token.value))
             if consume('STRING'):
                 return Promise.value(IR.StringLiteral(token, token.value))
             if consume('throw'):
@@ -2727,7 +2758,7 @@ def C(ns):
         extern=False,
         rtype=IR.VAR_TYPE,
         paramtypes=[
-            IR.PRIMITIVE_TYPE_MAP['int'],
+            IR.c_int,
             IR.PointerType(IR.VAR_TYPE),
         ],
         vararg=False,
@@ -3310,7 +3341,9 @@ def C(ns):
                 pnames=pnames,
             )
 
-    def declare_raw_c_functype(self, name, pnames=None):
+    def declare_raw_c_functype(self: IR.FunctionType, name, pnames=None):
+        assert isinstance(self, IR.FunctionType), self
+
         if pnames is None:
             pnames = [''] * len(self.paramtypes)
 
@@ -3720,9 +3753,9 @@ def C(ns):
         if st == IR.VOID:
             return ctx.declare(IR.VAR_TYPE)
 
-        if st.name in IR.INTEGRAL_TYPE_NAMES:
+        if st in IR.INTEGRAL_TYPES:
             convert_func = 'KLC_var_from_int'
-        elif st.name in IR.FLOAT_TYPE_NAMES:
+        elif st in IR.FLOAT_TYPES:
             convert_func = 'KLC_var_from_float'
         else:
             assert False, st
@@ -3754,12 +3787,12 @@ def C(ns):
         if dt == IR.VOID:
             return
 
-        if dt.name in IR.INTEGRAL_TYPE_NAMES:
+        if dt in IR.INTEGRAL_TYPES:
             convert_func = 'KLC_var_to_int'
-            extract_type = IR.PRIMITIVE_TYPE_MAP['KLC_int']
-        elif dt.name in IR.FLOAT_TYPE_NAMES:
+            extract_type = IR.INT
+        elif dt in IR.FLOAT_TYPES:
             convert_func = 'KLC_var_to_float'
-            extract_type = IR.PRIMITIVE_TYPE_MAP['KLC_float']
+            extract_type = IR.FLOAT
         else:
             assert False, dt
 
@@ -3860,13 +3893,13 @@ def C(ns):
 
     @E.on(IR.IntLiteral)
     def E(self, ctx):
-        retvar = ctx.declare(IR.PRIMITIVE_TYPE_MAP['int'])
+        retvar = ctx.declare(IR.INT)
         ctx.out += f'{retvar} = {self.value};'
         return retvar
 
-    @E.on(IR.DoubleLiteral)
+    @E.on(IR.FloatLiteral)
     def E(self, ctx):
-        retvar = ctx.declare(IR.PRIMITIVE_TYPE_MAP['double'])
+        retvar = ctx.declare(IR.FLOAT)
         ctx.out += f'{retvar} = {self.value};'
         return retvar
 

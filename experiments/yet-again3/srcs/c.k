@@ -5,7 +5,7 @@
 
 typedef * size_t
 
-extern int printf(char const* msg, ...)
+extern c_int printf(c_char const* msg, ...)
 extern void* malloc(size_t size)
 extern void free(void* p)
-extern size_t strlen(char const* str)
+extern size_t strlen(c_char const* str)
