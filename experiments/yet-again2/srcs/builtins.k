@@ -53,6 +53,20 @@ class List {
     $(List)
   }
 
+  size_t __GETsize() {
+    _size
+  }
+
+  void push(var x) {
+    if (_size >= _cap) {
+      size_t old_cap = _cap
+      _cap = _cap * static_cast(size_t, 2) + static_cast(size_t, 16)
+      _buffer = KLC_realloc_var_array(_buffer, old_cap, _cap)
+    }
+    KLC_var_array_set(_buffer, _size, x)
+    _size = _size + static_cast(size_t, 1)
+  }
+
   var __getitem(size_t i) {
     if (i >= _size) {
       throw "Index out of bounds"

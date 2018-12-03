@@ -1173,6 +1173,11 @@ def IR(ns):
             ('type', Type),
         )
 
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if self.type == IR.VOID:
+                raise TypeError(str(self))
+
     @ns
     class FunctionName(PseudoExpression):
         node_fields = (
@@ -1379,13 +1384,6 @@ def IR(ns):
 
         node_fields = (
             ('value', str),
-        )
-
-    @ns
-    class PointerCast(Expression):
-        node_fields = (
-            ('type', PointerType),
-            ('expr', Expression),
         )
 
     @ns
@@ -1847,6 +1845,7 @@ def parser(ns):
                             ))
                     else:
                         expr_promises.append(parse_expression(scope))
+                        expect('\n')
                     consume_all('\n')
             @Promise
             def promise():
@@ -1963,8 +1962,6 @@ def parser(ns):
                     )
                 with scope.push(token):
                     key = (op, left.type, right.type)
-                    print(left.type in IR.NUMERIC_TYPES)
-                    print(f'IR.NUMERIC_TYPES = {IR.NUMERIC_TYPES}')
                     raise scope.error(f'Unsupported binop {key}')
             return promise
 
@@ -2151,6 +2148,27 @@ def parser(ns):
                         )
             return promise
 
+        def process_assignment(scope, token, target, val):
+            if isinstance(target, IR.LocalName):
+                decl = target.decl
+                return IR.SetLocalName(token, decl, val)
+            elif isinstance(target, IR.GetClassField):
+                return IR.SetClassField(
+                    token,
+                    target.field_defn,
+                    target.expr,
+                    val,
+                )
+            elif isinstance(target, IR.GetStructField):
+                return IR.SetStructField(
+                    token,
+                    target.expr,
+                    target.field_defn,
+                    val,
+                )
+            with scope.push(token):
+                raise scope.error(f'Not assignable')
+
         def parse_postfix(scope):
             expr = parse_primary(scope)
             while True:
@@ -2165,21 +2183,14 @@ def parser(ns):
                     )
                 elif consume('.'):
                     name = expect_id()
-                    if consume('='):
-                        valp = parse_expression(scope)
-                        expr = promise_set_field(
-                            scope, token, expr, name, valp)
-                    else:
-                        expr = promise_get_field(scope, token, expr, name)
+                    expr = promise_get_field(scope, token, expr, name)
                 elif consume('->'):
                     name = expect_id()
-                    if consume('='):
-                        valp = parse_expression(scope)
-                        expr = promise_set_field_arrow(
-                            scope, token, expr, name, valp)
-                    else:
-                        expr = promise_get_field_arrow(
+                    expr = promise_get_field_arrow(
                             scope, token, expr, name)
+                elif consume('='):
+                    valp = parse_expression(scope)
+                    expr = pcall(process_assignment, scope, token, expr, valp)
                 else:
                     break
             return expr
@@ -2247,21 +2258,13 @@ def parser(ns):
             return promise
 
         def make_cast(scope, token, type, arg):
-            if isinstance(type, IR.PointerType):
-                if isinstance(arg.type, IR.PointerType):
-                    return IR.PointerCast(
-                        token,
-                        type,
-                        arg,
-                    )
-                else:
-                    with scope.push(token):
-                        raise scope.error(
-                            f'Only pointer can be cast to other pointer '
-                            f'types but got {arg.type}')
+            if ((isinstance(type, IR.PointerType) and
+                    isinstance(arg.type, IR.PointerType) or
+                    (type in IR.NUMERIC_TYPES and
+                        arg.type in IR.NUMERIC_TYPES))):
+                return IR.Cast(token, arg, type)
             with scope.push(token):
-                raise scope.error(
-                    f'Only pointer casts are supported right now')
+                raise scope.error(f'Unsupported cast to {type}')
 
         def parse_if(scope):
             token = expect('if')
@@ -3554,7 +3557,8 @@ def C(ns):
             ),
             body=IR.Cast(
                 token,
-                IR.Cast(token, self.body, self.rtype),
+                self.body if self.rtype == IR.VOID else
+                    IR.Cast(token, self.body, self.rtype),
                 IR.VAR_TYPE,
             ),
         )
@@ -3686,6 +3690,8 @@ def C(ns):
 
     @E.on(IR.Cast)
     def E(self, ctx):
+        if self.type == IR.VOID:
+            raise TypeError(str(self))
         return cast_expr(ctx, self.expr, self.type)
 
     def cast_expr(ctx, expr, dt):
@@ -3776,6 +3782,13 @@ def C(ns):
         retvar = ctx.declare(IR.VAR_TYPE)
         ctx.out += f'{retvar} = KLC_var_from_ptr((KLC_Header*) {c_name});'
         ctx.retain(retvar);
+        return retvar
+
+    @_cast.on(IR.PointerType, IR.PointerType)
+    def _cast(st, dt, c_name, ctx, token):
+        retvar = ctx.declare(dt)
+        ctx.out += f'{retvar} = (({declare(dt, "")}) {c_name});'
+        ctx.retain(retvar)
         return retvar
 
     def _get_struct_field_chain(expr):
@@ -4024,14 +4037,6 @@ def C(ns):
         malloc_name = get_class_malloc_name(self.type)
         retvar = ctx.declare(self.type)
         ctx.out += f'{retvar} = {malloc_name}();'
-        return retvar
-
-    @E.on(IR.PointerCast)
-    def E(self, ctx):
-        exprvar = E(self.expr, ctx)
-        retvar = ctx.declare(self.type)
-        ctx.out += f'{retvar} = (({declare(self.type, "")}) {exprvar});'
-        ctx.retain(retvar)
         return retvar
 
     @E.on(IR.ThrowStringLiteral)
