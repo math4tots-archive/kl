@@ -1313,6 +1313,21 @@ def IR(ns):
         )
 
     @ns
+    class If(Expression):
+        node_fields = (
+            ('cond', Expression),
+            ('left', Expression),
+            ('right', Expression),
+        )
+
+        @lazy(lambda: Type)
+        def type(self):
+            if self.left.type == self.right.type:
+                return self.left.type
+            else:
+                return IR.VOID
+
+    @ns
     class Malloc(Expression):
         node_fields = (
             ('type', Type),
@@ -1745,6 +1760,26 @@ def parser(ns):
                     return True
 
             return False
+
+        def promise_truthy(scope, token, expr_promise):
+            @Promise
+            def promise():
+                expr = expr_promise.resolve()
+                if expr.type not in IR.NUMERIC_TYPES:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'Truthiness of non-numeric types '
+                            f'not yet supported')
+                # This is a bit of a hack, considering that '!!'
+                # is actually two operators.
+                # TODO: Figure out a better story for tuthiness.
+                return IR.PrimitiveUnop(
+                    token,
+                    IR.PRIMITIVE_TYPE_MAP['int'],
+                    '!!',
+                    expr,
+                )
+            return promise
 
         def promise_set_local_name(scope, token, decl_promise, expr_promise):
             @Promise
@@ -2214,8 +2249,36 @@ def parser(ns):
                 raise scope.error(
                     f'Only pointer casts are supported right now')
 
+        def parse_if(scope):
+            token = expect('if')
+            expect('(')
+            with skipping_newlines(True):
+                cond_promise = promise_truthy(
+                    token,
+                    scope,
+                    parse_expression(scope),
+                )
+                expect(')')
+            body_promise = parse_block(scope)
+            if consume('else'):
+                if at('if'):
+                    other_promise = parse_if(scope)
+                else:
+                    other_promise = parse_block(scope)
+            else:
+                other_promise = Promise.value(IR.Block(token, [], []))
+            @Promise
+            def promise():
+                cond = cond_promise.resolve()
+                body = body_promise.resolve()
+                other = other_promise.resolve()
+                return IR.If(token, cond, body, other)
+            return promise
+
         def parse_primary(scope):
             token = peek()
+            if at('if'):
+                return parse_if(scope)
             if consume('$'):
                 if at('{'):
                     return parse_block(scope)
@@ -3918,6 +3981,29 @@ def C(ns):
         retvar = ctx.declare(self.type)
         ctx.out += f'{retvar} = {leftvar} {self.op} {rightvar};'
         return retvar
+
+    @E.on(IR.If)
+    def E(self, ctx):
+        condvar = E(self.cond, ctx)
+
+        if self.type != IR.VOID:
+            retvar = ctx.declare(self.type)
+
+        ctx.out += f'if ({condvar})'
+        with ctx.retain_scope():
+            leftvar = E(self.left, ctx)
+            if self.type != IR.VOID:
+                ctx.out += f'{retvar} = {leftvar};'
+        ctx.out += 'else'
+        with ctx.retain_scope():
+            rightvar = E(self.right, ctx)
+            if self.type != IR.VOID:
+                ctx.out += f'{retvar} = {rightvar};'
+
+        if self.type != IR.VOID:
+            ctx.retain(retvar)
+            return retvar
+
 
     @E.on(IR.Malloc)
     def E(self, ctx):
