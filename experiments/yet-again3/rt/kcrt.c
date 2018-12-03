@@ -1,6 +1,7 @@
 #include "kcrt.h"
-#include <stdlib.h>
+#include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct KLC_StackEntry KLC_StackEntry;
@@ -21,6 +22,18 @@ struct KLC_Stack {
   size_t size, cap;
   KLC_StackEntry* buffer;
 };
+
+static const char* KLC_tag_to_str(int tag) {
+  switch (tag) {
+    case KLC_TAG_POINTER:
+      return "POINTER";
+    case KLC_TAG_INT:
+      return "INT";
+    case KLC_TAG_FLOAT:
+      return "FLOAT";
+  }
+  return "INVALID";
+}
 
 char* KLC_CopyString(const char* s) {
   char* ret = (char*) malloc(sizeof(char) * (strlen(s) + 1));
@@ -85,6 +98,40 @@ KLC_Error* KLC_new_error_with_message(KLC_Stack* stack, const char* msg) {
   error->stack = (KLC_StackEntry*) malloc(nbytes);
   memcpy(error->stack, stack->buffer, nbytes);
   return error;
+}
+
+static size_t KLC_estimate_sprintf_size(const char* format) {
+  size_t len = strlen(format);
+  size_t estimate = len + 1;
+  size_t i;
+  for (i = 0; i < len; i++) {
+    if (format[i] == '%') {
+      estimate += 64;
+    }
+  }
+  return estimate * sizeof(char);
+}
+
+static KLC_Error* KLC_verrorf(
+    size_t hint, KLC_Stack* stack, const char* format, va_list args) {
+  size_t estimate_buffer_size = KLC_estimate_sprintf_size(format) + hint;
+  char* buffer = (char*) malloc(estimate_buffer_size);
+  KLC_Error* error;
+  vsprintf(buffer, format, args);
+  error = KLC_new_error_with_message(stack, buffer);
+  free(buffer);
+  return error;
+}
+
+/* The 'hint' argument is a hint for how much extra memory should be allocated */
+/* for the buffer, for the error message. */
+KLC_Error* KLC_errorf(size_t hint, KLC_Stack* stack, const char* format, ...) {
+  KLC_Error* err;
+  va_list args;
+  va_start(args, format);
+  err = KLC_verrorf(hint, stack, format, args);
+  va_end(args);
+  return err;
 }
 
 void KLC_delete_error(KLC_Error* error) {
@@ -220,11 +267,25 @@ KLC_var KLC_var_from_float(KLC_float f) {
 KLC_Error* KLC_var_to_ptr(
     KLC_Stack* stack, KLC_Header** out, KLC_var v, KLC_Class* cls) {
   if (v.tag != KLC_TAG_POINTER) {
-    return KLC_new_error_with_message(stack, "Expected class type");
+    return KLC_errorf(
+        0,
+        stack,
+        "Expected class type but got %s",
+        KLC_tag_to_str(v.tag));
   }
   if (v.u.p->cls != cls) {
-    return KLC_new_error_with_message(
-        stack, "Tried to cast to incorrect class type");
+    return KLC_errorf(
+        strlen(v.u.p->cls->module_name) +
+          strlen(v.u.p->cls->short_name) +
+          strlen(cls->module_name) +
+          strlen(cls->short_name),
+        stack,
+        "Tried to cast %s#%s instance to %s#%s",
+        v.u.p->cls->module_name,
+        v.u.p->cls->short_name,
+        cls->module_name,
+        cls->short_name
+      );
   }
   *out = v.u.p;
   return NULL;
@@ -232,7 +293,7 @@ KLC_Error* KLC_var_to_ptr(
 
 KLC_Error* KLC_var_to_int(KLC_Stack* stack, KLC_int* out, KLC_var v) {
   if (v.tag != KLC_TAG_INT) {
-    return KLC_new_error_with_message(stack, "Expected integral type");
+    return KLC_errorf(0, stack, "Expected INT but got %s", KLC_tag_to_str(v.tag));
   }
   *out = v.u.i;
   return NULL;
@@ -240,7 +301,8 @@ KLC_Error* KLC_var_to_int(KLC_Stack* stack, KLC_int* out, KLC_var v) {
 
 KLC_Error* KLC_var_to_float(KLC_Stack* stack, KLC_float* out, KLC_var v) {
   if (v.tag != KLC_TAG_FLOAT) {
-    return KLC_new_error_with_message(stack, "Expected float type");
+    return KLC_errorf(
+      0, stack, "Expected FLOAT but got %s", KLC_tag_to_str(v.tag));
   }
   *out = v.u.f;
   return NULL;
@@ -283,19 +345,26 @@ KLC_Error* KLC_call_method(
   KLC_Class* cls;
   KLC_MethodEntry* method_entry;
   if (argc < 1) {
-    return KLC_new_error_with_message(stack, "FUBAR: KLC_call_method with argc < 1");
+    return KLC_errorf(
+        0, stack, "FUBAR: KLC_call_method with argc < 1, argc = %d", argc);
   }
   /* TODO: Method call for primitive types */
   cls = KLC_get_class(argv[0]);
   if (!cls) {
-    int* p = NULL;
-    int i = *p;
-    printf("i = %d\n", i);
-    return KLC_new_error_with_message(stack, "FUBAR: Could not get class for method call");
+    return KLC_errorf(0, stack, "FUBAR: Could not get class for method call");
   }
   method_entry = KLC_find_method(cls, name);
   if (!method_entry) {
-    return KLC_new_error_with_message(stack, "Method not found");
+    return KLC_errorf(
+      strlen(name) +
+        strlen(cls->module_name) +
+        strlen(cls->short_name),
+      stack,
+      "Method '%s' not found for '%s#%s'",
+      name,
+      cls->module_name,
+      cls->short_name
+    );
   }
   return method_entry->method(stack, out, argc, argv);
 }

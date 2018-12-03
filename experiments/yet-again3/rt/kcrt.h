@@ -54,6 +54,7 @@ void KLC_stack_pop(KLC_Stack*);
 
 void KLC_panic_with_error(KLC_Error* error);
 KLC_Error* KLC_new_error_with_message(KLC_Stack*, const char*);
+KLC_Error* KLC_errorf(size_t hint, KLC_Stack*, const char*, ...);
 void KLC_delete_error(KLC_Error*);
 const char* KLC_get_error_message(KLC_Error*);
 
