@@ -915,6 +915,12 @@ def IR(ns):
             ('name', str),
         )
 
+        def __eq__(self, other):
+            return type(self) is type(other) and self.name == other.name
+
+        def __hash__(self):
+            return hash((type(self), self.name))
+
     class ProxyMixin:
         def __eq__(self, other):
             return type(self) is type(other) and self._proxy == other._proxy
@@ -996,7 +1002,12 @@ def IR(ns):
 
     PRIMITIVE_TYPE_MAP = {
         t: PrimitiveTypeDefinition(builtin_token, t)
-        for t in list(lexer.PRIMITIVE_TYPE_NAMES) + ['KLC_int', 'KLC_float']
+        for t in set(
+            list(lexer.PRIMITIVE_TYPE_NAMES) +
+            list(INTEGRAL_TYPE_NAMES) +
+            list(FLOAT_TYPE_NAMES) +
+            ['KLC_int', 'KLC_float']
+        )
     }
     ns(PRIMITIVE_TYPE_MAP, 'PRIMITIVE_TYPE_MAP')
 
@@ -1951,7 +1962,10 @@ def parser(ns):
                         right,
                     )
                 with scope.push(token):
-                    raise scope.error(f'Unsupported binop')
+                    key = (op, left.type, right.type)
+                    print(left.type in IR.NUMERIC_TYPES)
+                    print(f'IR.NUMERIC_TYPES = {IR.NUMERIC_TYPES}')
+                    raise scope.error(f'Unsupported binop {key}')
             return promise
 
         def promise_unop(scope, token, op, expr_promise):

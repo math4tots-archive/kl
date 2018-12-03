@@ -54,16 +54,16 @@ class List {
   }
 
   var __getitem(size_t i) {
-    // if (i >= _size) {
-    //   throw "Index out of bounds"
-    // }
+    if (i >= _size) {
+      throw "Index out of bounds"
+    }
     KLC_var_array_get(_buffer, i)
   }
 
   var __setitem(size_t i, var value) {
-    // if (i >= _size) {
-    //   throw "Index out of bounds"
-    // }
+    if (i >= _size) {
+      throw "Index out of bounds"
+    }
     KLC_var_array_set(_buffer, i, value)
     value
   }
