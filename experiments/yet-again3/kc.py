@@ -280,6 +280,24 @@ def typeutil(ns):
     And = AndType([object])
     ns(And, 'And')
 
+    class OrType(FakeType):
+        def __init__(self, subtypes):
+            self.subtypes = subtypes
+
+        def __getitem__(self, subtypes):
+            assert isinstance(subtypes, tuple), subtypes
+            return type(self)(subtypes)
+
+        def __repr__(self):
+            subtypes = ','.join(map(repr, self.subtypes))
+            return f'Or[{subtypes}]'
+
+        def __instancecheck__(self, obj):
+            return any(isinstance(obj, t) for t in self.subtypes)
+
+    Or = OrType([object])
+    ns(Or, 'Or')
+
     class NotType(SingleArgumentFakeType):
         def __instancecheck__(self, obj):
             return not isinstance(obj, self.subtype)
@@ -820,7 +838,37 @@ def IR(ns):
 
     @ns
     class TraitOrClassDefinition:
-        pass
+        defined = False
+
+        @lazy(lambda: typeutil.List[StaticMethodDefinition])
+        def static_methods(self):
+            return [p.resolve() for p in self.static_method_promises]
+
+        @lazy(lambda: typeutil.List[InstanceMethodDefinition])
+        def instance_methods(self):
+            return [p.resolve() for p in self.instance_method_promises]
+
+        @lazy(lambda: typeutil.List[InstanceMethodDefinition])
+        def instance_method_closure(self):
+            methods = []
+            seen = set()
+
+            for method in self.instance_methods:
+                if method.name not in seen:
+                    methods.append(method)
+                seen.add(method.name)
+
+            for trait in self.traits:
+                for method in trait.instance_method_closure:
+                    if method.name not in seen:
+                        methods.append(method)
+                    seen.add(method.name)
+
+            return methods
+
+        @lazy(lambda: typeutil.List[TraitDefinition])
+        def traits(self):
+            return self.traits_promise.resolve()
 
     @ns
     class StructDefinition(StructOrClassDefinition):
@@ -833,19 +881,12 @@ def IR(ns):
             ('delete_hook_promise', Promise),
             ('static_method_promises', typeutil.List[Promise]),
             ('instance_method_promises', typeutil.List[Promise]),
+            ('traits_promise', Promise),
         )
 
         @lazy(lambda: DeleteHook)
         def delete_hook(self):
             return self.delete_hook_promise.resolve()
-
-        @lazy(lambda: typeutil.List[StaticMethodDefinition])
-        def static_methods(self):
-            return [p.resolve() for p in self.static_method_promises]
-
-        @lazy(lambda: typeutil.List[InstanceMethodDefinition])
-        def instance_methods(self):
-            return [p.resolve() for p in self.instance_method_promises]
 
     @ns
     class TraitDefinition(
@@ -857,15 +898,8 @@ def IR(ns):
             ('short_name', str),
             ('static_method_promises', typeutil.List[Promise]),
             ('instance_method_promises', typeutil.List[Promise]),
+            ('traits_promise', Promise),
         )
-
-        @lazy(lambda: typeutil.List[StaticMethodDefinition])
-        def static_methods(self):
-            return [p.resolve() for p in self.static_method_promises]
-
-        @lazy(lambda: typeutil.List[InstanceMethodDefinition])
-        def instance_methods(self):
-            return [p.resolve() for p in self.instance_method_promises]
 
     @ns
     class StaticMethodDefinition(Declaration):
@@ -916,9 +950,17 @@ def IR(ns):
         def rtype(self):
             return self.rtype_promise.resolve()
 
-        @lazy(lambda: ClassDefinition)
+        @lazy(lambda: TraitOrClassDefinition)
         def cls(self):
             return self.cls_promise.resolve()
+
+        @lazy(lambda: typeutil.Or[VarType, ClassDefinition])
+        def this_type(self):
+            return (
+                VAR_TYPE
+                if isinstance(self.cls, TraitDefinition) else
+                self.cls
+            )
 
         @lazy(lambda: ParameterList)
         def plist(self):
@@ -1460,15 +1502,15 @@ def IR(ns):
     @ns
     class This(Expression):
         node_fields = (
-            ('cls', ClassDefinition),
+            ('type', typeutil.Or[ClassDefinition, VAR_TYPE]),
         )
 
-        @property
-        def type(self):
-            return self.cls
-
         def __repr__(self):
-            return f'This({self.cls.module_name}.{self.cls.short_name})'
+            if isinstance(self.type, ClassDefinition):
+                return f'This({self.cls.module_name}.{self.cls.short_name})'
+            elif self.type == VAR_TYPE:
+                return f'This(var)'
+            assert False, self.type
 
     @ns
     class IntLiteral(Expression):
@@ -1544,7 +1586,8 @@ def IR(ns):
             # context. Also the calling convention is different.
             ('extern', bool),
 
-            ('this_type', typeutil.Optional[ClassDefinition]),
+            ('this_type',
+                typeutil.Optional[typeutil.Or[ClassDefinition, VarType]]),
         )
 
     def new_builtin_extern_struct(name):
@@ -2579,8 +2622,39 @@ def parser(ns):
 
             return promise
 
+        def parse_traits(scope):
+            token_and_names = []
+            if consume('('):
+                while not consume(')'):
+                    token = peek()
+                    token_and_names.append([token, expect_id()])
+                    if not consume(','):
+                        expect(')')
+                        break
+
+            @Promise
+            def promise():
+                traits = []
+                for token, name in token_and_names:
+                    with scope.push(token):
+                        trait = scope[name]
+                        if not isinstance(trait, IR.TraitDefinition):
+                            with scope.push(trait.token):
+                                raise scope.error(f'{name} is not a trait')
+                        if not trait.defined:
+                            with scope.push(trait.token):
+                                raise scope.error(
+                                    f'Base traits must be defined '
+                                    f'before any class or trait that '
+                                    f'derives from it')
+                    traits.append(trait)
+                return traits
+
+            return promise
+
         def parse_class(is_trait, outer_scope, token):
             name = expect_id()
+            traits_promise = parse_traits(outer_scope)
 
             field_promises = None if is_trait else []
             static_method_promises = []
@@ -2593,6 +2667,7 @@ def parser(ns):
                     short_name=name,
                     static_method_promises=static_method_promises,
                     instance_method_promises=instance_method_promises,
+                    traits_promise=traits_promise,
                 )
             else:
                 defn = IR.ClassDefinition(
@@ -2604,6 +2679,7 @@ def parser(ns):
                     delete_hook_promise=Promise(lambda: delete_hook_ptr[0]),
                     static_method_promises=static_method_promises,
                     instance_method_promises=instance_method_promises,
+                    traits_promise=traits_promise,
                 )
             outer_scope[name] = defn
 
@@ -2673,6 +2749,8 @@ def parser(ns):
                         fields,
                         allow_retainable_fields=True,
                     )
+                defn.traits  # verify all traits are defined by now
+                defn.defined = True
                 return defn
 
             return promise
@@ -2684,7 +2762,11 @@ def parser(ns):
             method_scope['@ec'] = IR.ExpressionContext(
                 token=token,
                 extern=False,
-                this_type=cls,
+                this_type=(
+                    IR.VAR_TYPE
+                    if isinstance(cls, IR.TraitDefinition) else
+                    cls
+                ),
             )
             body_promise = parse_block(method_scope)
             defn_promise = Promise.value(IR.InstanceMethodDefinition(
@@ -3698,15 +3780,17 @@ def C(ns):
         assert isinstance(self, IR.TraitOrClassDefinition), self
         method_list_name = get_method_list_name(self)
         descriptor_name = get_class_descriptor_name(self)
+        sorted_instance_methods = sorted(
+            self.instance_method_closure,
+            key=lambda method: method.name,
+        )
 
-        if self.instance_methods:
+        if sorted_instance_methods:
             ctx.out += f'KLC_MethodEntry {method_list_name}[] = ' '{'
             with ctx.push_indent(1):
-                sorted_instance_methods = sorted(
-                    self.instance_methods,
-                    key=lambda method: method.name,
-                )
                 for instance_method in sorted_instance_methods:
+                    if self.short_name == 'SomeClass':
+                        print(instance_method.name)
                     ctx.out += '{'
                     with ctx.push_indent(1):
                         method_c_name = (
@@ -3726,7 +3810,7 @@ def C(ns):
                 ctx.out += f'NULL,'
             else:
                 ctx.out += f'&{get_class_deleter_name(self)},'
-            if self.instance_methods:
+            if sorted_instance_methods:
                 ctx.out += (
                     f'sizeof({method_list_name})/sizeof(KLC_MethodEntry),'
                 )
@@ -3767,6 +3851,7 @@ def C(ns):
     @D.on(IR.InstanceMethodDefinition)
     def D(self, ctx):
         token = self.token
+        this_type = self.this_type
         emit_function_body(
             ctx=ctx,
             debug_name=f'{self.cls.short_name}.{self.name}',
@@ -3776,7 +3861,7 @@ def C(ns):
             start_callback=lambda ctx: copy_method_params_to_locals(
                 ctx=ctx,
                 token=self.token,
-                this_type=self.cls,
+                this_type=this_type,
                 paramtypes=[p.type for p in self.plist.params],
                 c_local_names=list(map(cvarname, self.plist.params)),
             ),

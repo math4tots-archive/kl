@@ -1,8 +1,24 @@
 from c import printf
 
-trait SomeTrait {
+trait SomeTrait() {
   static int someStaticMethod() {
     printf("Inside someStaticMethod\n")
+  }
+
+  int someInstanceMethod() {
+    printf("Inside someInstanceMethod\n")
+  }
+}
+
+trait SomeOtherTrait {
+  void someOtherInstanceMethod() {
+    printf("Inside someOtherInstanceMethod\n")
+  }
+}
+
+class SomeClass(SomeTrait, SomeOtherTrait) {
+  static SomeClass new() {
+    $(SomeClass)
   }
 }
 
@@ -15,6 +31,10 @@ extern c_int main() {
   printf("list.size = %ld\n", size)
 
   SomeTrait.someStaticMethod()
+
+  SomeClass someClass = SomeClass()
+  someClass.someInstanceMethod()
+  someClass.someOtherInstanceMethod()
 
   static_cast(c_int, 0)
 }
