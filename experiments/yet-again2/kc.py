@@ -906,6 +906,10 @@ def IR(ns):
         mutable = True
 
     @ns
+    class DeleteQueueDeclaration(VariableDeclaration):
+        node_fields = ()
+
+    @ns
     class PrimitiveTypeDefinition(TypeDeclaration, GlobalDefinition):
         node_fields = (
             ('name', str),
@@ -1158,6 +1162,11 @@ def IR(ns):
                 f'FunctionName({self.defn.module_name}.'
                 f'{self.defn.short_name})'
             )
+
+    @ns
+    class DeleteQueueName(Expression):
+        node_fields = ()
+        type = VOIDP
 
     @ns
     class LocalName(Expression):
@@ -1660,23 +1669,24 @@ def parser(ns):
 
         def parse_param_list(scope):
             token = expect('(')
-            paramps = []
-            vararg = False
-            while not consume(')'):
-                if consume('...'):
-                    expect(')')
-                    vararg = True
-                    break
-                ptok = peek()
-                ptypep = parse_type(scope)
-                pname = expect_id()
-                param_promise = pcall(IR.Parameter, ptok, ptypep, pname)
-                scope.set_promise(ptok, pname, param_promise)
-                paramps.append(param_promise)
-                if not consume(','):
-                    expect(')')
-                    break
-            return Promise(lambda: IR.ParameterList(
+            with skipping_newlines(True):
+                paramps = []
+                vararg = False
+                while not consume(')'):
+                    if consume('...'):
+                        expect(')')
+                        vararg = True
+                        break
+                    ptok = peek()
+                    ptypep = parse_type(scope)
+                    pname = expect_id()
+                    param_promise = pcall(IR.Parameter, ptok, ptypep, pname)
+                    scope.set_promise(ptok, pname, param_promise)
+                    paramps.append(param_promise)
+                    if not consume(','):
+                        expect(')')
+                        break
+                return Promise(lambda: IR.ParameterList(
                 token, [p.resolve() for p in paramps], vararg,
             ))
 
@@ -2002,6 +2012,8 @@ def parser(ns):
                         IR.This(token, this_type),
                         defn,
                     )
+                if isinstance(defn, IR.DeleteQueueDeclaration):
+                    return IR.DeleteQueueName(token)
                 with scope.push(token):
                     raise scope.error(f'{defn} is not a variable')
             return promise
@@ -2314,6 +2326,7 @@ def parser(ns):
                 extern=True,
                 this_type=cls,
             )
+            delete_scope['__delete_queue'] = IR.DeleteQueueDeclaration(token)
             delete_hook_ptr[0] = IR.DeleteHook(
                 token,
                 parse_block(delete_scope),
@@ -2479,6 +2492,7 @@ def C(ns):
     DEBUG_FUNC_NAME_NAME = 'KLC_debug_func_name'
     DEBUG_FILE_NAME_NAME = 'KLC_debug_file_name'
     CALL_METHOD_FUNCTION_NAME = 'KLC_call_method'
+    DELETE_QUEUE_NAME = 'KLC_delete_queue'
     DELETER_TYPE = IR.FunctionType(
         extern=True,
         rtype=IR.VOID,
@@ -2910,7 +2924,7 @@ def C(ns):
         return IR.FunctionType(
             extern=True,
             rtype=IR.VOID,
-            paramtypes=[decl],
+            paramtypes=[decl, IR.VOIDP],
             vararg=False,
         )
 
@@ -3222,7 +3236,7 @@ def C(ns):
         ctx.out += '}'
 
         ctx.out += 'static ' + declare(delete_hook_type, delete_hook_name, [
-            THIS_NAME,
+            THIS_NAME, DELETE_QUEUE_NAME,
         ])
         with ctx.retain_scope():
             ctx.declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)
@@ -3237,7 +3251,7 @@ def C(ns):
         ]
         with ctx.push_indent(1):
             ctx.out += f'{struct_name}* obj = ({struct_name}*) robj;'
-            ctx.out += f'{delete_hook_name}(obj);'
+            ctx.out += f'{delete_hook_name}(obj, dq);'
             for field in retainable_fields:
                 if isinstance(field.type, IR.ClassDefinition):
                     c_field_name = get_class_c_struct_field_name(field)
@@ -3430,6 +3444,13 @@ def C(ns):
         retvar = ctx.declare(self.type)
         ctx.out += f'{retvar} = {THIS_NAME};'
         ctx.retain(retvar)
+        return retvar
+
+    @E.on(IR.DeleteQueueName)
+    def E(self, ctx):
+        assert self.type == IR.VOIDP
+        retvar = ctx.declare(IR.VOIDP)
+        ctx.out == f'{retvar} = {DELETE_QUEUE_NAME};'
         return retvar
 
     @E.on(IR.SetLocalName)

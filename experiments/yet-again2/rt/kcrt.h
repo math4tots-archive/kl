@@ -64,6 +64,13 @@ void KLC_retain_var(KLC_var);
 void KLC_release_var(KLC_var);
 void KLC_partial_release_var(KLC_var, KLC_Header**);
 
+void* KLC_realloc_var_array(void* buffer, size_t old_cap, size_t new_cap);
+void KLC_partial_release_var_array(
+  void* buffer, size_t size, size_t cap, void* delete_queue);
+void KLC_var_array_clear_range(void* buffer, size_t begin, size_t end);
+KLC_var KLC_var_array_get(void* buffer, size_t i);
+void KLC_var_array_set(void* buffer, size_t i, KLC_var value);
+
 KLC_var KLC_var_from_ptr(KLC_Header* p);
 KLC_var KLC_var_from_int(KLC_int i);
 KLC_var KLC_var_from_float(KLC_float f);

@@ -143,6 +143,59 @@ void KLC_partial_release_var(KLC_var v, KLC_Header** delete_queue) {
   }
 }
 
+void* KLC_realloc_var_array(void* buffer, size_t old_cap, size_t new_cap) {
+  KLC_var KLC_null = {0};
+  size_t i;
+  KLC_var* arr = (KLC_var*) buffer;
+
+  if (old_cap > new_cap) {
+    KLC_var_array_clear_range(buffer, new_cap, old_cap);
+  }
+
+  arr = (KLC_var*) realloc(buffer, sizeof(KLC_var) * new_cap);
+
+  if (old_cap < new_cap) {
+    for (i = old_cap; i < new_cap; i++) {
+      arr[i] = KLC_null;
+    }
+  }
+
+  return arr;
+}
+
+void KLC_partial_release_var_array(
+    void* buffer, size_t size, size_t cap, void* delete_queue) {
+  KLC_var* arr = (KLC_var*) buffer;
+  size_t i;
+  for (i = 0; i < size; i++) {
+    KLC_partial_release_var(arr[i], delete_queue);
+  }
+  free(buffer);
+}
+
+void KLC_var_array_clear_range(void* buffer, size_t begin, size_t end) {
+  KLC_var KLC_null = {0};
+  KLC_var* arr = (KLC_var*) buffer;
+  size_t i;
+  for (i = begin; i < end; i++) {
+    KLC_release_var(arr[i]);
+    arr[i] = KLC_null;
+  }
+}
+
+KLC_var KLC_var_array_get(void* buffer, size_t i) {
+  KLC_var* arr = (KLC_var*) buffer;
+  KLC_retain_var(arr[i]);
+  return arr[i];
+}
+
+void KLC_var_array_set(void* buffer, size_t i, KLC_var value) {
+  KLC_var* arr = (KLC_var*) buffer;
+  KLC_retain_var(value);
+  KLC_release_var(arr[i]);
+  arr[i] = value;
+}
+
 KLC_var KLC_var_from_ptr(KLC_Header* p) {
   KLC_var ret;
   ret.tag = KLC_TAG_POINTER;
