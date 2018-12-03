@@ -3,9 +3,11 @@
 #include <stddef.h>
 
 #define KLC_TAG_POINTER 0
-#define KLC_TAG_INT 1
-#define KLC_TAG_FLOAT 2
+#define KLC_TAG_BOOL 1
+#define KLC_TAG_INT 2
+#define KLC_TAG_FLOAT 3
 
+typedef int KLC_bool;
 typedef ptrdiff_t KLC_int;  /* TODO: This is unsatisfactory */
 typedef double KLC_float;
 typedef struct KLC_Error KLC_Error;

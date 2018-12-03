@@ -20,6 +20,9 @@ extern c_int main(c_int argc, c_char** argv) {
   printf("2 + -3 = %d\n", static_cast(c_int, 2 + -3))
   printf("2 < 3 = %d\n", static_cast(c_int, 2 < 3))
   printf("2 > 3 = %d\n", static_cast(c_int, 2 > 3))
+  printf("0 || 2 = %d\n", 0 || 2)
+  printf("0 && 2 = %d\n", 0 && 2)
+  bool b = 10
   if (5 < 10) {
     printf("5 < 10 is true\n")
   } else {

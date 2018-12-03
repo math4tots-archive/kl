@@ -379,14 +379,15 @@ def lexer(ns):
     ns(PRIMITIVE_TYPE_NAMES, 'PRIMITIVE_TYPE_NAMES')
 
     KEYWORDS = {
-      'is', 'not', 'null', 'true', 'false', 'delete',
-      'and', 'or', 'in',
-      'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
-      'struct', 'const', 'throw',
-      'for', 'if', 'else', 'while', 'break', 'continue', 'return',
-      'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
-      'except', 'case','switch', 'var', 'this',
-      'static_cast',
+        'bool',
+        'is', 'not', 'null', 'true', 'false', 'delete',
+        'and', 'or', 'in',
+        'inline', 'extern', 'class', 'trait', 'final', 'def', 'auto',
+        'struct', 'const', 'throw',
+        'for', 'if', 'else', 'while', 'break', 'continue', 'return',
+        'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
+        'except', 'case','switch', 'var', 'this',
+        'static_cast',
     } | set(C_KEYWORDS)
     ns(KEYWORDS, 'KEYWORDS')
 
@@ -578,7 +579,7 @@ def IR(ns):
             def set_arg(fname, ftype, arg):
                 if not isinstance(arg, ftype):
                     raise TypeError(
-                        f'Expected type of {key} for {cls.__name__} '
+                        f'Expected type of {fname} for {cls.__name__} '
                         f'to be {ftype} but got {arg}')
                 setattr(self, fname, arg)
 
@@ -680,6 +681,26 @@ def IR(ns):
         @property
         def is_pseudo_expression(self):
             return isinstance(self, PseudoExpression)
+
+        class WithType(typeutil.FakeType):
+
+            def __init__(self, type):
+                self.type = type
+
+            def __instancecheck__(self, obj):
+                return (
+                    isinstance(obj, Expression) and
+                    obj.type == self.type
+                )
+
+            def __eq__(self, other):
+                return type(self) is type(other) and self.type == other.type
+
+            def __hash__(self):
+                return hash((type(self), self.type))
+
+            def __repr__(self):
+                return f'WithType({self.type})'
 
         class _WithVarType(typeutil.FakeType):
             def __instancecheck__(self, obj):
@@ -997,13 +1018,14 @@ def IR(ns):
     VOID = nptype('void')
     ns(VOID, 'VOID')
 
+    BOOL = nptype('KLC_bool')
+    ns(BOOL, 'BOOL')
+
     INT = nptype('KLC_int')
     ns(INT, 'INT')
 
     FLOAT = nptype('KLC_float')
     ns(FLOAT, 'FLOAT')
-
-    NUMERIC_TYPES = {INT, FLOAT}
 
     VOIDP = PointerType(VOID)
     ns(VOIDP, 'VOIDP')
@@ -1063,7 +1085,10 @@ def IR(ns):
     NUMERIC_TYPES = INTEGRAL_TYPES | FLOAT_TYPES
     ns(NUMERIC_TYPES, 'NUMERIC_TYPES')
 
-    VAR_CONVERTIBLE_TYPES = {VOID} | NUMERIC_TYPES
+    PRIMITIVE_TRUTHY_TYPES = {BOOL} | NUMERIC_TYPES
+    ns(PRIMITIVE_TRUTHY_TYPES, 'PRIMITIVE_TRUTHY_TYPES')
+
+    VAR_CONVERTIBLE_TYPES = {VOID, BOOL} | NUMERIC_TYPES
 
     class VarType(Type, Retainable):
         pass
@@ -1112,6 +1137,17 @@ def IR(ns):
             return expr
 
         pair = (st.name, dt.name)
+
+        if st in NUMERIC_TYPES and dt == BOOL:
+            # This is a bit of a hack, considering that '!!'
+            # is actually two operators.
+            # TODO: Figure out a better story for tuthiness.
+            return PrimitiveUnop(
+                expr.token,
+                BOOL,
+                '!!',
+                expr,
+            )
 
         if st in INTEGRAL_TYPES and dt == INT:
             return Cast(expr.token, expr, dt)
@@ -1361,7 +1397,7 @@ def IR(ns):
     @ns
     class If(Expression):
         node_fields = (
-            ('cond', Expression),
+            ('cond', Expression.WithType(BOOL)),
             ('left', Expression),
             ('right', Expression),
         )
@@ -1372,6 +1408,24 @@ def IR(ns):
                 return self.left.type
             else:
                 return IR.VOID
+
+    @ns
+    class LogicalAnd(Expression):
+        node_fields = (
+            ('left', Expression.WithType(BOOL)),
+            ('right', Expression.WithType(BOOL)),
+        )
+
+        type = BOOL
+
+    @ns
+    class LogicalOr(Expression):
+        node_fields = (
+            ('left', Expression.WithType(BOOL)),
+            ('right', Expression.WithType(BOOL)),
+        )
+
+        type = BOOL
 
     @ns
     class Malloc(Expression):
@@ -1743,7 +1797,9 @@ def parser(ns):
 
         def parse_root_type(scope):
             token = peek()
-            if consume('int'):
+            if consume('bool'):
+                return Promise.value(IR.BOOL)
+            elif consume('int'):
                 return Promise.value(IR.INT)
             elif consume('float'):
                 return Promise.value(IR.FLOAT)
@@ -1778,10 +1834,7 @@ def parser(ns):
             ))
 
         def at_variable_declaration():
-            if peek().type in lexer.C_PRIMITIVE_TYPE_SPECIFIERS:
-                return True
-
-            if peek().type == 'var':
+            if peek().type in ('bool', 'int', 'float', 'void', 'var'):
                 return True
 
             # Whitelist a few patterns as being the start
@@ -1792,7 +1845,6 @@ def parser(ns):
                 ['NAME', '*', '*'],
                 ['NAME', '*', 'NAME', '='],
                 ['NAME', '*', 'NAME', '\n'],
-                ['NAME', '!'],
                 ['NAME', 'const'],
             ]
             for seq in seqs:
@@ -1804,21 +1856,7 @@ def parser(ns):
         def promise_truthy(scope, token, expr_promise):
             @Promise
             def promise():
-                expr = expr_promise.resolve()
-                if expr.type not in IR.NUMERIC_TYPES:
-                    with scope.push(token):
-                        raise scope.error(
-                            f'Truthiness of non-numeric types '
-                            f'not yet supported')
-                # This is a bit of a hack, considering that '!!'
-                # is actually two operators.
-                # TODO: Figure out a better story for tuthiness.
-                return IR.PrimitiveUnop(
-                    token,
-                    IR.c_int,
-                    '!!',
-                    expr,
-                )
+                return scope.convert(expr_promise.resolve(), IR.BOOL)
             return promise
 
         def promise_set_local_name(scope, token, decl_promise, expr_promise):
@@ -1894,6 +1932,10 @@ def parser(ns):
         def _check_has_expression_context(scope):
             assert isinstance(scope['@ec'], IR.ExpressionContext)
 
+        def parse_truthy_expression(scope):
+            token = peek()
+            return promise_truthy(scope, token, parse_expression(scope))
+
         def parse_expression(scope):
             promise = parse_expression_or_pseudo_expression(scope)
             return promise.map(lambda expr: IR.to_value_expr(
@@ -1902,12 +1944,64 @@ def parser(ns):
             ))
 
         def parse_expression_or_pseudo_expression(scope):
-            promise = parse_comparison(scope)
+            promise = parse_logical_or(scope)
             @promise.map
             def promise(expr):
                 _check_has_expression_context(scope)
                 return expr
             return promise
+
+        def parse_logical_or(scope):
+            expr_promise = parse_logical_and(scope)
+            while True:
+                token = peek()
+                if consume('||'):
+                    left_promise = promise_truthy(
+                        scope,
+                        token,
+                        expr_promise,
+                    )
+                    right_promise = promise_truthy(
+                        scope,
+                        token,
+                        parse_logical_and(scope),
+                    )
+                    expr_promise = promise_binop(
+                        scope,
+                        token,
+                        '||',
+                        left_promise,
+                        right_promise,
+                    )
+                else:
+                    break
+            return expr_promise
+
+        def parse_logical_and(scope):
+            expr_promise = parse_comparison(scope)
+            while True:
+                token = peek()
+                if consume('&&'):
+                    left_promise = promise_truthy(
+                        scope,
+                        token,
+                        expr_promise,
+                    )
+                    right_promise = promise_truthy(
+                        scope,
+                        token,
+                        parse_comparison(scope),
+                    )
+                    expr_promise = promise_binop(
+                        scope,
+                        token,
+                        '&&',
+                        left_promise,
+                        right_promise,
+                    )
+                else:
+                    break
+            return expr_promise
 
         def parse_comparison(scope):
             expr_promise = parse_additive(scope)
@@ -1971,6 +2065,22 @@ def parser(ns):
             def promise():
                 left = left_promise.resolve()
                 right = right_promise.resolve()
+                if op == '||':
+                    assert left.type == IR.BOOL, left.type
+                    assert right.type == IR.BOOL, right.type
+                    return IR.LogicalOr(
+                        token,
+                        left,
+                        right,
+                    )
+                if op == '&&':
+                    assert left.type == IR.BOOL, left.type
+                    assert right.type == IR.BOOL, right.type
+                    return IR.LogicalAnd(
+                        token,
+                        left,
+                        right,
+                    )
                 if (op in ('+', '-', '*', '/', '%') and
                         left.type in IR.NUMERIC_TYPES and
                         left.type == right.type):
@@ -1986,7 +2096,7 @@ def parser(ns):
                         left.type == right.type):
                     return IR.PrimitiveBinop(
                         token,
-                        IR.INT,
+                        IR.BOOL,
                         op,
                         left,
                         right,
@@ -2000,10 +2110,17 @@ def parser(ns):
             @Promise
             def promise():
                 expr = expr_promise.resolve()
-                if op in ('+', '-', '!') and expr.type in IR.NUMERIC_TYPES:
+                if op in ('+', '-') and expr.type in IR.NUMERIC_TYPES:
                     return IR.PrimitiveUnop(
                         token,
                         expr.type,
+                        op,
+                        expr,
+                    )
+                if op == '!' and expr.type in IR.PRIMITIVE_TRUTHY_TYPES:
+                    return IR.PrimitiveUnop(
+                        token,
+                        IR.BOOL,
                         op,
                         expr,
                     )
@@ -2022,11 +2139,12 @@ def parser(ns):
         def parse_args(scope):
             argps = []
             expect('(')
-            while not consume(')'):
-                argps.append(parse_expression(scope))
-                if not consume(','):
-                    expect(')')
-                    break
+            with skipping_newlines(True):
+                while not consume(')'):
+                    argps.append(parse_expression(scope))
+                    if not consume(','):
+                        expect(')')
+                        break
             return Promise(lambda: [p.resolve() for p in argps])
 
         def promise_fcall(scope, token, function_promise, argsp):
@@ -2291,8 +2409,8 @@ def parser(ns):
         def make_cast(scope, token, type, arg):
             if ((isinstance(type, IR.PointerType) and
                     isinstance(arg.type, IR.PointerType) or
-                    (type in IR.NUMERIC_TYPES and
-                        arg.type in IR.NUMERIC_TYPES))):
+                    (type in IR.PRIMITIVE_TRUTHY_TYPES and
+                        arg.type in IR.PRIMITIVE_TRUTHY_TYPES))):
                 return IR.Cast(token, arg, type)
             with scope.push(token):
                 raise scope.error(f'Unsupported cast to {type}')
@@ -2301,11 +2419,7 @@ def parser(ns):
             token = expect('if')
             expect('(')
             with skipping_newlines(True):
-                cond_promise = promise_truthy(
-                    token,
-                    scope,
-                    parse_expression(scope),
-                )
+                cond_promise = parse_truthy_expression(scope)
                 expect(')')
             body_promise = parse_block(scope)
             if consume('else'):
@@ -3744,8 +3858,11 @@ def C(ns):
     def _cast(st, dt, c_name, ctx, token):
         assert st != IR.VOID and dt != IR.VOID, (st, dt)
         retvar = ctx.declare(dt)
-        cdecl = declare(dt, '')
-        ctx.out += f'{retvar} = (({cdecl}) {c_name});'
+        if dt == IR.BOOL:
+            ctx.out += f'{retvar} = !!({c_name});'
+        else:
+            cdecl = declare(dt, '')
+            ctx.out += f'{retvar} = (({cdecl}) {c_name});'
         return retvar
 
     @_cast.on(IR.PrimitiveTypeDefinition, type(IR.VAR_TYPE))
@@ -4044,26 +4161,58 @@ def C(ns):
 
     @E.on(IR.If)
     def E(self, ctx):
-        condvar = E(self.cond, ctx)
-
         if self.type != IR.VOID:
             retvar = ctx.declare(self.type)
 
-        ctx.out += f'if ({condvar})'
+        with ctx.retain_scope():
+            condvar = E(self.cond, ctx)
+
+            ctx.out += f'if ({condvar})'
+            with ctx.retain_scope():
+                leftvar = E(self.left, ctx)
+                if self.type != IR.VOID:
+                    ctx.out += f'{retvar} = {leftvar};'
+            ctx.out += 'else'
+            with ctx.retain_scope():
+                rightvar = E(self.right, ctx)
+                if self.type != IR.VOID:
+                    ctx.out += f'{retvar} = {rightvar};'
+
+            if self.type != IR.VOID:
+                ctx.retain(retvar)
+                return retvar
+
+    @E.on(IR.LogicalAnd)
+    def E(self, ctx):
+        retvar = ctx.declare(IR.BOOL)
+
         with ctx.retain_scope():
             leftvar = E(self.left, ctx)
-            if self.type != IR.VOID:
+            ctx.out += f'if ({leftvar})'
+            with ctx.retain_scope():
+                rightvar = E(self.right, ctx)
+                ctx.out += f'{retvar} = {rightvar};'
+            ctx.out += 'else'
+            with ctx.retain_scope():
                 ctx.out += f'{retvar} = {leftvar};'
-        ctx.out += 'else'
+
+        return retvar
+
+    @E.on(IR.LogicalOr)
+    def E(self, ctx):
+        retvar = ctx.declare(IR.BOOL)
+
         with ctx.retain_scope():
-            rightvar = E(self.right, ctx)
-            if self.type != IR.VOID:
+            leftvar = E(self.left, ctx)
+            ctx.out += f'if ({leftvar})'
+            with ctx.retain_scope():
+                ctx.out += f'{retvar} = {leftvar};'
+            ctx.out += 'else'
+            with ctx.retain_scope():
+                rightvar = E(self.right, ctx)
                 ctx.out += f'{retvar} = {rightvar};'
 
-        if self.type != IR.VOID:
-            ctx.retain(retvar)
-            return retvar
-
+        return retvar
 
     @E.on(IR.Malloc)
     def E(self, ctx):

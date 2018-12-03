@@ -45,44 +45,53 @@ class String {
 
 
 class List {
-  size_t _size
-  size_t _cap
+  int _size
+  int _cap
   void* _buffer
 
   static List new() {
     $(List)
   }
 
-  size_t __GETsize() {
+  int __GETsize() {
     _size
   }
 
   void push(var x) {
     if (_size >= _cap) {
-      size_t old_cap = _cap
-      _cap = _cap * static_cast(size_t, 2) + static_cast(size_t, 16)
-      _buffer = KLC_realloc_var_array(_buffer, old_cap, _cap)
+      int old_cap = _cap
+      _cap = _cap * 2 + 16
+      _buffer = KLC_realloc_var_array(
+        _buffer,
+        static_cast(size_t, old_cap),
+        static_cast(size_t, _cap),
+      )
     }
-    KLC_var_array_set(_buffer, _size, x)
-    _size = _size + static_cast(size_t, 1)
+    KLC_var_array_set(_buffer, static_cast(size_t, _size), x)
+    _size = _size + 1
   }
 
-  var __getitem(size_t i) {
-    if (i >= _size) {
+  var __getitem(int i) {
+    if (i < 0 || i >= _size) {
       throw "Index out of bounds"
     }
-    KLC_var_array_get(_buffer, i)
+    KLC_var_array_get(_buffer, static_cast(size_t, i))
   }
 
-  var __setitem(size_t i, var value) {
-    if (i >= _size) {
+  var __setitem(int i, var value) {
+    if (i < 0 || i >= _size) {
       throw "Index out of bounds"
     }
-    KLC_var_array_set(_buffer, i, value)
+    KLC_var_array_set(_buffer, static_cast(size_t, i), value)
     value
   }
 
   delete {
-    KLC_partial_release_var_array(_buffer, _size, _cap, __delete_queue)
+    KLC_partial_release_var_array(
+      _buffer,
+      static_cast(size_t, _size),
+      static_cast(size_t, _cap),
+      __delete_queue,
+    )
   }
 }

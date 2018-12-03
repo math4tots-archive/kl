@@ -27,6 +27,8 @@ static const char* KLC_tag_to_str(int tag) {
   switch (tag) {
     case KLC_TAG_POINTER:
       return "POINTER";
+    case KLC_TAG_BOOL:
+      return "BOOL";
     case KLC_TAG_INT:
       return "INT";
     case KLC_TAG_FLOAT:
