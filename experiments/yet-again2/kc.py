@@ -981,11 +981,39 @@ def IR(ns):
         def _proxy(self):
             return (self.base,)
 
+    INTEGRAL_TYPE_NAMES = (
+        'char', 'short', 'int', 'long', 'size_t', 'ptrdiff_t',
+    )
+    ns(INTEGRAL_TYPE_NAMES, 'INTEGRAL_TYPE_NAMES')
+
+    FLOAT_TYPE_NAMES = (
+        'float', 'double',
+    )
+    ns(FLOAT_TYPE_NAMES, 'FLOAT_TYPE_NAMES')
+
+    VAR_CONVERTIBLE_TYPE_NAMES = frozenset(
+        {'void'} | set(INTEGRAL_TYPE_NAMES) | set(FLOAT_TYPE_NAMES))
+
     PRIMITIVE_TYPE_MAP = {
         t: PrimitiveTypeDefinition(builtin_token, t)
         for t in list(lexer.PRIMITIVE_TYPE_NAMES) + ['KLC_int', 'KLC_float']
     }
     ns(PRIMITIVE_TYPE_MAP, 'PRIMITIVE_TYPE_MAP')
+
+    INTEGRAL_TYPES = {
+        t for t in PRIMITIVE_TYPE_MAP.values()
+            if t.name in INTEGRAL_TYPE_NAMES
+    }
+    ns(INTEGRAL_TYPES, 'INTEGRAL_TYPES')
+
+    FLOAT_TYPES = {
+        t for t in PRIMITIVE_TYPE_MAP.values()
+            if t.name in FLOAT_TYPE_NAMES
+    }
+    ns(FLOAT_TYPES, 'FLOAT_TYPES')
+
+    NUMERIC_TYPES = INTEGRAL_TYPES | FLOAT_TYPES
+    ns(NUMERIC_TYPES, 'NUMERIC_TYPES')
 
     VOID = PRIMITIVE_TYPE_MAP['void']
     ns(VOID, 'VOID')
@@ -1058,19 +1086,6 @@ def IR(ns):
     @_convert.on(VarType, VarType, Expression)
     def _convert(st, dt, expr, scope):
         return expr
-
-    INTEGRAL_TYPE_NAMES = (
-        'char', 'short', 'int', 'long', 'size_t', 'ptrdiff_t',
-    )
-    ns(INTEGRAL_TYPE_NAMES, 'INTEGRAL_TYPE_NAMES')
-
-    FLOAT_TYPE_NAMES = (
-        'float', 'double',
-    )
-    ns(FLOAT_TYPE_NAMES, 'FLOAT_TYPE_NAMES')
-
-    VAR_CONVERTIBLE_TYPE_NAMES = frozenset(
-        {'void'} | set(INTEGRAL_TYPE_NAMES) | set(FLOAT_TYPE_NAMES))
 
     @_convert.on(VarType, PTD, Expression)
     def _convert(st, dt, expr, scope):
@@ -1278,6 +1293,23 @@ def IR(ns):
         node_fields = (
             ('name', str),
             ('args', typeutil.NonEmptyList[Expression.WITH_VAR_TYPE]),
+        )
+
+    @ns
+    class PrimitiveUnop(Expression):
+        node_fields = (
+            ('type', PrimitiveTypeDefinition),
+            ('op', str),
+            ('expr', Expression),
+        )
+
+    @ns
+    class PrimitiveBinop(Expression):
+        node_fields = (
+            ('type', PrimitiveTypeDefinition),
+            ('op', str),
+            ('left', Expression),
+            ('right', Expression),
         )
 
     @ns
@@ -1794,12 +1826,121 @@ def parser(ns):
             ))
 
         def parse_expression_or_pseudo_expression(scope):
-            promise = parse_postfix(scope)
+            promise = parse_comparison(scope)
             @promise.map
             def promise(expr):
                 _check_has_expression_context(scope)
                 return expr
             return promise
+
+        def parse_comparison(scope):
+            expr_promise = parse_additive(scope)
+            while True:
+                token = peek()
+                for op in ('==', '!=', '<', '>', '<=', '>='):
+                    if consume(op):
+                        right_promise = parse_additive(scope)
+                        expr_promise = promise_binop(
+                            scope,
+                            token,
+                            op,
+                            expr_promise,
+                            right_promise,
+                        )
+                        break
+                else:
+                    break
+            return expr_promise
+
+        def parse_additive(scope):
+            expr_promise = parse_multiplicative(scope)
+            while True:
+                token = peek()
+                for op in ('+', '-'):
+                    if consume(op):
+                        right_promise = parse_multiplicative(scope)
+                        expr_promise = promise_binop(
+                            scope,
+                            token,
+                            op,
+                            expr_promise,
+                            right_promise,
+                        )
+                        break
+                else:
+                    break
+            return expr_promise
+
+        def parse_multiplicative(scope):
+            expr_promise = parse_unary(scope)
+            while True:
+                token = peek()
+                for op in ('*', '/', '%'):
+                    if consume(op):
+                        right_promise = parse_unary(scope)
+                        expr_promise = promise_binop(
+                            scope,
+                            token,
+                            op,
+                            expr_promise,
+                            right_promise,
+                        )
+                        break
+                else:
+                    break
+            return expr_promise
+
+        def promise_binop(scope, token, op, left_promise, right_promise):
+            @Promise
+            def promise():
+                left = left_promise.resolve()
+                right = right_promise.resolve()
+                if (op in ('+', '-', '*', '/', '%') and
+                        left.type in IR.NUMERIC_TYPES and
+                        left.type == right.type):
+                    return IR.PrimitiveBinop(
+                        token,
+                        left.type,
+                        op,
+                        left,
+                        right,
+                    )
+                if (op in ('==', '<=', '>=', '<', '>', '!=') and
+                        left.type in IR.NUMERIC_TYPES and
+                        left.type == right.type):
+                    return IR.PrimitiveBinop(
+                        token,
+                        IR.PRIMITIVE_TYPE_MAP['int'],
+                        op,
+                        left,
+                        right,
+                    )
+                with scope.push(token):
+                    raise scope.error(f'Unsupported binop')
+            return promise
+
+        def promise_unop(scope, token, op, expr_promise):
+            @Promise
+            def promise():
+                expr = expr_promise.resolve()
+                if op in ('+', '-', '!') and expr.type in IR.NUMERIC_TYPES:
+                    return IR.PrimitiveUnop(
+                        token,
+                        expr.type,
+                        op,
+                        expr,
+                    )
+                with scope.push(token):
+                    raise scope.error(f'Unsupported unary operation')
+            return promise
+
+        def parse_unary(scope):
+            token = peek()
+            for op in ('+', '-'):
+                if consume(op):
+                    expr_promise = parse_unary(scope)
+                    return promise_unop(scope, token, op, expr_promise)
+            return parse_postfix(scope)
 
         def parse_args(scope):
             argps = []
@@ -3760,6 +3901,23 @@ def C(ns):
             extern=False,
             c_function_name=CALL_METHOD_FUNCTION_NAME,
         )
+
+    @E.on(IR.PrimitiveUnop)
+    def E(self, ctx):
+        assert isinstance(self.type, IR.PrimitiveTypeDefinition), self.type
+        exprvar = E(self.expr, ctx)
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = {self.op} {exprvar};'
+        return retvar
+
+    @E.on(IR.PrimitiveBinop)
+    def E(self, ctx):
+        assert isinstance(self.type, IR.PrimitiveTypeDefinition), self.type
+        leftvar = E(self.left, ctx)
+        rightvar = E(self.right, ctx)
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = {leftvar} {self.op} {rightvar};'
+        return retvar
 
     @E.on(IR.Malloc)
     def E(self, ctx):

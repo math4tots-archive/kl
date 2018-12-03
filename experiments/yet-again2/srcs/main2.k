@@ -16,6 +16,8 @@ extern int main(int argc, char** argv) {
   var vf = 1.4
   double f = vf
   String s3 = y
+  printf("2 + 3 = %d\n", 2 + 3)
+  printf("2 + -3 = %d\n", 2 + -3)
   printf("Before\n")
   Foo foo = $(Foo)
   var vfoo = foo
