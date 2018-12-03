@@ -819,11 +819,16 @@ def IR(ns):
             return [p.resolve() for p in self.field_promises]
 
     @ns
+    class TraitOrClassDefinition:
+        pass
+
+    @ns
     class StructDefinition(StructOrClassDefinition):
         declarable = False
 
     @ns
-    class ClassDefinition(StructOrClassDefinition, Retainable):
+    class ClassDefinition(
+            StructOrClassDefinition, Retainable, TraitOrClassDefinition):
         node_fields = StructOrClassDefinition.node_fields + (
             ('delete_hook_promise', Promise),
             ('static_method_promises', typeutil.List[Promise]),
@@ -833,6 +838,26 @@ def IR(ns):
         @lazy(lambda: DeleteHook)
         def delete_hook(self):
             return self.delete_hook_promise.resolve()
+
+        @lazy(lambda: typeutil.List[StaticMethodDefinition])
+        def static_methods(self):
+            return [p.resolve() for p in self.static_method_promises]
+
+        @lazy(lambda: typeutil.List[InstanceMethodDefinition])
+        def instance_methods(self):
+            return [p.resolve() for p in self.instance_method_promises]
+
+    @ns
+    class TraitDefinition(
+            GlobalDefinition, Declaration, TraitOrClassDefinition):
+        extern = False
+        declarable = False
+        node_fields = (
+            ('module_name', str),
+            ('short_name', str),
+            ('static_method_promises', typeutil.List[Promise]),
+            ('instance_method_promises', typeutil.List[Promise]),
+        )
 
         @lazy(lambda: typeutil.List[StaticMethodDefinition])
         def static_methods(self):
@@ -865,7 +890,7 @@ def IR(ns):
         def rtype(self):
             return self.rtype_promise.resolve()
 
-        @lazy(lambda: ClassDefinition)
+        @lazy(lambda: TraitOrClassDefinition)
         def cls(self):
             return self.cls_promise.resolve()
 
@@ -1207,13 +1232,16 @@ def IR(ns):
         pass
 
     @ns
-    class ClassName(TypeExpression):
+    class TraitOrClassName(TypeExpression):
         node_fields = (
-            ('cls', ClassDefinition),
+            ('cls', TraitOrClassDefinition),
         )
 
         def __repr__(self):
-            return f'ClassName({self.cls.module_name}.{self.cls.short_name})'
+            return (
+                f'TraitOrClassName('
+                f'{self.cls.module_name}.{self.cls.short_name})'
+            )
 
     @ns
     class StaticMethodName(PseudoExpression):
@@ -2165,7 +2193,7 @@ def parser(ns):
                         f.defn,
                         args,
                     )
-                elif isinstance(f, IR.ClassName):
+                elif isinstance(f, IR.TraitOrClassName):
                     # If using a Class name like a function,
                     # the 'new' static method is implicitly called.
                     defn = get_static_method(scope, token, f.cls, 'new')
@@ -2214,7 +2242,7 @@ def parser(ns):
             @Promise
             def promise():
                 expr = exprp.resolve()
-                if isinstance(expr, IR.ClassName):
+                if isinstance(expr, IR.TraitOrClassName):
                     defn = get_static_method(scope, token, expr.cls, fname)
                     return IR.StaticMethodName(token, defn)
                 elif isinstance(expr.type, IR.StructDefinition):
@@ -2359,8 +2387,8 @@ def parser(ns):
                     return IR.FunctionName(token, defn)
                 if isinstance(defn, IR.BaseLocalVariableDeclaration):
                     return IR.LocalName(token, defn)
-                if isinstance(defn, IR.ClassDefinition):
-                    return IR.ClassName(token, defn)
+                if isinstance(defn, IR.TraitOrClassDefinition):
+                    return IR.TraitOrClassName(token, defn)
                 if isinstance(defn, IR.FieldDefinition):
                     this_type = scope.get_this_type()
                     return IR.GetClassField(
@@ -2555,24 +2583,32 @@ def parser(ns):
 
             return promise
 
-        def parse_class(outer_scope, token, extern):
-            assert not extern, 'extern is not meaningful for a class'
+        def parse_class(is_trait, outer_scope, token):
             name = expect_id()
 
-            field_promises = []
+            field_promises = None if is_trait else []
             static_method_promises = []
             instance_method_promises = []
 
-            defn = IR.ClassDefinition(
-                token,
-                extern,
-                module_name,
-                name,
-                field_promises,
-                Promise(lambda: delete_hook_ptr[0]),
-                static_method_promises,
-                instance_method_promises,
-            )
+            if is_trait:
+                defn = IR.TraitDefinition(
+                    token=token,
+                    module_name=module_name,
+                    short_name=name,
+                    static_method_promises=static_method_promises,
+                    instance_method_promises=instance_method_promises,
+                )
+            else:
+                defn = IR.ClassDefinition(
+                    token=token,
+                    extern=False,
+                    module_name=module_name,
+                    short_name=name,
+                    field_promises=field_promises,
+                    delete_hook_promise=Promise(lambda: delete_hook_ptr[0]),
+                    static_method_promises=static_method_promises,
+                    instance_method_promises=instance_method_promises,
+                )
             outer_scope[name] = defn
 
             class_scope = Scope(outer_scope)
@@ -2582,7 +2618,7 @@ def parser(ns):
             consume_all('\n')
             while not consume('}'):
                 member_token = peek()
-                if consume('delete'):
+                if not is_trait and consume('delete'):
                     expect_delete_hook(
                         scope=class_scope,
                         token=member_token,
@@ -2596,7 +2632,7 @@ def parser(ns):
                 else:
                     member_type_promise = parse_type(class_scope)
                     member_name = expect_id()
-                    if at('('):
+                    if is_trait or at('('):
                         instance_method_promises.append(
                             parse_instance_method(
                                 class_scope,
@@ -2631,15 +2667,16 @@ def parser(ns):
 
             @Promise
             def promise():
-                fields = defn.fields
-                # We don't need to call 'check_member_names' because
-                # if there is a member name conflict,
-                # class_scope.set_promise would've thrown something.
-                check_fields(
-                    outer_scope,
-                    fields,
-                    allow_retainable_fields=True,
-                )
+                if not is_trait:
+                    fields = defn.fields
+                    # We don't need to call 'check_member_names' because
+                    # if there is a member name conflict,
+                    # class_scope.set_promise would've thrown something.
+                    check_fields(
+                        outer_scope,
+                        fields,
+                        allow_retainable_fields=True,
+                    )
                 return defn
 
             return promise
@@ -2770,8 +2807,15 @@ def parser(ns):
                 return Promise.value(defn)
             elif consume('struct'):
                 return parse_struct(scope, token, extern)
-            elif consume('class'):
-                return parse_class(scope, token, extern)
+            elif at('class') or at('trait'):
+                if extern:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'Classes and traits cannot be extern')
+                is_trait = bool(consume('trait'))
+                if not is_trait:
+                    expect('class')
+                return parse_class(is_trait, scope, token)
             else:
                 type_promise = parse_type(scope)
                 name = expect_id()
@@ -2842,7 +2886,7 @@ def C(ns):
     ENCODED_LOCAL_VARIABLE_PREFIX = 'KLCLV'
     ENCODED_STRUCT_PREFIX = 'KLCST'
     ENCODED_STRUCT_FIELD_PREFIX = 'KLCSF'
-    ENCODED_CLASS_PROTO_NAME = 'KLCCP'
+    ENCODED_CLASS_DESCRIPTOR_PREFIX = 'KLCCP'
     ENCODED_CLASS_MALLOC_PREFIX = 'KLCCM'
     ENCODED_CLASS_DELETE_HOOK_PREFIX = 'KLCDH'
     ENCODED_CLASS_DELETER_PREFIX = 'KLCCD'
@@ -3201,26 +3245,30 @@ def C(ns):
                         # Add a dummy field.
                         fields_out += f'char dummy;'
                     structs += '};'
-            elif isinstance(defn, IR.ClassDefinition):
+            elif isinstance(defn, IR.TraitOrClassDefinition):
                 assert not defn.extern, defn
-                struct_name = get_class_struct_name(defn)
-                proto_name = get_class_proto_name(defn)
 
-                fwdstruct += f'typedef struct {struct_name} {struct_name};'
+                if isinstance(defn, IR.ClassDefinition):
+                    struct_name = get_class_struct_name(defn)
 
-                structs += f'struct {struct_name} ' '{'
-                fields_out = structs.spawn(1)
-                fields_out += (
-                    f'{HEADER_STRUCT_NAME} {CLASS_HEADER_FIELD_NAME};'
-                )
-                for field in defn.fields:
-                    fields_out += declare(
-                        field.type,
-                        get_class_c_struct_field_name(field),
-                    ) + ';'
-                structs += '};'
+                    fwdstruct += (
+                        f'typedef struct {struct_name} {struct_name};'
+                    )
 
-                gvardecls += f'extern KLC_Class {proto_name};'
+                    structs += f'struct {struct_name} ' '{'
+                    fields_out = structs.spawn(1)
+                    fields_out += (
+                        f'{HEADER_STRUCT_NAME} {CLASS_HEADER_FIELD_NAME};'
+                    )
+                    for field in defn.fields:
+                        fields_out += declare(
+                            field.type,
+                            get_class_c_struct_field_name(field),
+                        ) + ';'
+                    structs += '};'
+
+                descriptor_name = get_class_descriptor_name(defn)
+                gvardecls += f'extern KLC_Class {descriptor_name};'
 
                 for static_method in defn.static_methods:
                     fdecls += f'extern {proto_for(static_method)};'
@@ -3266,12 +3314,12 @@ def C(ns):
             encode(defn.name, prefix=ENCODED_STRUCT_FIELD_PREFIX)
         )
 
-    def get_class_proto_name(decl: IR.Declaration):
-        assert isinstance(decl, IR.ClassDefinition), decl
+    def get_class_descriptor_name(decl):
+        assert isinstance(decl, IR.TraitOrClassDefinition), decl
         return qualify(
             decl.module_name,
             decl.short_name,
-            prefix=ENCODED_CLASS_PROTO_NAME,
+            prefix=ENCODED_CLASS_DESCRIPTOR_PREFIX,
         )
 
     def get_class_malloc_type(decl: IR.ClassDefinition):
@@ -3586,16 +3634,15 @@ def C(ns):
     def D(self, ctx):
         pass
 
-    @D.on(IR.ClassDefinition)
-    def D(self, ctx):
+    def emit_malloc_and_deleter(self, ctx):
+        assert isinstance(self, IR.ClassDefinition), self
+        descriptor_name = get_class_descriptor_name(self)
         struct_name = get_class_struct_name(self)
         malloc_name = get_class_malloc_name(self)
         malloc_type = get_class_malloc_type(self)
         delete_hook_name = get_class_delete_hook_name(self)
         delete_hook_type = get_delete_hook_type(self)
         deleter_name = get_class_deleter_name(self)
-        proto_name = get_class_proto_name(self)
-        method_list_name = get_method_list_name(self)
 
         ctx.static_fdecls += f'static {declare(malloc_type, malloc_name)};'
 
@@ -3605,7 +3652,7 @@ def C(ns):
             ctx.out += f'{struct_name} zero = ' '{0};'
             ctx.out += f'{struct_name}* ret = malloc(sizeof({struct_name}));'
             ctx.out += f'*ret = zero;'
-            ctx.out += f'ret->header.cls = &{proto_name};'
+            ctx.out += f'ret->header.cls = &{descriptor_name};'
             ctx.out += f'return ret;'
         ctx.out += '}'
 
@@ -3642,11 +3689,19 @@ def C(ns):
                     assert False, field
         ctx.out += '}'
 
+    def emit_methods(self, ctx):
+        assert isinstance(self, IR.TraitOrClassDefinition), self
+
         for static_method in self.static_methods:
             D(static_method, ctx)
 
         for instance_method in self.instance_methods:
             D(instance_method, ctx)
+
+    def emit_trait_or_class_descriptor(self, ctx):
+        assert isinstance(self, IR.TraitOrClassDefinition), self
+        method_list_name = get_method_list_name(self)
+        descriptor_name = get_class_descriptor_name(self)
 
         if self.instance_methods:
             ctx.out += f'KLC_MethodEntry {method_list_name}[] = ' '{'
@@ -3658,17 +3713,23 @@ def C(ns):
                 for instance_method in sorted_instance_methods:
                     ctx.out += '{'
                     with ctx.push_indent(1):
-                        method_c_name = get_instance_method_name(instance_method)
+                        method_c_name = (
+                            get_instance_method_name(instance_method)
+                        )
                         ctx.out += f'"{instance_method.name}",'
                         ctx.out += f'&{method_c_name},'
                     ctx.out += '},'
             ctx.out += '};'
 
-        ctx.out += f'KLC_Class {proto_name} = ' '{'
+        ctx.out += f'KLC_Class {descriptor_name} = ' '{'
         with ctx.push_indent(1):
             ctx.out += f'"{self.module_name}",'
             ctx.out += f'"{self.short_name}",'
-            ctx.out += f'&{deleter_name},'
+            if isinstance(self, IR.TraitDefinition):
+                # Traits are not concrete, and so have no deleter
+                ctx.out += f'NULL,'
+            else:
+                ctx.out += f'&{get_class_deleter_name(self)},'
             if self.instance_methods:
                 ctx.out += (
                     f'sizeof({method_list_name})/sizeof(KLC_MethodEntry),'
@@ -3678,6 +3739,17 @@ def C(ns):
                 ctx.out += '0,'
                 ctx.out += 'NULL,'
         ctx.out += '};'
+
+    @D.on(IR.ClassDefinition)
+    def D(self, ctx):
+        emit_malloc_and_deleter(self, ctx)
+        emit_methods(self, ctx)
+        emit_trait_or_class_descriptor(self, ctx)
+
+    @D.on(IR.TraitDefinition)
+    def D(self, ctx):
+        emit_methods(self, ctx)
+        emit_trait_or_class_descriptor(self, ctx)
 
     @D.on(IR.StaticMethodDefinition)
     def D(self, ctx):
@@ -3893,14 +3965,14 @@ def C(ns):
 
     @_cast.on(type(IR.VAR_TYPE), IR.ClassDefinition)
     def _cast(st, dt, c_name, ctx, token):
-        proto_name = get_class_proto_name(dt)
+        descriptor_name = get_class_descriptor_name(dt)
         tvar = ctx.declare(HEADER_POINTER_TYPE)
         retvar = ctx.declare(dt)
         with stack_trace_entry(ctx, token):
             ctx.out += (
                 f'{ERROR_POINTER_NAME} = '
                 f'KLC_var_to_ptr({STACK_POINTER_NAME}, '
-                f'&{tvar}, {c_name}, &{proto_name});'
+                f'&{tvar}, {c_name}, &{descriptor_name});'
             )
         cdecl = declare(dt, '')
         ctx.out += f'{retvar} = (({cdecl}) {tvar});'

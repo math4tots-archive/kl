@@ -15,6 +15,9 @@ extern void KLC_var_array_clear_range(void* buffer, size_t begin, size_t end)
 extern var KLC_var_array_get(void* buffer, size_t i)
 extern void KLC_var_array_set(void* buffer, size_t i, var value)
 
+trait Object {
+}
+
 class String {
   c_char* _buffer
   size_t _size
