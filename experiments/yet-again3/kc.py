@@ -1672,6 +1672,7 @@ def parser(ns):
 
     _builtins_export_names = (
         'String',
+        'List',
     )
 
     @ns
@@ -1864,11 +1865,8 @@ def parser(ns):
             def promise():
                 decl = decl_promise.resolve()
                 expr = expr_promise.resolve()
-                assert isinstance(decl, IR.BaseLocalVariableDeclaration), decl
-                if not decl.mutable:
-                    with scope.push(token), scope.push(decl.token):
-                        raise scope.error(
-                            f'Tried to assign to non-mutable variable')
+                return process_assignment(
+                    scope, token, IR.LocalName(token, decl), expr)
                 return IR.SetLocalName(
                     token, decl, scope.convert(expr, decl.type))
             return promise
@@ -2300,7 +2298,15 @@ def parser(ns):
         def process_assignment(scope, token, target, val):
             if isinstance(target, IR.LocalName):
                 decl = target.decl
-                return IR.SetLocalName(token, decl, val)
+                if not decl.mutable:
+                    with scope.push(token), scope.push(decl.token):
+                        raise scope.error(
+                            f'Tried to assign to non-mutable variable')
+                return IR.SetLocalName(
+                    token,
+                    decl,
+                    scope.convert(val, decl.type),
+                )
             elif isinstance(target, IR.GetClassField):
                 return IR.SetClassField(
                     token,
@@ -3645,7 +3651,11 @@ def C(ns):
         if self.instance_methods:
             ctx.out += f'KLC_MethodEntry {method_list_name}[] = ' '{'
             with ctx.push_indent(1):
-                for instance_method in self.instance_methods:
+                sorted_instance_methods = sorted(
+                    self.instance_methods,
+                    key=lambda method: method.name,
+                )
+                for instance_method in sorted_instance_methods:
                     ctx.out += '{'
                     with ctx.push_indent(1):
                         method_c_name = get_instance_method_name(instance_method)

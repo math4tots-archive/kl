@@ -334,9 +334,9 @@ KLC_MethodEntry* KLC_find_method(KLC_Class* cls, const char* name) {
     } else if (lower == mid) {
       break;
     } else if (cmp < 0) {
-      upper = mid;
-    } else {
       lower = mid;
+    } else {
+      upper = mid;
     }
   }
   return NULL;
