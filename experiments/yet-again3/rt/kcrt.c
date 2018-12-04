@@ -424,3 +424,34 @@ KLC_Error* KLC_call_method(
   }
   return method_entry->method(stack, out, argc, argv);
 }
+
+KLC_int KLC_get_tag(KLC_var x) {
+  return x.tag;
+}
+
+KLC_int KLC_get_obj_tag() {
+  return KLC_TAG_OBJECT;
+}
+
+KLC_int KLC_get_bool_tag() {
+  return KLC_TAG_BOOL;
+}
+
+KLC_int KLC_get_int_tag() {
+  return KLC_TAG_INT;
+}
+KLC_int KLC_get_float_tag() {
+  return KLC_TAG_FLOAT;
+}
+
+KLC_int KLC_get_type_tag() {
+  return KLC_TAG_TYPE;
+}
+
+char const* KLC_get_type_module_name(KLC_Class* t) {
+  return t->module_name;
+}
+
+char const* KLC_get_type_short_name(KLC_Class* t) {
+  return t->short_name;
+}

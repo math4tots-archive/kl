@@ -91,4 +91,13 @@ KLC_Class* KLC_get_class(KLC_var);
 KLC_MethodEntry* KLC_find_method(KLC_Class*, const char*);
 KLC_Error* KLC_call_method(KLC_Stack*, KLC_var*, const char*, int, KLC_var*);
 
+KLC_int KLC_get_tag(KLC_var x);
+KLC_int KLC_get_obj_tag();
+KLC_int KLC_get_bool_tag();
+KLC_int KLC_get_int_tag();
+KLC_int KLC_get_float_tag();
+KLC_int KLC_get_type_tag();
+char const* KLC_get_type_module_name(KLC_Class* t);
+char const* KLC_get_type_short_name(KLC_Class* t);
+
 #endif/*kcrt_h*/

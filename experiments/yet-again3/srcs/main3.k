@@ -37,6 +37,8 @@ extern c_int main() {
   someClass.someOtherInstanceMethod()
   someClass.someInstanceMethodOnObject()
 
+  print(someClass)
+
   ${
     type t = SomeOtherTrait
     var tv = t

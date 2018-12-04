@@ -1271,6 +1271,19 @@ def IR(ns):
             return Cast(expr.token, expr, dt)
         raise convert_error(st, dt, expr, scope)
 
+    @_convert.on(PointerType, PointerType, Expression)
+    def _convert(st, dt, expr, scope):
+        if st == dt:
+            return expr
+
+        if dt == VOIDP:
+            return Cast(expr.token, expr, dt)
+
+        if isinstance(dt.base, ConstType) and st.base == dt.base.base:
+            return Cast(expr.token, expr,  dt)
+
+        raise convert_error(st, dt, expr, scope)
+
     @_convert.on(Type, Type, Expression)
     def _convert(st, dt, expr, scope):
         raise convert_error(st, dt, expr, scope)
@@ -2570,6 +2583,7 @@ def parser(ns):
             if consume('('):
                 with skipping_newlines(True):
                     expr = parse_expression(scope)
+                    expect(')')
                     return expr
             if consume('this'):
                 return promise_this(scope, token)
@@ -4413,15 +4427,16 @@ def C(ns):
                 leftvar = E(self.left, ctx)
                 if self.type != IR.VOID:
                     ctx.out += f'{retvar} = {leftvar};'
+                    ctx.retain(retvar)
             ctx.out += 'else'
             with ctx.retain_scope():
                 rightvar = E(self.right, ctx)
                 if self.type != IR.VOID:
                     ctx.out += f'{retvar} = {rightvar};'
+                    ctx.retain(retvar)
 
-            if self.type != IR.VOID:
-                ctx.retain(retvar)
-                return retvar
+        if self.type != IR.VOID:
+            return retvar
 
     @E.on(IR.LogicalAnd)
     def E(self, ctx):

@@ -17,3 +17,6 @@ extern c_char* cmalloc(int size) {
 extern void cfree(c_char* p) {
   free(static_cast(void*, p))
 }
+
+extern c_char* strcpy(c_char* dest, c_char const* src)
+extern c_char* strcat(c_char* dest, c_char const* src)

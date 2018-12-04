@@ -6,8 +6,21 @@ from c import free
 from c import strlen
 from c import cmalloc
 from c import cfree
+from c import strcpy
+from c import strcat
 
 extern c_char* KLC_CopyString(c_char const* s)
+
+// For extracting type information
+extern int KLC_get_tag(var x)
+extern int KLC_get_obj_tag()
+extern int KLC_get_bool_tag()
+extern int KLC_get_int_tag()
+extern int KLC_get_float_tag()
+extern int KLC_get_type_tag()
+extern c_char const* KLC_get_type_module_name(type t)
+extern c_char const* KLC_get_type_short_name(type t)
+extern type KLC_get_class(var x)
 
 // Helper functions for implementing class List
 extern void* KLC_realloc_var_array(void* buffer, size_t old_cap, size_t new_cap)
@@ -23,7 +36,15 @@ trait Object() {
   }
 
   String __repr() {
-    this.__str()
+    (
+      String.fromCString("<")
+        .__add(str(KLC_get_class(this)))
+        .__add(String.fromCString(" instance>"))
+    )
+  }
+
+  String __str() {
+    this.__repr()
   }
 }
 
@@ -36,10 +57,22 @@ class String(Object) {
   }
 
   static String fromCString(c_char const* cstr) {
+    String._fromBuffer(KLC_CopyString(cstr), strlen(cstr))
+  }
+
+  static String _fromBuffer(c_char* buffer, int size) {
     String ret = $(String)
-    ret->_buffer = KLC_CopyString(cstr)
-    ret->_size = static_cast(int, strlen(cstr))
+    ret->_buffer = buffer
+    ret->_size = size
     ret
+  }
+
+  String __add(String other) {
+    int new_size = _size + other->_size
+    c_char* new_buffer = cmalloc(new_size + 1)
+    strcpy(new_buffer, _buffer)
+    strcat(new_buffer, other->_buffer)
+    String._fromBuffer(new_buffer, new_size)
   }
 
   c_long normalMethod() {
@@ -107,8 +140,24 @@ class List(Object) {
   }
 }
 
+String get_type_str(type t) {
+  (
+    String.fromCString("<type ")
+      .__add(String.fromCString(KLC_get_type_module_name(t)))
+      .__add(String.fromCString("#"))
+      .__add(String.fromCString(KLC_get_type_short_name(t)))
+      .__add(String.fromCString(">"))
+  )
+}
+
 String str(var x) {
-  x.__str()
+  int tag = KLC_get_tag(x)
+  if (tag == KLC_get_type_tag()) {
+    get_type_str(x)
+  } else {
+    String s = x.__str()
+    s
+  }
 }
 
 void print(var x) {
