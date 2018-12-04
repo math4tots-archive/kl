@@ -4,6 +4,8 @@ from c import printf
 from c import malloc
 from c import free
 from c import strlen
+from c import cmalloc
+from c import cfree
 
 extern c_char* KLC_CopyString(c_char const* s)
 
@@ -19,11 +21,15 @@ trait Object() {
   int someInstanceMethodOnObject() {
     printf("Inside someInstanceMethodOnObject\n")
   }
+
+  String __repr() {
+    this.__str()
+  }
 }
 
 class String(Object) {
   c_char* _buffer
-  size_t _size
+  int _size
 
   static String new(c_char const* cstr) {
     String.fromCString(cstr)
@@ -32,7 +38,7 @@ class String(Object) {
   static String fromCString(c_char const* cstr) {
     String ret = $(String)
     ret->_buffer = KLC_CopyString(cstr)
-    ret->_size = strlen(cstr)
+    ret->_size = static_cast(int, strlen(cstr))
     ret
   }
 
@@ -40,7 +46,7 @@ class String(Object) {
     95189
   }
 
-  size_t __GETsize() {
+  int __GETsize() {
     _size
   }
 

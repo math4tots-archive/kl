@@ -282,6 +282,7 @@ def typeutil(ns):
 
     class OrType(FakeType):
         def __init__(self, subtypes):
+            assert all(isinstance(t, type) for t in subtypes)
             self.subtypes = subtypes
 
         def __getitem__(self, subtypes):
@@ -1502,7 +1503,7 @@ def IR(ns):
     @ns
     class This(Expression):
         node_fields = (
-            ('type', typeutil.Or[ClassDefinition, VAR_TYPE]),
+            ('type', typeutil.Or[ClassDefinition, VarType]),
         )
 
         def __repr__(self):
@@ -2292,7 +2293,8 @@ def parser(ns):
                         expr,
                         defn,
                     )
-                elif isinstance(expr.type, IR.ClassDefinition):
+                elif isinstance(expr.type, IR.ClassDefinition) or (
+                        expr.type == IR.VAR_TYPE):
                     return IR.InstanceMethodReference(
                         token,
                         scope.convert(expr, IR.VAR_TYPE),
