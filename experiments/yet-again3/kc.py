@@ -4285,8 +4285,7 @@ def C(ns):
                 # And of course, the release is implicit with
                 # the 'declare'.
                 retvar = ctx.declare(rtype)
-                with stack_trace_entry(ctx, token):
-                    ctx.out += f'{retvar} = {c_function_name}({argvars});'
+                ctx.out += f'{retvar} = {c_function_name}({argvars});'
                 return retvar
         else:
             # Function calls implicitly generate a retain,
@@ -4306,9 +4305,10 @@ def C(ns):
                 f'{protcol_args}, {argvars}' if c_args else protcol_args
             )
 
-            ctx.out += (
-                f'{ERROR_POINTER_NAME} = {c_function_name}({margvars});'
-            )
+            with stack_trace_entry(ctx, token):
+                ctx.out += (
+                    f'{ERROR_POINTER_NAME} = {c_function_name}({margvars});'
+                )
             ctx.jump_on_error()
             return retvar
 
