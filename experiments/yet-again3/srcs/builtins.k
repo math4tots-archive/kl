@@ -106,3 +106,11 @@ class List(Object) {
     )
   }
 }
+
+String str(var x) {
+  x.__str()
+}
+
+void print(var x) {
+  printf("%s\n", str(x)->_buffer)
+}

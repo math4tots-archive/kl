@@ -23,18 +23,44 @@ struct KLC_Stack {
   KLC_StackEntry* buffer;
 };
 
+static KLC_Error* KLC_type_method_repr(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_type_method_str(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+
+KLC_MethodEntry KLC_type_methods[] = {
+  { "__repr", KLC_type_method_repr },
+  { "__str", KLC_type_method_str },
+};
+
+KLC_Class KLC_type_class = {
+  "builtins",
+  "type",
+  NULL,
+  sizeof(KLC_type_methods) / sizeof(KLC_MethodEntry),
+  KLC_type_methods,
+};
+
 static const char* KLC_tag_to_str(int tag) {
   switch (tag) {
-    case KLC_TAG_POINTER:
-      return "POINTER";
+    case KLC_TAG_OBJECT:
+      return "OBJECT";
     case KLC_TAG_BOOL:
       return "BOOL";
     case KLC_TAG_INT:
       return "INT";
     case KLC_TAG_FLOAT:
       return "FLOAT";
+    case KLC_TAG_TYPE:
+      return "TYPE";
   }
   return "INVALID";
+}
+
+static KLC_Error* KLC_type_method_repr(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  return KLC_errorf(0, stack, "type.__repr TODO");
+}
+
+static KLC_Error* KLC_type_method_str(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  return KLC_type_method_repr(stack, out, argc, argv);
 }
 
 char* KLC_CopyString(const char* s) {
@@ -175,19 +201,19 @@ void KLC_partial_release(KLC_Header* obj, KLC_Header** delete_queue) {
 }
 
 void KLC_retain_var(KLC_var v) {
-  if (v.tag == KLC_TAG_POINTER) {
+  if (v.tag == KLC_TAG_OBJECT) {
     KLC_retain(v.u.p);
   }
 }
 
 void KLC_release_var(KLC_var v) {
-  if (v.tag == KLC_TAG_POINTER) {
+  if (v.tag == KLC_TAG_OBJECT) {
     KLC_release(v.u.p);
   }
 }
 
 void KLC_partial_release_var(KLC_var v, KLC_Header** delete_queue) {
-  if (v.tag == KLC_TAG_POINTER) {
+  if (v.tag == KLC_TAG_OBJECT) {
     KLC_partial_release(v.u.p, delete_queue);
   }
 }
@@ -247,7 +273,7 @@ void KLC_var_array_set(void* buffer, size_t i, KLC_var value) {
 
 KLC_var KLC_var_from_ptr(KLC_Header* p) {
   KLC_var ret;
-  ret.tag = KLC_TAG_POINTER;
+  ret.tag = KLC_TAG_OBJECT;
   ret.u.p = p;
   return ret;
 }
@@ -266,9 +292,16 @@ KLC_var KLC_var_from_float(KLC_float f) {
   return ret;
 }
 
+KLC_var KLC_var_from_type(KLC_Class* c) {
+  KLC_var ret;
+  ret.tag = KLC_TAG_TYPE;
+  ret.u.t = c;
+  return ret;
+}
+
 KLC_Error* KLC_var_to_ptr(
     KLC_Stack* stack, KLC_Header** out, KLC_var v, KLC_Class* cls) {
-  if (v.tag != KLC_TAG_POINTER) {
+  if (v.tag != KLC_TAG_OBJECT) {
     return KLC_errorf(
         0,
         stack,
@@ -310,12 +343,27 @@ KLC_Error* KLC_var_to_float(KLC_Stack* stack, KLC_float* out, KLC_var v) {
   return NULL;
 }
 
+KLC_Error* KLC_var_to_type(KLC_Stack* stack, KLC_Class** out, KLC_var v) {
+  if (v.tag != KLC_TAG_TYPE) {
+    return KLC_errorf(
+      0, stack, "Expected TYPE but got %s", KLC_tag_to_str(v.tag));
+  }
+  *out = v.u.t;
+  return NULL;
+}
+
 KLC_Class* KLC_get_class(KLC_var v) {
   switch (v.tag) {
-    case KLC_TAG_POINTER:
+    case KLC_TAG_OBJECT:
       if (v.u.p) {
         return v.u.p->cls;
       }
+      break;
+    case KLC_TAG_TYPE:
+      if (v.u.t) {
+        return &KLC_type_class;
+      }
+      break;
   }
   return NULL;
 }
@@ -353,7 +401,13 @@ KLC_Error* KLC_call_method(
   /* TODO: Method call for primitive types */
   cls = KLC_get_class(argv[0]);
   if (!cls) {
-    return KLC_errorf(0, stack, "FUBAR: Could not get class for method call");
+    return KLC_errorf(
+      0,
+      stack,
+      "FUBAR: Could not get class for method call (tag = %s, method_name = %s)",
+      KLC_tag_to_str(argv[0].tag),
+      name
+    );
   }
   method_entry = KLC_find_method(cls, name);
   if (!method_entry) {

@@ -1112,6 +1112,7 @@ def IR(ns):
         'ptrdiff_t': 'ptrdiff_t',
         'c_float': 'float',
         'c_double': 'double',
+        'type': 'KLC_Class*',
     }
 
     c_type_map = {
@@ -1122,6 +1123,9 @@ def IR(ns):
 
     for kc_name, ptype in c_type_map.items():
         ns(ptype, kc_name)
+
+    TYPE = c_type_map['type']
+    ns(TYPE, 'TYPE')
 
     CHAR_TYPES = {
         c_type_map['c_char'],
@@ -1156,7 +1160,7 @@ def IR(ns):
     PRIMITIVE_TRUTHY_TYPES = {BOOL} | NUMERIC_TYPES
     ns(PRIMITIVE_TRUTHY_TYPES, 'PRIMITIVE_TRUTHY_TYPES')
 
-    VAR_CONVERTIBLE_TYPES = {VOID, BOOL} | NUMERIC_TYPES
+    VAR_CONVERTIBLE_TYPES = {VOID, BOOL, TYPE} | NUMERIC_TYPES
 
     class VarType(Type, Retainable):
         pass
@@ -1271,7 +1275,9 @@ def IR(ns):
     ]
 
     @ns
-    class TraitOrClassName(PseudoExpression):
+    class TraitOrClassName(Expression):
+        type = TYPE
+
         node_fields = (
             ('cls', TraitOrClassDefinition),
         )
@@ -1508,7 +1514,7 @@ def IR(ns):
 
         def __repr__(self):
             if isinstance(self.type, ClassDefinition):
-                return f'This({self.cls.module_name}.{self.cls.short_name})'
+                return f'This({self.type.module_name}.{self.type.short_name})'
             elif self.type == VAR_TYPE:
                 return f'This(var)'
             assert False, self.type
@@ -1742,6 +1748,7 @@ def parser(ns):
     _builtins_export_names = (
         'String',
         'List',
+        'print',
     )
 
     @ns
@@ -2865,7 +2872,9 @@ def parser(ns):
                     raw_body = raw_body_promise.resolve()
                     assert raw_body is not None
                     if defn.rtype != IR.VOID:
-                        body = outer_scope.convert(raw_body, defn.rtype)
+                        body = IR.Block(token, [], [
+                            outer_scope.convert(raw_body, defn.rtype),
+                        ])
                     else:
                         body = raw_body
                     return body
@@ -4064,6 +4073,8 @@ def C(ns):
             convert_func = 'KLC_var_from_int'
         elif st in IR.FLOAT_TYPES:
             convert_func = 'KLC_var_from_float'
+        elif st == IR.TYPE:
+            convert_func = f'KLC_var_from_type'
         else:
             assert False, st
 
@@ -4100,12 +4111,20 @@ def C(ns):
         elif dt in IR.FLOAT_TYPES:
             convert_func = 'KLC_var_to_float'
             extract_type = IR.FLOAT
+        elif dt == IR.TYPE:
+            convert_func = 'KLC_var_to_type'
+            extract_type = IR.TYPE
         else:
             assert False, dt
 
         vvar = c_name
         tvar = ctx.declare(extract_type)
-        retvar = ctx.declare(dt)
+
+        if extract_type != dt:
+            retvar = ctx.declare(dt)
+        else:
+            retvar = tvar
+
         with stack_trace_entry(ctx, token):
             ctx.out += (
                 f'{ERROR_POINTER_NAME} = '
@@ -4114,7 +4133,10 @@ def C(ns):
             )
         ctx.jump_on_error()
         cdecl = declare(dt, '')
-        ctx.out += f'{retvar} = (({cdecl}) {tvar});'
+
+        if extract_type != dt:
+            ctx.out += f'{retvar} = (({cdecl}) {tvar});'
+
         return retvar
 
     @_cast.on(IR.ClassDefinition, type(IR.VAR_TYPE))
@@ -4196,6 +4218,13 @@ def C(ns):
         ctx.out += f'{retvar} = {val_var};'
         ctx.out += f'{field_expr_str} = {retvar};'
         ctx.retain(retvar)
+        return retvar
+
+    @E.on(IR.TraitOrClassName)
+    def E(self, ctx):
+        retvar = ctx.declare(self.type)
+        descriptor_name = get_class_descriptor_name(self.cls)
+        ctx.out += f'{retvar} = &{descriptor_name};'
         return retvar
 
     @E.on(IR.IntLiteral)

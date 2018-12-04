@@ -37,5 +37,12 @@ extern c_int main() {
   someClass.someOtherInstanceMethod()
   someClass.someInstanceMethodOnObject()
 
+  ${
+    type t = SomeOtherTrait
+    var tv = t
+    t = tv
+    print(t)
+  }
+
   static_cast(c_int, 0)
 }

@@ -2,10 +2,11 @@
 #define kcrt_h
 #include <stddef.h>
 
-#define KLC_TAG_POINTER 0
+#define KLC_TAG_OBJECT 0
 #define KLC_TAG_BOOL 1
 #define KLC_TAG_INT 2
 #define KLC_TAG_FLOAT 3
+#define KLC_TAG_TYPE 4
 
 typedef int KLC_bool;
 typedef ptrdiff_t KLC_int;  /* TODO: This is unsatisfactory */
@@ -44,8 +45,11 @@ struct KLC_var {
     KLC_Header* p;
     KLC_int i;
     KLC_float f;
+    KLC_Class* t;
   } u;
 };
+
+extern KLC_Class KLC_type_class;
 
 char* KLC_CopyString(const char* s);
 
@@ -77,9 +81,11 @@ void KLC_var_array_set(void* buffer, size_t i, KLC_var value);
 KLC_var KLC_var_from_ptr(KLC_Header* p);
 KLC_var KLC_var_from_int(KLC_int i);
 KLC_var KLC_var_from_float(KLC_float f);
+KLC_var KLC_var_from_type(KLC_Class* c);
 KLC_Error* KLC_var_to_ptr(KLC_Stack*, KLC_Header** out, KLC_var, KLC_Class*);
 KLC_Error* KLC_var_to_int(KLC_Stack*, KLC_int* out, KLC_var);
 KLC_Error* KLC_var_to_float(KLC_Stack*, KLC_float* out, KLC_var);
+KLC_Error* KLC_var_to_type(KLC_Stack*, KLC_Class** out, KLC_var);
 
 KLC_Class* KLC_get_class(KLC_var);
 KLC_MethodEntry* KLC_find_method(KLC_Class*, const char*);
