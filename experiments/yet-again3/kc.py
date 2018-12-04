@@ -621,7 +621,7 @@ def IR(ns):
             for (fname, ftype), arg in zip(node_fields, args):
                 set_arg(fname, ftype, arg)
 
-        def __repr__(self):
+        def dump(self):
             return '%s(%s)' % (
                 type(self).__name__,
                 ', '.join(repr(getattr(self, n))
@@ -823,6 +823,12 @@ def IR(ns):
                 self.plist.vararg,
             )
 
+        def __repr__(self):
+            return (
+                f'FunctionDefinition({self.rtype}, '
+                f'{self.module_name}#{self.short_name}, {self.plist})'
+            )
+
     @ns
     class StructOrClassDefinition(GlobalDefinition, TypeDeclaration):
         _fields = None
@@ -982,13 +988,19 @@ def IR(ns):
             return self.body_promise.resolve()
 
     @ns
-    class GlobalVariableDeclaration(VariableDeclaration):
+    class GlobalVariableDefinition(GlobalDefinition, VariableDeclaration):
         node_fields = (
             ('extern', bool),
             ('type', Type),
             ('module_name', str),
             ('short_name', str),
         )
+
+        def __repr__(self):
+            return (
+                f'GlobalVariableDefinition('
+                f'{self.module_name}#{self.short_name})'
+            )
 
     @ns
     class LocalVariableDeclaration(BaseLocalVariableDeclaration):
@@ -1003,6 +1015,9 @@ def IR(ns):
         node_fields = (
             ('name', str),
         )
+
+        def __repr__(self):
+            return f'PrimitiveTypeDefinition({self.name})'
 
         def __eq__(self, other):
             return type(self) is type(other) and self.name == other.name
@@ -1339,6 +1354,27 @@ def IR(ns):
         type = VOIDP
 
     @ns
+    class GlobalName(Expression):
+        node_fields = (
+            ('defn', GlobalVariableDefinition),
+        )
+
+        @property
+        def type(self):
+            return self.defn.type
+
+    @ns
+    class SetGlobalName(Expression):
+        node_fields = (
+            ('defn', GlobalVariableDefinition),
+            ('expr', ValueExpression),
+        )
+
+        @property
+        def type(self):
+            return self.defn.type
+
+    @ns
     class LocalName(Expression):
         node_fields = (
             ('decl', BaseLocalVariableDeclaration),
@@ -1566,12 +1602,6 @@ def IR(ns):
             ('module_name', str),
             ('exported_name', str),
             ('alias', str),
-        )
-
-    @ns
-    class GlobalVariableDefinition(GlobalDefinition):
-        node_fields = (
-            ('decl', GlobalVariableDeclaration),
         )
 
     @ns
@@ -1823,7 +1853,8 @@ def parser(ns):
         def expect(t: str):
             if not at(t):
                 with module_scope.push(peek()):
-                    raise module_scope.error(f'Expected {t} but got {peek()}')
+                    raise module_scope.error(
+                        f'Expected {repr(t)} but got {peek()}')
             return gettok()
 
         def expect_id():
@@ -2398,6 +2429,8 @@ def parser(ns):
                     target.field_defn,
                     val,
                 )
+            elif isinstance(target, IR.GlobalName):
+                return IR.SetGlobalName(token, target.defn, val)
             with scope.push(token):
                 raise scope.error(f'Not assignable')
 
@@ -2447,6 +2480,8 @@ def parser(ns):
                     )
                 if isinstance(defn, IR.DeleteQueueDeclaration):
                     return IR.DeleteQueueName(token)
+                if isinstance(defn, IR.GlobalVariableDefinition):
+                    return IR.GlobalName(token, defn)
                 with scope.push(token):
                     raise scope.error(f'{defn} is not a variable')
             return promise
@@ -2894,21 +2929,18 @@ def parser(ns):
             return defn_promise
 
         def parse_global_var_defn(scope, token, extern, type_promise, name):
+            assert not extern, 'extern global variables not yet supported'
             expect('\n')
-            decl_promise = pcall(
-                IR.GlobalVariableDeclaration,
+            defn_promise = pcall(
+                IR.GlobalVariableDefinition,
                 token,
                 extern,
                 type_promise,
                 module_name,
                 name,
             )
-            scope.set_promise(token, name, decl_promise)
-            return pcall(
-                IR.GlobalVariableDefinition,
-                token,
-                decl_promise,
-            )
+            scope.set_promise(token, name, defn_promise)
+            return defn_promise
 
         def parse_global(scope):
             token = peek()
@@ -2994,7 +3026,10 @@ def parser(ns):
 def C(ns):
     THIS_NAME = 'KLC_this'
     ENCODED_FUNCTION_PREFIX = 'KLCFN'
-    ENCODED_GLOBAL_VARIABLE_PREFIX = 'KLCGV'
+    ENCODED_GLOBAL_VARIABLE_INITVAR_PREFIX = 'KLCGVX'
+    ENCODED_GLOBAL_VARIABLE_VAR_PREFIX = 'KLCGVV'
+    ENCODED_GLOBAL_VARIABLE_INIT_PREFIX = 'KLCGVI'
+    ENCODED_GLOBAL_VARIABLE_GETTER_PREFIX = 'KLCGVG'
     ENCODED_LOCAL_PARAM_PREFIX = 'KLCLP'
     ENCODED_LOCAL_VARIABLE_PREFIX = 'KLCLV'
     ENCODED_STRUCT_PREFIX = 'KLCST'
@@ -3328,10 +3363,7 @@ def C(ns):
         fdecls = sb.spawn()
 
         for defn in module.definitions:
-            if isinstance(defn, IR.GlobalVariableDefinition):
-                if not defn.decl.extern:
-                    gvardecls += f'extern {proto_for(defn)};'
-            elif isinstance(defn, IR.FunctionDefinition):
+            if isinstance(defn, IR.FunctionDefinition):
                 fdecls += f'extern {proto_for(defn)};'
             elif isinstance(defn, IR.PrimitiveTypeDefinition):
                 # These definitions are just to help the compiler,
@@ -3388,7 +3420,9 @@ def C(ns):
 
                 for instance_method in defn.instance_methods:
                     fdecls += f'extern {proto_for(instance_method)};'
-
+            elif isinstance(defn, IR.GlobalVariableDefinition):
+                assert not defn.extern, defn
+                assert False, 'TODO'
             else:
                 raise Fubar([], defn)
 
@@ -3411,6 +3445,14 @@ def C(ns):
         return (
             encode(name, prefix=prefix) if module_name is None else
             encode(f'{module_name}.{name}', prefix=prefix)
+        )
+
+    def get_global_variable_var_name(defn: IR.GlobalVariableDefinition):
+        assert isinstance(defn, IR.GlobalVariableDefinition), defn
+        return qualify(
+            defn.module_name,
+            defn.short_name,
+            prefix=ENCODED_GLOBAL_VARIABLE_VAR_PREFIX,
         )
 
     def get_c_struct_name(defn: IR.StructDefinition):
@@ -3524,17 +3566,6 @@ def C(ns):
     # Get the C name of variable with given declaration
     cvarname = Multimethod('cvarname')
 
-    @cvarname.on(IR.GlobalVariableDeclaration)
-    def cvarname(self):
-        return (
-            self.short_name if self.extern else
-            qualify(
-                self.module_name,
-                self.short_name,
-                ENCODED_GLOBAL_VARIABLE_PREFIX,
-            )
-        )
-
     @cvarname.on(IR.Parameter)
     def cvarname(self):
         # NOTE: It isn't a typo that we use ENCODED_LOCAL_VARIABLE_PREFIX
@@ -3647,10 +3678,6 @@ def C(ns):
 
     # translate definition for source
     D = Multimethod('D')
-
-    @D.on(IR.GlobalVariableDefinition)
-    def D(self, ctx):
-        ctx.out += proto_for(self) + ';'
 
     @D.on(IR.PrimitiveTypeDefinition)
     def D(self, ctx):
@@ -3965,11 +3992,6 @@ def C(ns):
             cvarname(self),
             [METHOD_PARAM_ARGC_NAME, METHOD_PARAM_ARGV_NAME],
         )
-
-    @proto_for.on(IR.GlobalVariableDefinition)
-    def proto_for(self):
-        decl = self.decl
-        return declare(decl.type, cvarname(decl))
 
     # translate expressions
     E = Multimethod('E')
