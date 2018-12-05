@@ -59,7 +59,7 @@ class StringBuilder(Object) {
   }
 
   void addString(String s) {
-    _addCString(this, s->_buffer, s->_size)
+    _addCStringWithSize(this, s->_buffer, s->_size)
   }
 
   void add(var x) {
@@ -75,6 +75,11 @@ class StringBuilder(Object) {
   }
 
   static void _addCString(
+      StringBuilder sb, c_char const* cstr) {
+    _addCStringWithSize(sb, cstr, strlen(cstr))
+  }
+
+  static void _addCStringWithSize(
       StringBuilder sb, c_char const* cstr, int added_size) {
     if (sb->_size + added_size + 1 >= sb->_cap) {
       sb->_cap = 2 * (sb->_size + added_size + 1)
