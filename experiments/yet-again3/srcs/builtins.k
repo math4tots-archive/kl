@@ -1,6 +1,7 @@
 #"no builtins"
 from c import size_t
 from c import printf
+from c import sprintf
 from c import malloc
 from c import free
 from c import strlen
@@ -121,7 +122,7 @@ class String(Object) {
     String._fromBuffer(new_buffer, new_size)
   }
 
-  c_long normalMethod() {
+  int normalMethod() {
     95189
   }
 
@@ -206,10 +207,32 @@ String get_type_str(type t) {
   )
 }
 
+String get_int_str(int x) {
+  // TODO: Make implementation more portable
+  c_char* buffer = cmalloc(64)
+  sprintf(buffer, c"%lu", x)
+  String ret = String.fromCString(buffer)
+  cfree(buffer)
+  ret
+}
+
+String get_float_str(float x) {
+  // TODO: Make implementation more portable
+  c_char* buffer = cmalloc(64)
+  sprintf(buffer, c"%f", x)
+  String ret = String.fromCString(buffer)
+  cfree(buffer)
+  ret
+}
+
 String str(var x) {
   int tag = KLC_get_tag(x)
   if (tag == KLC_get_type_tag()) {
     get_type_str(x)
+  } else if (tag == KLC_get_int_tag()) {
+    get_int_str(x)
+  } else if (tag == KLC_get_float_tag()) {
+    get_float_str(x)
   } else {
     String s = x.__str()
     s

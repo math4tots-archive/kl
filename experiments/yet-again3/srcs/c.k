@@ -10,6 +10,7 @@ extern void* malloc(size_t size)
 extern void free(void* p)
 extern void* realloc(void* p, size_t size)
 extern size_t strlen(c_char const* str)
+extern c_int sprintf(c_char* str, c_char const* fmt, ...)
 
 extern c_char* cmalloc(int size) {
   static_cast(c_char*, malloc(static_cast(size_t, size)))

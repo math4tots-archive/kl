@@ -1245,6 +1245,10 @@ def IR(ns):
         if value_expr.type == dest_type:
             return value_expr
 
+        if value_expr.type == VOID:
+            with scope.push(expr.token):
+                scope.error(f'Got void type but expected {dest_type}')
+
         return _convert(value_expr.type, dest_type, value_expr, scope)
 
     _convert = Multimethod('_convert', 3)
@@ -1260,6 +1264,9 @@ def IR(ns):
     def _convert(st, dt, expr, scope):
         if st == dt:
             return expr
+
+        if dt == VOID:
+            return Cast(expr.token, expr, dt)
 
         pair = (st.name, dt.name)
 
@@ -1377,11 +1384,6 @@ def IR(ns):
             ('expr', ValueExpression),
             ('type', Type),
         )
-
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            if self.type == IR.VOID:
-                raise TypeError(str(self))
 
     @ns
     class FunctionName(PseudoExpression):
@@ -3005,7 +3007,14 @@ def parser(ns):
                 rtype_promise,
                 name,
                 plist_promise,
-                body_promise,
+                body_promise.map(lambda body:
+                    IR.Block(
+                        token,
+                        [],
+                        [method_scope.convert(
+                            body, rtype_promise.resolve())]
+                    ),
+                )
             ))
             class_scope.set_promise(token, name, defn_promise)
             return defn_promise
@@ -4236,8 +4245,9 @@ def C(ns):
     @E.on(IR.Cast)
     def E(self, ctx):
         if self.type == IR.VOID:
-            raise TypeError(str(self))
-        return cast_expr(ctx, self.expr, self.type)
+            E(self.expr, ctx)
+        else:
+            return cast_expr(ctx, self.expr, self.type)
 
     def cast_expr(ctx, expr, dt):
         c_name = E(expr, ctx)
