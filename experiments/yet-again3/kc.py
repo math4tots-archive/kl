@@ -1579,6 +1579,17 @@ def IR(ns):
                 return IR.VOID
 
     @ns
+    class While(Expression):
+        node_fields = (
+            ('cond', Expression.WithType(BOOL)),
+            ('body', Block),
+        )
+
+        @lazy(lambda: Type)
+        def type(self):
+            return VOID
+
+    @ns
     class LogicalAnd(Expression):
         node_fields = (
             ('left', Expression.WithType(BOOL)),
@@ -4596,6 +4607,28 @@ def C(ns):
 
         if self.type != IR.VOID:
             return retvar
+
+    @E.on(IR.While)
+    def E(self, ctx):
+        assert self.cond.type == IR.BOOL, self.cond.type
+
+        condvar = ctx.declare(IR.BOOL)
+        ctx.out += f'{condvar} = 1;'
+        ctx.out += f'while ({condvar})'
+        with ctx.retain_scope():
+            saved_condvar = ctx.declare(self.cond.type)
+
+            with ctx.retain_scope():
+                computed_condvar = E(self.cond, ctx)
+                ctx.out += f'{condvar} = {computed_condvar};'
+
+            ctx.out += f'if (!{condvar})'
+            ctx.out += '{'
+            with ctx.push_indent(1):
+                ctx.jump_out_of_scope()
+            ctx.out += '}'
+
+            E(self.body, ctx)
 
     @E.on(IR.LogicalAnd)
     def E(self, ctx):

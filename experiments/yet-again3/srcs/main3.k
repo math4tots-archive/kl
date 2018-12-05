@@ -39,12 +39,14 @@ extern c_int main() {
 
   print(someClass)
 
-  // ${
-  //   int i = 0
-  //   while (i < 10) {
-  //     print("i = " + str(i))
-  //   }
-  // }
+  ${
+    print('a')
+    int i = 0
+    while (i < 10) {
+      printf(c"i = %ld\n", i)
+      i = i + 1
+    }
+  }
 
   ${
     type t = SomeOtherTrait
