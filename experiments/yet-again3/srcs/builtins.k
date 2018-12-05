@@ -33,14 +33,14 @@ extern void KLC_var_array_set(void* buffer, size_t i, var value)
 
 trait Object() {
   int someInstanceMethodOnObject() {
-    printf("Inside someInstanceMethodOnObject\n")
+    printf(c"Inside someInstanceMethodOnObject\n")
   }
 
   String __repr() {
     (
-      String.fromCString("<")
+      String.fromCString(c"<")
         .__add(str(KLC_get_class(this)))
-        .__add(String.fromCString(" instance>"))
+        .__add(String.fromCString(c" instance>"))
     )
   }
 
@@ -67,7 +67,7 @@ class StringBuilder(Object) {
   }
 
   String __repr() {
-    String.fromCString("<StringBuilder>")
+    String.fromCString(c"<StringBuilder>")
   }
 
   String __str() {
@@ -138,6 +138,12 @@ class String(Object) {
   }
 }
 
+// This is an implicit function that will get called
+// whenever present
+String `%str`(c_char const* cstr) {
+  String.fromCString(cstr)
+}
+
 class List(Object) {
   int _size
   int _cap
@@ -192,11 +198,11 @@ class List(Object) {
 
 String get_type_str(type t) {
   (
-    String.fromCString("<type ")
+    String.fromCString(c"<type ")
       .__add(String.fromCString(KLC_get_type_module_name(t)))
-      .__add(String.fromCString("#"))
+      .__add(String.fromCString(c"#"))
       .__add(String.fromCString(KLC_get_type_short_name(t)))
-      .__add(String.fromCString(">"))
+      .__add(String.fromCString(c">"))
   )
 }
 
@@ -211,5 +217,5 @@ String str(var x) {
 }
 
 void print(var x) {
-  printf("%s\n", str(x)->_buffer)
+  printf(c"%s\n", str(x)->_buffer)
 }

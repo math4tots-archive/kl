@@ -471,20 +471,28 @@ def lexer(ns):
                 break
 
             # raw string literal
-            if s.startswith(('r"', "r'"), i):
+            if s.startswith(('r"', "r'", 'cr"', "cr'"), i):
+                is_c_str = (s[i] == 'c')
+                if is_c_str:
+                    i += 1
                 i += 1  # 'r'
                 q = s[i:i+3] if s.startswith(s[i] * 3, i) else s[i]
                 i += len(q)
+                cut_start = i
                 while i < len(s) and not s.startswith(q, i):
                     i += 1
                 if i >= len(s):
                     raise error([a], 'Unterminated raw string literal')
                 i += len(q)
-                yield mt(a, 'STRING', s[a+1+len(q):i-len(q)])
+                token_type = 'C_STRING' if is_c_str else 'STRING'
+                yield mt(a, 'STRING', s[cut_start:i-len(q)])
                 continue
 
             # normal string literal
-            if s.startswith(('"', "'"), i):
+            if s.startswith(('"', "'", 'c"', "c'"), i):
+                is_c_str = (s[i] == 'c')
+                if is_c_str:
+                    i += 1
                 q = s[i:i+3] if s.startswith(s[i] * 3, i) else s[i]
                 i += len(q)
                 sb = []
@@ -504,7 +512,8 @@ def lexer(ns):
                 if i >= len(s):
                     raise error([a], 'Unterminated string literal')
                 i += len(q)
-                yield mt(a, 'STRING', ''.join(sb))
+                token_type = 'C_STRING' if is_c_str else 'STRING'
+                yield mt(a, token_type, ''.join(sb))
                 continue
 
             # numbers (int and float)
@@ -1121,6 +1130,9 @@ def IR(ns):
         def _proxy(self):
             return (self.base,)
 
+    STRING_CONVERSION_FUNCTION_NAME = '%str'
+    ns(STRING_CONVERSION_FUNCTION_NAME, 'STRING_CONVERSION_FUNCTION_NAME')
+
     def nptype(c_name):
         return PrimitiveTypeDefinition(builtin_token, c_name)
 
@@ -1620,7 +1632,7 @@ def IR(ns):
         )
 
     @ns
-    class StringLiteral(Expression):
+    class CStringLiteral(Expression):
         node_fields = (
             ('value', str),
         )
@@ -1824,10 +1836,12 @@ def parser(ns):
     ROOT_TRAIT_NAME = 'Object'
 
     _builtins_export_names = (
+        IR.STRING_CONVERSION_FUNCTION_NAME,
         'String',
         'StringBuilder',
         'List',
         'print',
+        'str',
     )
 
     @ns
@@ -2214,6 +2228,14 @@ def parser(ns):
                     break
             return expr_promise
 
+        _binop_table = {
+            '+': '__add',
+            '-': '__sub',
+            '*': '__mul',
+            '/': '__div',
+            '%': '__mod',
+        }
+
         def promise_binop(scope, token, op, left_promise, right_promise):
             @Promise
             def promise():
@@ -2268,6 +2290,17 @@ def parser(ns):
                         left,
                         op,
                         right,
+                    )
+                if (isinstance(left.type, IR.Retainable) and
+                        isinstance(right.type, IR.Retainable)):
+                    op_name = _binop_table[op]
+                    return IR.InstanceMethodCall(
+                        token,
+                        op_name,
+                        [
+                            scope.convert(left, IR.VAR_TYPE),
+                            scope.convert(right, IR.VAR_TYPE),
+                        ],
                     )
                 with scope.push(token):
                     key = (op, left.type, right.type)
@@ -2629,10 +2662,50 @@ def parser(ns):
                 return IR.If(token, cond, body, other)
             return promise
 
+        def parse_while(scope):
+            token = expect('while')
+            expect('(')
+            with skipping_newlines(True):
+                cond_promise = parse_truthy_expression(scope)
+                expect(')')
+            body_promise = parse_block(scope)
+            @Promise
+            def promise():
+                cond = cond_promise.resolve()
+                body = body_promise.resolve()
+                return IR.While(token, cond, body)
+            return promise
+
+        def promise_string_literal(token, scope, value):
+            @Promise
+            def promise():
+                c_str_expr = IR.CStringLiteral(token, value)
+                if IR.STRING_CONVERSION_FUNCTION_NAME in scope:
+                    return promise_fcall(
+                        scope=scope,
+                        token=token,
+                        function_promise=promise_name(
+                            scope,
+                            token,
+                            IR.STRING_CONVERSION_FUNCTION_NAME,
+                        ),
+                        argsp=Promise(lambda: [c_str_expr]),
+                    ).resolve()
+                else:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'Normal string literals are not available '
+                            f'in this context, use c"..." style for '
+                            f'C string literals')
+                return expr
+            return promise
+
         def parse_primary(scope):
             token = peek()
             if at('if'):
                 return parse_if(scope)
+            if at('while'):
+                return parse_while(scope)
             if consume('$'):
                 if at('{'):
                     return parse_block(scope)
@@ -2655,8 +2728,10 @@ def parser(ns):
                 return Promise.value(IR.IntLiteral(token, token.value))
             if consume('FLOAT'):
                 return Promise.value(IR.FloatLiteral(token, token.value))
+            if consume('C_STRING'):
+                return Promise.value(IR.CStringLiteral(token, token.value))
             if consume('STRING'):
-                return Promise.value(IR.StringLiteral(token, token.value))
+                return promise_string_literal(token, scope, token.value)
             if consume('throw'):
                 # For now, only allow string literals
                 value = expect('STRING').value
@@ -3161,6 +3236,13 @@ def C(ns):
 
         '#': '_H',  # H for Hashtag
                     # For generating method names
+
+        '%': '_M',  # M for Modulo
+                    # For auto-generated symbol names,
+                    # e.g. any temp variables,
+                    # the '%str' function that automatically
+                    # converts C string literals into
+                    # String when builtin is included.
     }
 
     def encode_char(c):
@@ -4363,7 +4445,7 @@ def C(ns):
                 .replace("'", "\\'")
         )
 
-    @E.on(IR.StringLiteral)
+    @E.on(IR.CStringLiteral)
     def E(self, ctx):
         return f'"{escape_str(self.value)}"'
 

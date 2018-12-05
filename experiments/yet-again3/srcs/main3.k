@@ -2,17 +2,17 @@ from c import printf
 
 trait SomeTrait() {
   static int someStaticMethod() {
-    printf("Inside someStaticMethod\n")
+    printf(c"Inside someStaticMethod\n")
   }
 
   int someInstanceMethod() {
-    printf("Inside someInstanceMethod\n")
+    printf(c"Inside someInstanceMethod\n")
   }
 }
 
 trait SomeOtherTrait {
   void someOtherInstanceMethod() {
-    printf("Inside someOtherInstanceMethod\n")
+    printf(c"Inside someOtherInstanceMethod\n")
   }
 }
 
@@ -25,10 +25,10 @@ class SomeClass(SomeTrait, SomeOtherTrait) {
 extern c_int main() {
   List list = List()
   c_long size = list.size
-  printf("list.size = %ld\n", size)
+  printf(c"list.size = %ld\n", size)
   list.push(15)
   size = list.size
-  printf("list.size = %ld\n", size)
+  printf(c"list.size = %ld\n", size)
 
   SomeTrait.someStaticMethod()
 
@@ -39,6 +39,13 @@ extern c_int main() {
 
   print(someClass)
 
+  // ${
+  //   int i = 0
+  //   while (i < 10) {
+  //     print("i = " + str(i))
+  //   }
+  // }
+
   ${
     type t = SomeOtherTrait
     var tv = t
@@ -48,8 +55,8 @@ extern c_int main() {
 
   ${
     StringBuilder sb = StringBuilder()
-    sb.addString(String.fromCString("abc"))
-    sb.addString(String.fromCString("def"))
+    sb.addString(String.fromCString(c"abc"))
+    sb.addString(String.fromCString(c"def"))
     print(sb)
   }
 
