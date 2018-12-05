@@ -703,13 +703,36 @@ def IR(ns):
 
         class WithType(typeutil.FakeType):
 
-            def __init__(self, type):
-                self.type = type
+            def __init__(self, *types):
+                self.types = types
 
             def __instancecheck__(self, obj):
                 return (
                     isinstance(obj, Expression) and
-                    obj.type == self.type
+                    obj.type in self.types
+                )
+
+            def __eq__(self, other):
+                return (
+                    type(self) is type(other) and
+                    self.types == other.types
+                )
+
+            def __hash__(self):
+                return hash((type(self), self.types))
+
+            def __repr__(self):
+                return f'WithType({self.types})'
+
+        class WithTypeOfClass(typeutil.FakeType):
+
+            def __init__(self, type_class):
+                self.type_class = type_class
+
+            def __instancecheck__(self, obj):
+                return (
+                    isinstance(obj, Expression) and
+                    isinstance(obj.type, self.type_class)
                 )
 
             def __eq__(self, other):
@@ -890,6 +913,9 @@ def IR(ns):
             ('instance_method_promises', typeutil.List[Promise]),
             ('traits_promise', Promise),
         )
+
+        def __repr__(self):
+            return f'ClassDefinition({self.module_name}#{self.short_name})'
 
         @lazy(lambda: DeleteHook)
         def delete_hook(self):
@@ -1517,6 +1543,15 @@ def IR(ns):
         )
 
     @ns
+    class PointerAndIntArithmetic(Expression):
+        node_fields = (
+            ('type', PointerType),
+            ('left', Expression.WithTypeOfClass(PointerType)),
+            ('op', str),
+            ('right', Expression.WithType(INT)),
+        )
+
+    @ns
     class If(Expression):
         node_fields = (
             ('cond', Expression.WithType(BOOL)),
@@ -1790,6 +1825,7 @@ def parser(ns):
 
     _builtins_export_names = (
         'String',
+        'StringBuilder',
         'List',
         'print',
     )
@@ -2219,6 +2255,20 @@ def parser(ns):
                         left,
                         right,
                     )
+                if (op in ('+', '-') and
+                        isinstance(left.type, IR.PointerType) and
+                        right.type == IR.INT):
+                    if left.type == IR.VOIDP:
+                        with scope.push(token):
+                            raise scope.error(
+                                f'Cannot do arithmetic on void pointers')
+                    return IR.PointerAndIntArithmetic(
+                        token,
+                        left.type,
+                        left,
+                        op,
+                        right,
+                    )
                 with scope.push(token):
                     key = (op, left.type, right.type)
                     raise scope.error(f'Unsupported binop {key}')
@@ -2495,6 +2545,17 @@ def parser(ns):
                     return IR.DeleteQueueName(token)
                 if isinstance(defn, IR.GlobalVariableDefinition):
                     return IR.GlobalName(token, defn)
+                if isinstance(defn, IR.StaticMethodDefinition):
+                    return IR.StaticMethodName(token, defn)
+                if isinstance(defn, IR.InstanceMethodDefinition):
+                    return IR.InstanceMethodReference(
+                        token,
+                        scope.convert(
+                            promise_this(scope, token).resolve(),
+                            IR.VAR_TYPE,
+                        ),
+                        defn.name,
+                    )
                 with scope.push(token):
                     raise scope.error(f'{defn} is not a variable')
             return promise
@@ -2602,17 +2663,18 @@ def parser(ns):
                 return promise_throw_string_literal(scope, token, value)
             if consume('static_cast'):
                 expect('(')
-                type_promise = parse_type(scope)
-                expect(',')
-                arg_promise = parse_expression(scope)
-                expect(')')
-                return pcall(
-                    make_cast,
-                    scope,
-                    token,
-                    type_promise,
-                    arg_promise,
-                )
+                with skipping_newlines(True):
+                    type_promise = parse_type(scope)
+                    expect(',')
+                    arg_promise = parse_expression(scope)
+                    expect(')')
+                    return pcall(
+                        make_cast,
+                        scope,
+                        token,
+                        type_promise,
+                        arg_promise,
+                    )
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
 
@@ -4070,6 +4132,14 @@ def C(ns):
     def E(self, ctx):
         return cvarname(self.decl)
 
+    @E.on(IR.PointerAndIntArithmetic)
+    def E(self, ctx):
+        ptr_var = E(self.left, ctx)
+        int_var = E(self.right, ctx)
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = {ptr_var} {self.op} {int_var};'
+        return retvar
+
     @E.on(IR.Cast)
     def E(self, ctx):
         if self.type == IR.VOID:
@@ -4088,6 +4158,9 @@ def C(ns):
             return _cast(st, dt, c_name, ctx, token)
 
     _cast = Multimethod('_cast', 2)
+
+    def _cast_error(st, dt, token):
+        return Error([token], f'Unsupported cast from {st} to {dt}')
 
     @_cast.on(IR.PrimitiveTypeDefinition, IR.PrimitiveTypeDefinition)
     def _cast(st, dt, c_name, ctx, token):
@@ -4188,6 +4261,10 @@ def C(ns):
         ctx.out += f'{retvar} = (({declare(dt, "")}) {c_name});'
         ctx.retain(retvar)
         return retvar
+
+    @_cast.on(IR.Type, IR.Type)
+    def _cast(st, dt, c_name, ctx, token):
+        raise _cast_error(st, dt, token)
 
     def _get_struct_field_chain(expr):
         reverse_field_chain = []

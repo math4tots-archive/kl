@@ -6,6 +6,7 @@ from c import free
 from c import strlen
 from c import cmalloc
 from c import cfree
+from c import crealloc
 from c import strcpy
 from c import strcat
 
@@ -48,6 +49,46 @@ trait Object() {
   }
 }
 
+class StringBuilder(Object) {
+  c_char* _buffer
+  int _size
+  int _cap
+
+  static StringBuilder new() {
+    $(StringBuilder)
+  }
+
+  void addString(String s) {
+    _addCString(this, s->_buffer, s->_size)
+  }
+
+  void add(var x) {
+    addString(str(x))
+  }
+
+  String __repr() {
+    String.fromCString("<StringBuilder>")
+  }
+
+  String __str() {
+    String.fromCString(_buffer)
+  }
+
+  static void _addCString(
+      StringBuilder sb, c_char const* cstr, int added_size) {
+    if (sb->_size + added_size + 1 >= sb->_cap) {
+      sb->_cap = 2 * (sb->_size + added_size + 1)
+      sb->_buffer = crealloc(sb->_buffer, sb->_cap)
+    }
+    strcpy(sb->_buffer + sb->_size, cstr)
+    sb->_size = sb->_size + added_size
+  }
+
+  delete {
+    free(static_cast(void*, this->_buffer))
+  }
+}
+
 class String(Object) {
   c_char* _buffer
   int _size
@@ -81,6 +122,10 @@ class String(Object) {
 
   int __GETsize() {
     _size
+  }
+
+  String __str() {
+    this
   }
 
   delete {

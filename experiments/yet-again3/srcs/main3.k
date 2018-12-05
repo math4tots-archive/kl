@@ -46,5 +46,12 @@ extern c_int main() {
     print(t)
   }
 
+  ${
+    StringBuilder sb = StringBuilder()
+    sb.addString(String.fromCString("abc"))
+    sb.addString(String.fromCString("def"))
+    print(sb)
+  }
+
   static_cast(c_int, 0)
 }
