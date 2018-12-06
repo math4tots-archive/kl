@@ -23,6 +23,7 @@ class SomeClass(SomeTrait, SomeOtherTrait) {
 }
 
 String message = 'hello world'
+List items = []
 
 extern c_int main() {
   List list = List()
@@ -45,6 +46,11 @@ extern c_int main() {
   print('[1, 2, 3].size = ' + str([1, 2, 3].size))
 
   print('(global) message = ' + message)
+  print('(global) items = ' + str(items))
+  items.push(1)
+  items.push(2)
+  items.push(3)
+  print('(global) items = ' + str(items))
 
   // ${
   //   int i = 0

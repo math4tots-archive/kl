@@ -1424,17 +1424,6 @@ def IR(ns):
             return self.defn.type
 
     @ns
-    class SetGlobalName(Expression):
-        node_fields = (
-            ('defn', GlobalVariableDefinition),
-            ('expr', ValueExpression),
-        )
-
-        @property
-        def type(self):
-            return self.defn.type
-
-    @ns
     class LocalName(Expression):
         node_fields = (
             ('decl', BaseLocalVariableDeclaration),
@@ -2556,7 +2545,9 @@ def parser(ns):
                     val,
                 )
             elif isinstance(target, IR.GlobalName):
-                return IR.SetGlobalName(token, target.defn, val)
+                with scope.push(token):
+                    raise scope.error(
+                        f'Global variables are not assignable')
             with scope.push(token):
                 raise scope.error(f'Not assignable')
 
