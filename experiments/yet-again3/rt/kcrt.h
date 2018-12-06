@@ -65,6 +65,8 @@ KLC_Error* KLC_errorf(size_t hint, KLC_Stack*, const char*, ...);
 void KLC_delete_error(KLC_Error*);
 const char* KLC_get_error_message(KLC_Error*);
 
+KLC_bool KLC_is(KLC_var left, KLC_var right);
+
 void KLC_retain(KLC_Header*);
 void KLC_release(KLC_Header*);
 void KLC_partial_release(KLC_Header*, KLC_Header**);

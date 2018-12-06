@@ -1,4 +1,5 @@
 from builtins import KLC_release_vars_queued_for_exit
+from c import printf
 
 trait SomeTrait() {
   static void someStaticMethod() {
@@ -59,6 +60,14 @@ extern c_int main() {
   //   }
   //   print('total = ' + str(total))
   // }
+
+  ${
+    var a = 10
+    var b = 5
+    printf(c'a is b = %d\n', static_cast(c_int, a is b))
+    printf(c'a is not b = %d\n', static_cast(c_int, a is not b))
+    printf(c'a is b = %d\n', static_cast(c_int, a is a))
+  }
 
   ${
     print('a')

@@ -181,6 +181,26 @@ const char* KLC_get_error_message(KLC_Error* error) {
   return error->message;
 }
 
+KLC_bool KLC_is(KLC_var left, KLC_var right) {
+  if (left.tag != right.tag) {
+    return 0;
+  }
+  switch (left.tag) {
+    case KLC_TAG_OBJECT:
+      return left.u.p == right.u.p;
+    case KLC_TAG_BOOL:
+      return left.u.b == right.u.b;
+    case KLC_TAG_INT:
+      return left.u.i == right.u.i;
+    case KLC_TAG_FLOAT:
+      return left.u.f == right.u.f;
+    case KLC_TAG_TYPE:
+      return left.u.t == right.u.t;
+  }
+  /* TODO: panic here */
+  return 0;
+}
+
 void KLC_retain(KLC_Header* obj) {
   if (obj) {
     obj->refcnt++;

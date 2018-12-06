@@ -1594,6 +1594,16 @@ def IR(ns):
             return VOID
 
     @ns
+    class IdentityComparison(Expression):
+        node_fields = (
+            ('op', str),
+            ('left', Expression.WITH_VAR_TYPE),
+            ('right', Expression.WITH_VAR_TYPE),
+        )
+
+        type = BOOL
+
+    @ns
     class LogicalAnd(Expression):
         node_fields = (
             ('left', Expression.WithType(BOOL)),
@@ -2202,19 +2212,39 @@ def parser(ns):
             expr_promise = parse_additive(scope)
             while True:
                 token = peek()
-                for op in ('==', '!=', '<', '>', '<=', '>='):
-                    if consume(op):
+                if consume('is'):
+                    if consume('not'):
                         right_promise = parse_additive(scope)
                         expr_promise = promise_binop(
                             scope,
                             token,
-                            op,
+                            'is not',
                             expr_promise,
                             right_promise,
                         )
-                        break
+                    else:
+                        right_promise = parse_additive(scope)
+                        expr_promise = promise_binop(
+                            scope,
+                            token,
+                            'is',
+                            expr_promise,
+                            right_promise,
+                        )
                 else:
-                    break
+                    for op in ('==', '!=', '<', '>', '<=', '>='):
+                        if consume(op):
+                            right_promise = parse_additive(scope)
+                            expr_promise = promise_binop(
+                                scope,
+                                token,
+                                op,
+                                expr_promise,
+                                right_promise,
+                            )
+                            break
+                    else:
+                        break
             return expr_promise
 
         def parse_additive(scope):
@@ -2277,6 +2307,13 @@ def parser(ns):
             def promise():
                 left = left_promise.resolve()
                 right = right_promise.resolve()
+                if op in ('is', 'is not'):
+                    return IR.IdentityComparison(
+                        token,
+                        op,
+                        scope.convert(left, IR.VAR_TYPE),
+                        scope.convert(right, IR.VAR_TYPE),
+                    )
                 if op == '||':
                     assert left.type == IR.BOOL, left.type
                     assert right.type == IR.BOOL, right.type
@@ -4895,6 +4932,20 @@ def C(ns):
             ctx.out += '}'
 
             E(self.body, ctx)
+
+    @E.on(IR.IdentityComparison)
+    def E(self, ctx):
+        assert self.type == IR.BOOL, self.type
+        assert self.left.type == IR.VAR_TYPE, self.left
+        assert self.right.type == IR.VAR_TYPE, self.right
+        assert self.op in ('is', 'is not'), self.op
+        is_not = (self.op == 'is not')
+        negate = '!' if is_not else ''
+        lvar = E(self.left, ctx)
+        rvar = E(self.right, ctx)
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = {negate}KLC_is({lvar}, {rvar});'
+        return retvar
 
     @E.on(IR.LogicalAnd)
     def E(self, ctx):
