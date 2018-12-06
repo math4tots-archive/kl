@@ -1,3 +1,5 @@
+from builtins import KLC_release_vars_queued_for_exit
+
 trait SomeTrait() {
   static void someStaticMethod() {
     print("Inside someStaticMethod")
@@ -20,6 +22,8 @@ class SomeClass(SomeTrait, SomeOtherTrait) {
   }
 }
 
+String message = 'hello world'
+
 extern c_int main() {
   List list = List()
   c_long size = list.size
@@ -39,6 +43,8 @@ extern c_int main() {
 
   print([1, 2, 3])
   print('[1, 2, 3].size = ' + str([1, 2, 3].size))
+
+  print('(global) message = ' + message)
 
   // ${
   //   int i = 0
@@ -73,5 +79,6 @@ extern c_int main() {
     print(sb)
   }
 
+  KLC_release_vars_queued_for_exit()
   static_cast(c_int, 0)
 }

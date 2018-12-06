@@ -5,6 +5,7 @@
 #include <string.h>
 
 typedef struct KLC_StackEntry KLC_StackEntry;
+typedef struct KLC_RelaseOnExitQueue KLC_RelaseOnExitQueue;
 
 struct KLC_Error {
   char* message;
@@ -23,8 +24,16 @@ struct KLC_Stack {
   KLC_StackEntry* buffer;
 };
 
+struct KLC_RelaseOnExitQueue {
+  size_t size;
+  size_t cap;
+  KLC_Header** buffer;
+};
+
 static KLC_Error* KLC_type_method_repr(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_type_method_str(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+
+static KLC_RelaseOnExitQueue exit_release_queue;
 
 KLC_MethodEntry KLC_type_methods[] = {
   { "__repr", KLC_type_method_repr },
@@ -216,6 +225,34 @@ void KLC_partial_release_var(KLC_var v, KLC_Header** delete_queue) {
   if (v.tag == KLC_TAG_OBJECT) {
     KLC_partial_release(v.u.p, delete_queue);
   }
+}
+
+void KLC_release_on_exit(KLC_Header* p) {
+  if (p) {
+    if (exit_release_queue.size + 1 >= exit_release_queue.cap) {
+      exit_release_queue.cap = exit_release_queue.cap * 2 + 16;
+      exit_release_queue.buffer =
+        (KLC_Header**) realloc(
+          exit_release_queue.buffer,
+          sizeof(KLC_Header*) * exit_release_queue.cap
+        );
+    }
+    exit_release_queue.buffer[exit_release_queue.size++] = p;
+  }
+}
+
+void KLC_release_var_on_exit(KLC_var v) {
+  if (v.tag == KLC_TAG_OBJECT) {
+    KLC_release_on_exit(v.u.p);
+  }
+}
+
+void KLC_release_vars_queued_for_exit() {
+  size_t i;
+  for (i = 0; i < exit_release_queue.size; i++) {
+    KLC_release(exit_release_queue.buffer[i]);
+  }
+  free(exit_release_queue.buffer);
 }
 
 void* KLC_realloc_var_array(void* buffer, size_t old_cap, size_t new_cap) {

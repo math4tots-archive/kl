@@ -13,6 +13,8 @@ from c import strcat
 
 extern c_char* KLC_CopyString(c_char const* s)
 
+extern void KLC_release_vars_queued_for_exit()
+
 // For extracting type information
 extern int KLC_get_tag(var x)
 extern int KLC_get_obj_tag()

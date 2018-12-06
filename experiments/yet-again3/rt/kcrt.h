@@ -70,6 +70,9 @@ void KLC_partial_release(KLC_Header*, KLC_Header**);
 void KLC_retain_var(KLC_var);
 void KLC_release_var(KLC_var);
 void KLC_partial_release_var(KLC_var, KLC_Header**);
+void KLC_release_on_exit(KLC_Header*);
+void KLC_release_var_on_exit(KLC_var);
+void KLC_release_vars_queued_for_exit();
 
 void* KLC_realloc_var_array(void* buffer, size_t old_cap, size_t new_cap);
 void KLC_partial_release_var_array(

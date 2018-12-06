@@ -1029,6 +1029,7 @@ def IR(ns):
             ('type', Type),
             ('module_name', str),
             ('short_name', str),
+            ('expr', Expression),
         )
 
         def __repr__(self):
@@ -3170,9 +3171,17 @@ def parser(ns):
             outer_scope.set_promise(token, name, defn_promise)
             return defn_promise
 
-        def parse_global_var_defn(scope, token, extern, type_promise, name):
+        def parse_global_var_defn(
+                outer_scope, token, extern, type_promise, name):
             assert not extern, 'extern global variables not yet supported'
-            expect('\n')
+            expect('=')
+            expr_scope = Scope(outer_scope)
+            expr_scope['@ec'] = IR.ExpressionContext(
+                token=token,
+                extern=False,
+                this_type=None,
+            )
+            expr_promise = parse_expression(expr_scope)
             defn_promise = pcall(
                 IR.GlobalVariableDefinition,
                 token,
@@ -3180,8 +3189,11 @@ def parser(ns):
                 type_promise,
                 module_name,
                 name,
+                expr_promise.map(lambda expr:
+                    expr_scope.convert(expr, type_promise.resolve())
+                ),
             )
-            scope.set_promise(token, name, defn_promise)
+            outer_scope.set_promise(token, name, defn_promise)
             return defn_promise
 
         def parse_global(scope):
@@ -3268,10 +3280,10 @@ def parser(ns):
 def C(ns):
     THIS_NAME = 'KLC_this'
     ENCODED_FUNCTION_PREFIX = 'KLCFN'
-    ENCODED_GLOBAL_VARIABLE_INITVAR_PREFIX = 'KLCGVX'
-    ENCODED_GLOBAL_VARIABLE_VAR_PREFIX = 'KLCGVV'
-    ENCODED_GLOBAL_VARIABLE_INIT_PREFIX = 'KLCGVI'
     ENCODED_GLOBAL_VARIABLE_GETTER_PREFIX = 'KLCGVG'
+    ENCODED_GLOBAL_VARIABLE_INITVAR_PREFIX = 'KLCGVI'
+    ENCODED_GLOBAL_VARIABLE_INITIALIZER_PREFIX = 'KLCGVR'
+    ENCODED_GLOBAL_VARIABLE_NAME_PREFIX = 'KLCGVN'
     ENCODED_LOCAL_PARAM_PREFIX = 'KLCLP'
     ENCODED_LOCAL_VARIABLE_PREFIX = 'KLCLV'
     ENCODED_STRUCT_PREFIX = 'KLCST'
@@ -3538,6 +3550,7 @@ def C(ns):
         elif type == IR.VAR_TYPE:
             return f'KLC_retain_var({cname});'
         else:
+            assert not isinstance(type, IR.Retainable), type
             return ''
 
     def _release(type, cname):
@@ -3546,6 +3559,16 @@ def C(ns):
         elif type == IR.VAR_TYPE:
             return f'KLC_release_var({cname});'
         else:
+            assert not isinstance(type, IR.Retainable), type
+            return ''
+
+    def _release_on_exit(type, cname):
+        if isinstance(type, IR.ClassDefinition):
+            return f'KLC_release_on_exit((KLC_Header*) {cname});'
+        elif type == IR.VAR_TYPE:
+            return f'KLC_release_var_on_exit({cname});'
+        else:
+            assert not isinstance(type, IR.Retainable), type
             return ''
 
     @ns
@@ -3671,7 +3694,8 @@ def C(ns):
                     fdecls += f'extern {proto_for(instance_method)};'
             elif isinstance(defn, IR.GlobalVariableDefinition):
                 assert not defn.extern, defn
-                assert False, 'TODO'
+                getter_proto = get_global_var_getter_proto(defn)
+                fdecls += f'extern {getter_proto};'
             else:
                 raise Fubar([], defn)
 
@@ -3696,12 +3720,64 @@ def C(ns):
             encode(f'{module_name}.{name}', prefix=prefix)
         )
 
-    def get_global_variable_var_name(defn: IR.GlobalVariableDefinition):
+    def get_global_var_getter_proto(defn: IR.GlobalVariableDefinition):
+        getter_name = get_global_var_getter_name(defn)
+        getter_type = get_global_var_getter_type(defn)
+        return declare(
+            getter_type,
+            getter_name,
+            [STACK_POINTER_NAME, OUTPUT_PTR_NAME],
+        )
+
+    def get_global_var_getter_name(defn: IR.GlobalVariableDefinition):
         assert isinstance(defn, IR.GlobalVariableDefinition), defn
         return qualify(
             defn.module_name,
             defn.short_name,
-            prefix=ENCODED_GLOBAL_VARIABLE_VAR_PREFIX,
+            prefix=ENCODED_GLOBAL_VARIABLE_GETTER_PREFIX,
+        )
+
+    def get_global_var_getter_type(defn: IR.GlobalVariableDefinition):
+        assert isinstance(defn, IR.GlobalVariableDefinition), defn
+        return IR.FunctionType(
+            extern=False,
+            rtype=defn.type,
+            paramtypes=[],
+            vararg=False,
+        )
+
+    def get_global_var_initializer_type(defn: IR.GlobalVariableDefinition):
+        return get_global_var_getter_type(defn)
+
+    def get_global_initvar_name(defn: IR.GlobalVariableDefinition):
+        assert isinstance(defn, IR.GlobalVariableDefinition), defn
+        return qualify(
+            defn.module_name,
+            defn.short_name,
+            prefix=ENCODED_GLOBAL_VARIABLE_INITVAR_PREFIX,
+        )
+
+    def get_global_var_initializer_name(defn: IR.GlobalVariableDefinition):
+        assert isinstance(defn, IR.GlobalVariableDefinition), defn
+        return qualify(
+            defn.module_name,
+            defn.short_name,
+            prefix=ENCODED_GLOBAL_VARIABLE_INITIALIZER_PREFIX,
+        )
+
+    def get_global_var_initializer_proto(defn: IR.GlobalVariableDefinition):
+        assert isinstance(defn, IR.GlobalVariableDefinition), defn
+        return declare(
+            get_global_var_initializer_type(defn),
+            get_global_var_initializer_name(defn),
+            [STACK_POINTER_NAME, OUTPUT_PTR_NAME],
+        )
+
+    def get_global_var_name(defn: IR.GlobalVariableDefinition):
+        return qualify(
+            defn.module_name,
+            defn.short_name,
+            prefix=ENCODED_GLOBAL_VARIABLE_NAME_PREFIX,
         )
 
     def get_c_struct_name(defn: IR.StructDefinition):
@@ -3961,6 +4037,7 @@ def C(ns):
             retvar = E(body, ctx)
             if rtype != IR.VOID:
                 ctx.retain(retvar)
+
             if extern:
                 after_release += f'KLC_delete_stack({STACK_POINTER_NAME});'
                 after_release += f'if ({ERROR_POINTER_NAME}) ' '{'
@@ -4021,6 +4098,58 @@ def C(ns):
                 ),
                 body=self.body
             )
+
+    def emit_global_variable_initializer(self, ctx):
+        assert isinstance(self, IR.GlobalVariableDefinition), self
+        initializer_proto = get_global_var_initializer_proto(self)
+        emit_function_body(
+            ctx=ctx,
+            debug_name=self.short_name,
+            proto='static ' + initializer_proto,
+            extern=False,
+            rtype=self.type,
+            start_callback=lambda ctx: None,
+            body=IR.Block(self.token, [], [self.expr]),
+        )
+
+    def emit_global_variable_getter(self, ctx):
+        assert isinstance(self, IR.GlobalVariableDefinition), self
+        getter_proto = get_global_var_getter_proto(self)
+        initializer_name = get_global_var_initializer_name(self)
+        initvar_name = get_global_initvar_name(self)
+        var_name = get_global_var_name(self)
+
+        ctx.out += getter_proto
+        ctx.out += '{'
+        with ctx.push_indent(1):
+            ctx.out += f'if (!{initvar_name})'
+            ctx.out += '{'
+            with ctx.push_indent(1):
+                ctx.out += (
+                    f'{declare(ERROR_POINTER_TYPE, ERROR_POINTER_NAME)} = '
+                    f'{initializer_name}({STACK_POINTER_NAME}, &{var_name});'
+                )
+                ctx.out += f'if ({ERROR_POINTER_NAME})'
+                ctx.out += '{'
+                with ctx.push_indent(1):
+                    ctx.out += f'return {ERROR_POINTER_NAME};'
+                ctx.out += '}'
+                ctx.out += _release_on_exit(self.type, var_name)
+                ctx.out += f'{initvar_name} = 1;'
+            ctx.out += '}'
+            ctx.out += _retain(self.type, var_name)
+            ctx.out += f'*{OUTPUT_PTR_NAME} = {var_name};'
+            ctx.out += 'return NULL;'
+        ctx.out += '}'
+
+    @D.on(IR.GlobalVariableDefinition)
+    def D(self, ctx):
+        initvar_name = get_global_initvar_name(self)
+        var_name = get_global_var_name(self)
+        ctx.static_vars += f'static KLC_bool {initvar_name};'
+        ctx.static_vars += f'static {declare(self.type, var_name)};'
+        emit_global_variable_initializer(self, ctx)
+        emit_global_variable_getter(self, ctx)
 
     @D.on(IR.StructDefinition)
     def D(self, ctx):
@@ -4304,6 +4433,17 @@ def C(ns):
     @E.on(IR.LocalName)
     def E(self, ctx):
         return cvarname(self.decl)
+
+    @E.on(IR.GlobalName)
+    def E(self, ctx):
+        return emit_function_call(
+            ctx=ctx,
+            token=self.token,
+            rtype=self.type,
+            c_args=[],
+            extern=False,
+            c_function_name=get_global_var_getter_name(self.defn),
+        )
 
     @E.on(IR.PointerAndIntArithmetic)
     def E(self, ctx):
