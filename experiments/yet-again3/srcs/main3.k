@@ -17,9 +17,7 @@ trait SomeOtherTrait {
 }
 
 class SomeClass(SomeTrait, SomeOtherTrait) {
-  static SomeClass new() {
-    $(SomeClass)
-  }
+  static SomeClass new() = $(SomeClass)
 }
 
 String message = 'hello world'

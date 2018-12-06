@@ -3055,7 +3055,7 @@ def parser(ns):
                     cls
                 ),
             )
-            body_promise = parse_block(method_scope)
+            body_promise = parse_body(method_scope)
             defn_promise = Promise.value(IR.InstanceMethodDefinition(
                 token,
                 Promise.value(cls),
@@ -3087,7 +3087,7 @@ def parser(ns):
                 extern=False,
                 this_type=None,
             )
-            body_promise = parse_block(method_scope)
+            body_promise = parse_body(method_scope)
             defn_promise = Promise.value(IR.StaticMethodDefinition(
                 token,
                 Promise.value(cls),
@@ -3117,6 +3117,18 @@ def parser(ns):
             )
             return delete_hook_ptr[0]
 
+        def parse_body(func_scope):
+            token = peek()
+            if consume('='):
+                return promise_block(
+                    token=token,
+                    scope=func_scope,
+                    decl_promises=[],
+                    expr_promises=[parse_expression(func_scope)],
+                )
+            else:
+                return parse_block(func_scope)
+
         def parse_function(outer_scope, token, extern, type_promise, name):
             func_scope = Scope(outer_scope)
             plist_promise = parse_param_list(func_scope)
@@ -3127,7 +3139,7 @@ def parser(ns):
             )
             has_body = not consume('\n')
             raw_body_promise = (
-                parse_block(func_scope) if has_body else None
+                parse_body(func_scope) if has_body else None
             )
             @Promise
             def body_promise():

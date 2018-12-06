@@ -35,21 +35,17 @@ extern var KLC_var_array_get(void* buffer, size_t i)
 extern void KLC_var_array_set(void* buffer, size_t i, var value)
 
 trait Object() {
-  int someInstanceMethodOnObject() {
+  void someInstanceMethodOnObject() = (
     printf(c"Inside someInstanceMethodOnObject\n")
-  }
+  )
 
-  String __repr() {
-    (
+  String __repr() = (
       String.fromCString(c"<")
         .__add(str(KLC_get_class(this)))
         .__add(String.fromCString(c" instance>"))
-    )
-  }
+  )
 
-  String __str() {
-    this.__repr()
-  }
+  String __str() = this.__repr()
 }
 
 trait Iterable(Object) {
@@ -149,22 +145,16 @@ class String(Object) {
 
 // This is an implicit function that will get called
 // whenever present
-String `%str`(c_char const* cstr) {
-  String.fromCString(cstr)
-}
+String `%str`(c_char const* cstr) = String.fromCString(cstr)
 
 class List(Iterable) {
   int _size
   int _cap
   void* _buffer
 
-  static List new() {
-    $(List)
-  }
+  static List new() = $(List)
 
-  int __GETsize() {
-    _size
-  }
+  int __GETsize() = _size
 
   void push(var x) {
     if (_size >= _cap) {
@@ -229,15 +219,13 @@ List `%listpush`(List list, var x) {
   list
 }
 
-String get_type_str(type t) {
-  (
+String get_type_str(type t) = (
     String.fromCString(c"<type ")
       .__add(String.fromCString(KLC_get_type_module_name(t)))
       .__add(String.fromCString(c"#"))
       .__add(String.fromCString(KLC_get_type_short_name(t)))
       .__add(String.fromCString(c">"))
-  )
-}
+)
 
 String get_int_str(int x) {
   // TODO: Make implementation more portable
