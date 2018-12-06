@@ -50,6 +50,12 @@ trait Object() {
   }
 }
 
+trait Iterable(Object) {
+}
+
+trait Iterator(Object) {
+}
+
 class StringBuilder(Object) {
   c_char* _buffer
   int _size
@@ -145,7 +151,7 @@ String `%str`(c_char const* cstr) {
   String.fromCString(cstr)
 }
 
-class List(Object) {
+class List(Iterable) {
   int _size
   int _cap
   void* _buffer
