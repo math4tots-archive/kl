@@ -54,6 +54,22 @@ trait Iterable(Object) {
 trait Iterator(Object) {
 }
 
+class assert() {
+  static void new(bool cond) {
+    if (!cond) {
+      throw "assertion failed"
+    }
+  }
+
+  static void equal(var left, var right) {
+    if (left != right) {
+      // TODO: Include 'left' and 'right'
+      // Into the error message
+      throw "assert equal failed"
+    }
+  }
+}
+
 class StringBuilder(Object) {
   c_char* _buffer
   int _size
@@ -217,6 +233,23 @@ List `%mklist`() {
 List `%listpush`(List list, var x) {
   list.push(x)
   list
+}
+
+bool `%eq`(var a, var b) {
+  int tag_a = KLC_get_tag(a)
+  int tag_b = KLC_get_tag(b)
+  if (tag_a != tag_b) {
+    static_cast(bool, 0)
+  } else if (tag_a == KLC_get_obj_tag()) {
+    bool r = a.__eq(b)
+    r
+  } else {
+    static_cast(bool, 1)
+  }
+}
+
+bool `%ne`(var a, var b) {
+  !(a == b)
 }
 
 String get_type_str(type t) = (

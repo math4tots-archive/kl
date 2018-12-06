@@ -43,6 +43,7 @@ struct KLC_var {
   int tag;
   union {
     KLC_Header* p;
+    KLC_bool b;
     KLC_int i;
     KLC_float f;
     KLC_Class* t;
@@ -82,10 +83,12 @@ KLC_var KLC_var_array_get(void* buffer, size_t i);
 void KLC_var_array_set(void* buffer, size_t i, KLC_var value);
 
 KLC_var KLC_var_from_ptr(KLC_Header* p);
+KLC_var KLC_var_from_bool(KLC_bool b);
 KLC_var KLC_var_from_int(KLC_int i);
 KLC_var KLC_var_from_float(KLC_float f);
 KLC_var KLC_var_from_type(KLC_Class* c);
 KLC_Error* KLC_var_to_ptr(KLC_Stack*, KLC_Header** out, KLC_var, KLC_Class*);
+KLC_Error* KLC_var_to_bool(KLC_Stack*, KLC_bool* out, KLC_var);
 KLC_Error* KLC_var_to_int(KLC_Stack*, KLC_int* out, KLC_var);
 KLC_Error* KLC_var_to_float(KLC_Stack*, KLC_float* out, KLC_var);
 KLC_Error* KLC_var_to_type(KLC_Stack*, KLC_Class** out, KLC_var);

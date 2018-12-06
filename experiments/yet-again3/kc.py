@@ -1131,6 +1131,12 @@ def IR(ns):
         def _proxy(self):
             return (self.base,)
 
+    VAR_EQ_FUNCTION_NAME = '%eq'
+    ns(VAR_EQ_FUNCTION_NAME, 'VAR_EQ_FUNCTION_NAME')
+
+    VAR_NE_FUNCTION_NAME = '%ne'
+    ns(VAR_NE_FUNCTION_NAME, 'VAR_NE_FUNCTION_NAME')
+
     STRING_CONVERSION_FUNCTION_NAME = '%str'
     ns(STRING_CONVERSION_FUNCTION_NAME, 'STRING_CONVERSION_FUNCTION_NAME')
 
@@ -1845,6 +1851,8 @@ def parser(ns):
     ROOT_TRAIT_NAME = 'Object'
 
     _builtins_export_names = (
+        IR.VAR_EQ_FUNCTION_NAME,
+        IR.VAR_NE_FUNCTION_NAME,
         IR.STRING_CONVERSION_FUNCTION_NAME,
         IR.NEW_LIST_FUNCTION_NAME,
         IR.LIST_PUSH_FUNCTION_NAME,
@@ -2253,6 +2261,15 @@ def parser(ns):
             '*': '__mul',
             '/': '__div',
             '%': '__mod',
+            '<': '__lt',
+            '<=': '__le',
+            '>': '__gt',
+            '>=': '__ge',
+        }
+
+        _equality_op_table = {
+            '==': IR.VAR_EQ_FUNCTION_NAME,
+            '!=': IR.VAR_NE_FUNCTION_NAME,
         }
 
         def promise_binop(scope, token, op, left_promise, right_promise):
@@ -2312,15 +2329,37 @@ def parser(ns):
                     )
                 if (isinstance(left.type, IR.Retainable) and
                         isinstance(right.type, IR.Retainable)):
-                    op_name = _binop_table[op]
-                    return IR.InstanceMethodCall(
-                        token,
-                        op_name,
-                        [
-                            scope.convert(left, IR.VAR_TYPE),
-                            scope.convert(right, IR.VAR_TYPE),
-                        ],
-                    )
+                    if op in _equality_op_table:
+                        func_name = _equality_op_table[op]
+                        if func_name in scope:
+                            return promise_fcall(
+                                scope=scope,
+                                token=token,
+                                function_promise=promise_name(
+                                    scope,
+                                    token,
+                                    func_name,
+                                ),
+                                argsp=Promise(lambda: [left, right]),
+                            ).resolve()
+                        else:
+                            with scope.push(token):
+                                raise scope.error(
+                                    f'Object equality is not supported '
+                                    f'in this context. You can still '
+                                    f'use the "is" operator for '
+                                    f'identity object comparison, or '
+                                    f'call the __eq method directly')
+                    else:
+                        op_name = _binop_table[op]
+                        return IR.InstanceMethodCall(
+                            token,
+                            op_name,
+                            [
+                                scope.convert(left, IR.VAR_TYPE),
+                                scope.convert(right, IR.VAR_TYPE),
+                            ],
+                        )
                 with scope.push(token):
                     key = (op, left.type, right.type)
                     raise scope.error(f'Unsupported binop {key}')
@@ -2350,7 +2389,7 @@ def parser(ns):
 
         def parse_unary(scope):
             token = peek()
-            for op in ('+', '-'):
+            for op in ('+', '-', '!'):
                 if consume(op):
                     expr_promise = parse_unary(scope)
                     return promise_unop(scope, token, op, expr_promise)
@@ -4531,7 +4570,10 @@ def C(ns):
         if dt == IR.VOID:
             return
 
-        if dt in IR.INTEGRAL_TYPES:
+        if dt == IR.BOOL:
+            convert_func = 'KLC_var_to_bool'
+            extract_type = IR.BOOL
+        elif dt in IR.INTEGRAL_TYPES:
             convert_func = 'KLC_var_to_int'
             extract_type = IR.INT
         elif dt in IR.FLOAT_TYPES:

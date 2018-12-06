@@ -315,6 +315,13 @@ KLC_var KLC_var_from_ptr(KLC_Header* p) {
   return ret;
 }
 
+KLC_var KLC_var_from_bool(KLC_bool b) {
+  KLC_var ret;
+  ret.tag = KLC_TAG_BOOL;
+  ret.u.b = b;
+  return ret;
+}
+
 KLC_var KLC_var_from_int(KLC_int i) {
   KLC_var ret;
   ret.tag = KLC_TAG_INT;
@@ -360,6 +367,14 @@ KLC_Error* KLC_var_to_ptr(
       );
   }
   *out = v.u.p;
+  return NULL;
+}
+
+KLC_Error* KLC_var_to_bool(KLC_Stack* stack, KLC_bool* out, KLC_var v) {
+  if (v.tag != KLC_TAG_BOOL) {
+    return KLC_errorf(0, stack, "Expected BOOL but got %s", KLC_tag_to_str(v.tag));
+  }
+  *out = v.u.i;
   return NULL;
 }
 
