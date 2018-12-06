@@ -666,20 +666,20 @@ def IR(ns):
         def map(self, f):
             nt = type(self)
             return nt(self.token, *[
-                Node._map_helper(getattr(self, fieldname))
+                Node._map_helper(f, getattr(self, fieldname))
                 for fieldname, _ in nt.node_fields
             ])
 
         @classmethod
         def _map_helper(cls, f, value):
-            if isinstance(value, (type(None), int, float, bool, str, IR.CType)):
+            if isinstance(value, (type(None), int, float, bool, str, IR.Type)):
                 return value
             if isinstance(value, list):
-                return [Node._map_helper(x) for x in value]
+                return [Node._map_helper(f, x) for x in value]
             if isinstance(value, tuple):
-                return tuple(Node._map_helper(x) for x in value)
+                return tuple(Node._map_helper(f, x) for x in value)
             if isinstance(value, set):
-                return {Node._map_helper(x) for x in value}
+                return {Node._map_helper(f, x) for x in value}
             if isinstance(value, dict):
                 return {
                     Node._map_helper(k): Node._map_helper(v)
@@ -1132,6 +1132,12 @@ def IR(ns):
 
     STRING_CONVERSION_FUNCTION_NAME = '%str'
     ns(STRING_CONVERSION_FUNCTION_NAME, 'STRING_CONVERSION_FUNCTION_NAME')
+
+    NEW_LIST_FUNCTION_NAME = '%mklist'
+    ns(NEW_LIST_FUNCTION_NAME, 'NEW_LIST_FUNCTION_NAME')
+
+    LIST_PUSH_FUNCTION_NAME = '%listpush'
+    ns(LIST_PUSH_FUNCTION_NAME, 'LIST_PUSH_FUNCTION_NAME')
 
     def nptype(c_name):
         return PrimitiveTypeDefinition(builtin_token, c_name)
@@ -1850,6 +1856,8 @@ def parser(ns):
 
     _builtins_export_names = (
         IR.STRING_CONVERSION_FUNCTION_NAME,
+        IR.NEW_LIST_FUNCTION_NAME,
+        IR.LIST_PUSH_FUNCTION_NAME,
         'String',
         'StringBuilder',
         'List',
@@ -2060,6 +2068,20 @@ def parser(ns):
                     raise scope.error(f'{expr} is not a value')
             return expr
 
+        def promise_block(token, scope, decl_promises, expr_promises):
+            @Promise
+            def promise():
+                _check_has_expression_context(scope)
+                return IR.Block(
+                    token,
+                    [p.resolve() for p in decl_promises],
+                    [
+                        check_concrete_expression(scope, p.resolve())
+                        for p in expr_promises
+                    ],
+                )
+            return promise
+
         def parse_block(parent_scope):
             scope = Scope(parent_scope)
             token = expect('{')
@@ -2097,18 +2119,12 @@ def parser(ns):
                         expr_promises.append(parse_expression(scope))
                         expect('\n')
                     consume_all('\n')
-            @Promise
-            def promise():
-                _check_has_expression_context(parent_scope)
-                return IR.Block(
-                    token,
-                    [p.resolve() for p in decl_promises],
-                    [
-                        check_concrete_expression(scope, p.resolve())
-                        for p in expr_promises
-                    ],
-                )
-            return promise
+            return promise_block(
+                token=token,
+                scope=scope,
+                decl_promises=decl_promises,
+                expr_promises=expr_promises,
+            )
 
         def _check_has_expression_context(scope):
             assert isinstance(scope['@ec'], IR.ExpressionContext)
@@ -2713,6 +2729,51 @@ def parser(ns):
                 return expr
             return promise
 
+        def promise_list_display(token, scope, element_promises):
+            @Promise
+            def promise():
+                if (IR.NEW_LIST_FUNCTION_NAME not in scope or
+                        IR.LIST_PUSH_FUNCTION_NAME not in scope):
+                    with scope.push(token):
+                        raise scope.error(
+                            f'List displays not available in this context')
+                expr = promise_fcall(
+                    scope=scope,
+                    token=token,
+                    function_promise=promise_name(
+                        scope,
+                        token,
+                        IR.NEW_LIST_FUNCTION_NAME,
+                    ),
+                    argsp=Promise(lambda: []),
+                ).resolve()
+                for element_promise in element_promises:
+                    expr = promise_fcall(
+                        scope=scope,
+                        token=token,
+                        function_promise=promise_name(
+                            scope,
+                            token,
+                            IR.LIST_PUSH_FUNCTION_NAME,
+                        ),
+                        argsp=Promise(lambda: [
+                            expr,
+                            element_promise.resolve(),
+                        ])
+                    ).resolve()
+                return expr
+            return promise
+
+        def parse_list_display(scope):
+            token = expect('[')
+            element_promises = []
+            while not consume(']'):
+                element_promises.append(parse_expression(scope))
+                if not consume(','):
+                    expect(']')
+                    break
+            return promise_list_display(token, scope, element_promises)
+
         def parse_primary(scope):
             token = peek()
             if at('if'):
@@ -2732,6 +2793,8 @@ def parser(ns):
                     expr = parse_expression(scope)
                     expect(')')
                     return expr
+            if at('['):
+                return parse_list_display(scope)
             if consume('this'):
                 return promise_this(scope, token)
             if consume('NAME'):
@@ -3007,14 +3070,17 @@ def parser(ns):
                 rtype_promise,
                 name,
                 plist_promise,
-                body_promise.map(lambda body:
-                    IR.Block(
-                        token,
-                        [],
-                        [method_scope.convert(
-                            body, rtype_promise.resolve())]
-                    ),
-                )
+                promise_block(
+                    token=token,
+                    scope=method_scope,
+                    decl_promises=[],
+                    expr_promises=[
+                        Promise(lambda: method_scope.convert(
+                            body_promise.resolve(),
+                            rtype_promise.resolve(),
+                        )),
+                    ],
+                ),
             ))
             class_scope.set_promise(token, name, defn_promise)
             return defn_promise
@@ -3078,9 +3144,14 @@ def parser(ns):
                     raw_body = raw_body_promise.resolve()
                     assert raw_body is not None
                     if defn.rtype != IR.VOID:
-                        body = IR.Block(token, [], [
-                            outer_scope.convert(raw_body, defn.rtype),
-                        ])
+                        body = promise_block(
+                            token=token,
+                            scope=func_scope,
+                            decl_promises=[],
+                            expr_promises=[Promise.value(
+                                outer_scope.convert(raw_body, defn.rtype)
+                            )],
+                        ).resolve()
                     else:
                         body = raw_body
                     return body

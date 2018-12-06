@@ -37,6 +37,19 @@ extern c_int main() {
 
   print(someClass)
 
+  print([1, 2, 3])
+  print('[1, 2, 3].size = ' + str([1, 2, 3].size))
+
+  // ${
+  //   int i = 0
+  //   int total = 0
+  //   while (i < 1000000000) {
+  //     total = total + i
+  //     i = i + 1
+  //   }
+  //   print('total = ' + str(total))
+  // }
+
   ${
     print('a')
     int i = 0

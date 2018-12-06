@@ -187,6 +187,21 @@ class List(Object) {
     value
   }
 
+  String __repr() {
+    StringBuilder sb = StringBuilder()
+    int i = 0
+    sb.add('[')
+    while (i < _size) {
+      if (i > 0) {
+        sb.add(', ')
+      }
+      sb.add(this.__getitem(i))
+      i = i + 1
+    }
+    sb.add(']')
+    str(sb)
+  }
+
   delete {
     KLC_partial_release_var_array(
       _buffer,
@@ -195,6 +210,15 @@ class List(Object) {
       __delete_queue,
     )
   }
+}
+
+List `%mklist`() {
+  List()
+}
+
+List `%listpush`(List list, var x) {
+  list.push(x)
+  list
 }
 
 String get_type_str(type t) {
