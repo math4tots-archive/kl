@@ -1,5 +1,4 @@
 #"no builtins"
-from c import size_t
 from c import printf
 from c import sprintf
 from c import malloc
@@ -33,6 +32,9 @@ extern void KLC_partial_release_var_array(
 extern void KLC_var_array_clear_range(void* buffer, size_t begin, size_t end)
 extern var KLC_var_array_get(void* buffer, size_t i)
 extern void KLC_var_array_set(void* buffer, size_t i, var value)
+
+// Helper functions for implementing class Lambda
+extern void KLC_free_lambda_capture(KLC_Lambda_capture* capture)
 
 trait Object() {
   void someInstanceMethodOnObject() = (
@@ -159,8 +161,26 @@ class String(Object) {
   }
 }
 
-// This is an implicit function that will get called
-// whenever present
+class Lambda(Object) {
+  KLC_Lambda_capture* _capture
+  KLC_Lambda_body* _body
+
+  extern __call = KLC_lambda_call
+
+  delete {
+    KLC_free_lambda_capture(_capture)
+  }
+}
+
+Lambda `%lambda`(KLC_Lambda_capture* capture, KLC_Lambda_body* body) {
+  Lambda ret = $(Lambda)
+  ret->_capture = capture
+  ret->_body = body
+  ret
+}
+
+// This is an implicit function that will get called for
+// normal string literals
 String `%str`(c_char const* cstr) = String.fromCString(cstr)
 
 class List(Iterable) {

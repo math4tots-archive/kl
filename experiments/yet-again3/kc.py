@@ -883,11 +883,11 @@ def IR(ns):
         def static_methods(self):
             return [p.resolve() for p in self.static_method_promises]
 
-        @lazy(lambda: typeutil.List[InstanceMethodDefinition])
+        @lazy(lambda: typeutil.List[BaseInstanceMethodDefinition])
         def instance_methods(self):
             return [p.resolve() for p in self.instance_method_promises]
 
-        @lazy(lambda: typeutil.List[InstanceMethodDefinition])
+        @lazy(lambda: typeutil.List[BaseInstanceMethodDefinition])
         def instance_method_closure(self):
             methods = []
             seen = set()
@@ -979,7 +979,13 @@ def IR(ns):
             return self.body_promise.resolve()
 
     @ns
-    class InstanceMethodDefinition(Declaration):
+    class BaseInstanceMethodDefinition(Declaration):
+        @lazy(lambda: TraitOrClassDefinition)
+        def cls(self):
+            return self.cls_promise.resolve()
+
+    @ns
+    class NormalInstanceMethodDefinition(BaseInstanceMethodDefinition):
         node_fields = (
             ('cls_promise', Promise),
             ('rtype_promise', Promise),
@@ -988,13 +994,11 @@ def IR(ns):
             ('body_promise', Promise),
         )
 
+        extern = False
+
         @lazy(lambda: Type)
         def rtype(self):
             return self.rtype_promise.resolve()
-
-        @lazy(lambda: TraitOrClassDefinition)
-        def cls(self):
-            return self.cls_promise.resolve()
 
         @lazy(lambda: typeutil.Or[VarType, ClassDefinition])
         def this_type(self):
@@ -1011,6 +1015,16 @@ def IR(ns):
         @lazy(lambda: Block)
         def body(self):
             return self.body_promise.resolve()
+
+    @ns
+    class ExternInstanceMethodDefinition(BaseInstanceMethodDefinition):
+        node_fields = (
+            ('cls_promise', Promise),
+            ('name', str),
+            ('c_function_name', str),
+        )
+
+        extern = True
 
     @ns
     class DeleteHook(Node):
@@ -1041,6 +1055,20 @@ def IR(ns):
     @ns
     class LocalVariableDeclaration(BaseLocalVariableDeclaration):
         mutable = True
+
+    @ns
+    class CaptureDeclaration(VariableDeclaration):
+        mutable = False
+
+        node_fields = (
+            ('decl', BaseLocalVariableDeclaration),
+            ('expr', Expression),
+            ('index', int),
+        )
+
+        @property
+        def type(self):
+            return self.decl.type
 
     @ns
     class DeleteQueueDeclaration(VariableDeclaration):
@@ -1233,6 +1261,45 @@ def IR(ns):
 
     VAR_TYPE = VarType()
     ns(VAR_TYPE, 'VAR_TYPE')
+
+    def new_builtin_extern_struct(name):
+        defn = StructDefinition(
+            builtin_token,
+            True,
+            'builtin',
+            name,
+            [],
+        )
+        return defn
+
+    HEADER_TYPE = new_builtin_extern_struct('KLC_Header')
+    ns(HEADER_TYPE, 'HEADER_TYPE')
+    ns(PointerType(HEADER_TYPE), 'HEADER_POINTER_TYPE')
+
+    CLASS_TYPE = new_builtin_extern_struct('KLC_Class')
+    ns(CLASS_TYPE, 'CLASS_TYPE')
+    ns(PointerType(CLASS_TYPE), 'CLASS_POINTER_TYPE')
+
+    ERROR_TYPE = new_builtin_extern_struct('KLC_Error')
+    ns(ERROR_TYPE, 'ERROR_TYPE')
+    ns(PointerType(ERROR_TYPE), 'ERROR_POINTER_TYPE')
+
+    STACK_TYPE = new_builtin_extern_struct('KLC_Stack')
+    ns(STACK_TYPE, 'STACK_TYPE')
+    ns(PointerType(STACK_TYPE), 'STACK_POINTER_TYPE')
+
+    LAMBDA_CAPTURE_TYPE = new_builtin_extern_struct('KLC_Lambda_capture')
+    ns(LAMBDA_CAPTURE_TYPE, 'LAMBDA_CAPTURE_TYPE')
+    ns(PointerType(LAMBDA_CAPTURE_TYPE), 'LAMBDA_CAPTURE_POINTER_TYPE')
+    c_type_map['KLC_Lambda_capture'] = LAMBDA_CAPTURE_TYPE
+
+    LAMBDA_BODY_TYPE = new_builtin_extern_struct('KLC_Lambda_body')
+    ns(LAMBDA_BODY_TYPE, 'LAMBDA_BODY_TYPE')
+    ns(PointerType(LAMBDA_BODY_TYPE), 'LAMBDA_BODY_POINTER_TYPE')
+    c_type_map['KLC_Lambda_body'] = LAMBDA_BODY_TYPE
+
+    LAMBDA_FUNCTION_NAME = '%lambda'
+    ns(LAMBDA_FUNCTION_NAME, 'LAMBDA_FUNCTION_NAME')
 
     @ns
     def to_value_expr(*, expr, scope):
@@ -1451,6 +1518,16 @@ def IR(ns):
             return self.decl.type
 
     @ns
+    class CaptureName(Expression):
+        node_fields = (
+            ('decl', CaptureDeclaration),
+        )
+
+        @property
+        def type(self):
+            return self.decl.type
+
+    @ns
     class FieldDefinition(Declaration):
         node_fields = (
             ('extern', bool),
@@ -1594,6 +1671,26 @@ def IR(ns):
             return VOID
 
     @ns
+    class LambdaCaptures(Expression):
+        node_fields = (
+            ('captures', typeutil.List[CaptureDeclaration]),
+        )
+
+        type = PointerType(LAMBDA_CAPTURE_TYPE)
+
+    @ns
+    class LambdaCode(Expression):
+        node_fields = (
+            ('module_name', str),
+            ('lambda_id', int),
+            ('rtype', Type),
+            ('plist', ParameterList),
+            ('body', Block),
+        )
+
+        type = PointerType(LAMBDA_BODY_TYPE)
+
+    @ns
     class IdentityComparison(Expression):
         node_fields = (
             ('op', str),
@@ -1711,32 +1808,6 @@ def IR(ns):
             ('this_type',
                 typeutil.Optional[typeutil.Or[ClassDefinition, VarType]]),
         )
-
-    def new_builtin_extern_struct(name):
-        defn = StructDefinition(
-            builtin_token,
-            True,
-            'builtin',
-            name,
-            [],
-        )
-        return defn
-
-    HEADER_TYPE = new_builtin_extern_struct('KLC_Header')
-    ns(HEADER_TYPE, 'HEADER_TYPE')
-    ns(PointerType(HEADER_TYPE), 'HEADER_POINTER_TYPE')
-
-    CLASS_TYPE = new_builtin_extern_struct('KLC_Class')
-    ns(CLASS_TYPE, 'CLASS_TYPE')
-    ns(PointerType(CLASS_TYPE), 'CLASS_POINTER_TYPE')
-
-    ERROR_TYPE = new_builtin_extern_struct('KLC_Error')
-    ns(ERROR_TYPE, 'ERROR_TYPE')
-    ns(PointerType(ERROR_TYPE), 'ERROR_POINTER_TYPE')
-
-    STACK_TYPE = new_builtin_extern_struct('KLC_Stack')
-    ns(STACK_TYPE, 'STACK_TYPE')
-    ns(PointerType(STACK_TYPE), 'STACK_POINTER_TYPE')
 
 
 @Namespace
@@ -1857,10 +1928,45 @@ def parser(ns):
                 raise scope.error(f'Not inside class instance context')
             return this_type
 
+    class LambdaScope(Scope):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            assert self.parent is not None
+            self.captures = []
+
+        def _getp(self, key: str) -> Promise:
+            if key in self.table:
+                return self.table[key]
+            elif self.parent is not None:
+                return self.parent._getp(key).map(lambda defn:
+                    self._capture(key, defn))
+            else:
+                return super()._getp(key)
+
+        def _capture(self, key, defn):
+            if isinstance(defn, IR.BaseLocalVariableDeclaration):
+                capture = IR.CaptureDeclaration(
+                    defn.token,
+                    defn,
+                    self.convert(
+                        convert_name_defn_to_expr(
+                            self, defn.token, defn
+                        ),
+                        IR.VAR_TYPE,
+                    ),
+                    len(self.captures),
+                )
+                self.table[key] = Promise.value(capture)
+                self.captures.append(capture)
+                return capture
+            else:
+                return defn
+
     BUILTINS_MODULE_NAME = 'builtins'
     ROOT_TRAIT_NAME = 'Object'
 
     _builtins_export_names = (
+        IR.LAMBDA_FUNCTION_NAME,
         IR.VAR_EQ_FUNCTION_NAME,
         IR.VAR_NE_FUNCTION_NAME,
         IR.STRING_CONVERSION_FUNCTION_NAME,
@@ -1872,6 +1978,49 @@ def parser(ns):
         'print',
         'str',
     )
+
+    def promise_this(scope, token):
+        @Promise
+        def promise():
+            ec = scope['@ec']
+            if ec.this_type is None:
+                with scope.push(token):
+                    raise scope.error(f"'this' cannot be used here ")
+            return IR.This(token, ec.this_type)
+        return promise
+
+    def convert_name_defn_to_expr(scope, token, defn):
+        if isinstance(defn, IR.FunctionDefinition):
+            return IR.FunctionName(token, defn)
+        if isinstance(defn, IR.BaseLocalVariableDeclaration):
+            return IR.LocalName(token, defn)
+        if isinstance(defn, IR.CaptureDeclaration):
+            return IR.CaptureName(token, defn)
+        if isinstance(defn, IR.TraitOrClassDefinition):
+            return IR.TraitOrClassName(token, defn)
+        if isinstance(defn, IR.FieldDefinition):
+            this_type = scope.get_this_type()
+            return IR.GetClassField(
+                token,
+                IR.This(token, this_type),
+                defn,
+            )
+        if isinstance(defn, IR.DeleteQueueDeclaration):
+            return IR.DeleteQueueName(token)
+        if isinstance(defn, IR.GlobalVariableDefinition):
+            return IR.GlobalName(token, defn)
+        if isinstance(defn, IR.StaticMethodDefinition):
+            return IR.StaticMethodName(token, defn)
+        if isinstance(defn, IR.BaseInstanceMethodDefinition):
+            return IR.InstanceMethodReference(
+                token,
+                scope.convert(
+                    promise_this(scope, token).resolve(),
+                    IR.VAR_TYPE,
+                ),
+                defn.name,
+            )
+        raise scope.error(f'{defn} is not a variable')
 
     @ns
     def parse(
@@ -1908,6 +2057,7 @@ def parser(ns):
         tokens = lexer.lex(source)
         i = 0
         indent_stack = []
+        next_lambda_id_ptr = [0]
 
         def should_skip_newlines():
             return indent_stack and indent_stack[-1]
@@ -2482,6 +2632,16 @@ def parser(ns):
                         f.name,
                         args,
                     )
+                elif (isinstance(f.type, IR.ClassDefinition) or
+                        f.type == IR.VAR_TYPE):
+                    args = [scope.convert(arg, IR.VAR_TYPE) for arg in
+                        [f] + list(raw_args)
+                    ]
+                    return IR.InstanceMethodCall(
+                        token,
+                        '__call',
+                        args,
+                    )
                 else:
                     with scope.push(token):
                         raise scope.error(f'{f.type} is not a function')
@@ -2658,36 +2818,7 @@ def parser(ns):
             def promise():
                 with scope.push(token):
                     defn = scope[name]
-                if isinstance(defn, IR.FunctionDefinition):
-                    return IR.FunctionName(token, defn)
-                if isinstance(defn, IR.BaseLocalVariableDeclaration):
-                    return IR.LocalName(token, defn)
-                if isinstance(defn, IR.TraitOrClassDefinition):
-                    return IR.TraitOrClassName(token, defn)
-                if isinstance(defn, IR.FieldDefinition):
-                    this_type = scope.get_this_type()
-                    return IR.GetClassField(
-                        token,
-                        IR.This(token, this_type),
-                        defn,
-                    )
-                if isinstance(defn, IR.DeleteQueueDeclaration):
-                    return IR.DeleteQueueName(token)
-                if isinstance(defn, IR.GlobalVariableDefinition):
-                    return IR.GlobalName(token, defn)
-                if isinstance(defn, IR.StaticMethodDefinition):
-                    return IR.StaticMethodName(token, defn)
-                if isinstance(defn, IR.InstanceMethodDefinition):
-                    return IR.InstanceMethodReference(
-                        token,
-                        scope.convert(
-                            promise_this(scope, token).resolve(),
-                            IR.VAR_TYPE,
-                        ),
-                        defn.name,
-                    )
-                with scope.push(token):
-                    raise scope.error(f'{defn} is not a variable')
+                    return convert_name_defn_to_expr(scope, token, defn)
             return promise
 
         def promise_throw_string_literal(scope, token, value):
@@ -2716,16 +2847,6 @@ def parser(ns):
                             f'as definition of the class'
                         )
                 return IR.Malloc(token, type)
-            return promise
-
-        def promise_this(scope, token):
-            @Promise
-            def promise():
-                ec = scope['@ec']
-                if ec.this_type is None:
-                    with scope.push(token):
-                        raise scope.error(f"'this' cannot be used here ")
-                return IR.This(token, ec.this_type)
             return promise
 
         def make_cast(scope, token, type, arg):
@@ -2842,6 +2963,65 @@ def parser(ns):
                     break
             return promise_list_display(token, scope, element_promises)
 
+        def promise_lambda(
+                scope, token, rtype_promise, plist_promise, body_promise):
+            assert isinstance(scope, LambdaScope)
+            @Promise
+            def promise():
+                if IR.LAMBDA_FUNCTION_NAME not in scope:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'lambda expressions not '
+                            f'supported in this context')
+                rtype = rtype_promise.resolve()
+                plist = plist_promise.resolve()
+                body = body_promise.resolve()
+                lambda_id = next_lambda_id_ptr[0]
+                next_lambda_id_ptr[0] += 1
+                return promise_fcall(
+                    scope=scope,
+                    token=token,
+                    function_promise=promise_name(
+                        scope=scope,
+                        token=token,
+                        name=IR.LAMBDA_FUNCTION_NAME,
+                    ),
+                    argsp=Promise(lambda: [
+                        IR.LambdaCaptures(token, list(scope.captures)),
+                        IR.LambdaCode(
+                            token,
+                            module_name,
+                            lambda_id,
+                            rtype,
+                            plist,
+                            body),
+                    ]),
+                ).resolve()
+                return IR.Lambda(
+                    token,
+                    rtype,
+                    plist,
+                    convert_body_type(scope, body, rtype),
+                )
+            return promise
+
+        def parse_lambda(outer_scope):
+            lambda_scope = LambdaScope(outer_scope)
+            token = expect('def')
+            if at('('):
+                rtype_promise = Promise.value(IR.VAR_TYPE)
+            else:
+                rtype_promise = parse_type(lambda_scope)
+            plist_promise = parse_param_list(lambda_scope)
+            body_promise = parse_body_with_type(lambda_scope, rtype_promise)
+            return promise_lambda(
+                lambda_scope,
+                token,
+                rtype_promise,
+                plist_promise,
+                body_promise,
+            )
+
         def parse_primary(scope):
             token = peek()
             if at('if'):
@@ -2894,6 +3074,8 @@ def parser(ns):
                         type_promise,
                         arg_promise,
                     )
+            if at('def'):
+                return parse_lambda(scope)
             with scope.push(peek()):
                 raise scope.error(f'Expected expression but got {peek()}')
 
@@ -3064,6 +3246,18 @@ def parser(ns):
                     static_method_promises.append(parse_static_method(
                         class_scope, member_token, defn,
                     ))
+                elif consume('extern'):
+                    method_name = expect_id()
+                    expect('=')
+                    extern_method_name = expect_id()
+                    instance_method_promises.append(Promise.value(
+                        IR.ExternInstanceMethodDefinition(
+                            token,
+                            Promise.value(defn),
+                            method_name,
+                            extern_method_name,
+                        )
+                    ))
                 else:
                     member_type_promise = parse_type(class_scope)
                     member_name = expect_id()
@@ -3132,7 +3326,7 @@ def parser(ns):
                 ),
             )
             body_promise = parse_body(method_scope)
-            defn_promise = Promise.value(IR.InstanceMethodDefinition(
+            defn_promise = Promise.value(IR.NormalInstanceMethodDefinition(
                 token,
                 Promise.value(cls),
                 rtype_promise,
@@ -3205,6 +3399,27 @@ def parser(ns):
             else:
                 return parse_block(func_scope)
 
+        def parse_body_with_type(scope, type_promise):
+            body_promise = parse_body(scope)
+            return body_promise.map(lambda body: convert_body_type(
+                scope,
+                body_promise.resolve(),
+                type_promise.resolve(),
+            ))
+
+        def convert_body_type(scope, raw_body, type):
+            if type != IR.VOID:
+                return promise_block(
+                    token=raw_body.token,
+                    scope=scope,
+                    decl_promises=[],
+                    expr_promises=[Promise.value(
+                        scope.convert(raw_body, type)
+                    )],
+                ).resolve()
+            else:
+                return raw_body
+
         def parse_function(outer_scope, token, extern, type_promise, name):
             func_scope = Scope(outer_scope)
             plist_promise = parse_param_list(func_scope)
@@ -3214,29 +3429,12 @@ def parser(ns):
                 this_type=None,
             )
             has_body = not consume('\n')
-            raw_body_promise = (
-                parse_body(func_scope) if has_body else None
+            body_promise = (
+                parse_body_with_type(
+                    func_scope,
+                    type_promise,
+                ) if has_body else None
             )
-            @Promise
-            def body_promise():
-                defn = defn_promise.resolve()
-                if has_body:
-                    raw_body = raw_body_promise.resolve()
-                    assert raw_body is not None
-                    if defn.rtype != IR.VOID:
-                        body = promise_block(
-                            token=token,
-                            scope=func_scope,
-                            decl_promises=[],
-                            expr_promises=[Promise.value(
-                                outer_scope.convert(raw_body, defn.rtype)
-                            )],
-                        ).resolve()
-                    else:
-                        body = raw_body
-                    return body
-                else:
-                    return None
             defn_promise = Promise(lambda: IR.FunctionDefinition(
                 token,
                 extern,
@@ -3376,9 +3574,10 @@ def C(ns):
     ENCODED_METHOD_LIST_PREFIX = 'KLCML'
     ENCODED_STATIC_METHOD_PREFIX = 'KLCSM'
     ENCODED_INSTANCE_METHOD_PREFIX = 'KLCIM'
+    ENCODED_LAMBDA_BODY_PREFIX = 'KLCLB'
     OUTPUT_PTR_NAME = 'KLC_output_ptr'
     CLASS_HEADER_FIELD_NAME = 'header'
-    METHOD_PARAM_ARGC_NAME = 'KLC_argc'
+    DYNAMIC_PARAM_ARGC_NAME = 'KLC_argc'
     METHOD_PARAM_ARGV_NAME = 'KLC_argv'
     HEADER_STRUCT_NAME = 'KLC_Header'
     ERROR_POINTER_NAME = 'KLC_error'
@@ -3389,6 +3588,7 @@ def C(ns):
     DEBUG_FUNC_NAME_NAME = 'KLC_debug_func_name'
     DEBUG_FILE_NAME_NAME = 'KLC_debug_file_name'
     CALL_METHOD_FUNCTION_NAME = 'KLC_call_method'
+    LAMBDA_CAPTURES_NAME = 'KLC_captures'
     DELETE_QUEUE_NAME = 'KLC_delete_queue'
     DELETER_TYPE = IR.FunctionType(
         extern=True,
@@ -3403,6 +3603,16 @@ def C(ns):
         extern=False,
         rtype=IR.VAR_TYPE,
         paramtypes=[
+            IR.c_int,
+            IR.PointerType(IR.VAR_TYPE),
+        ],
+        vararg=False,
+    )
+    LAMBDA_BODY_FUNCTION_TYPE = IR.FunctionType(
+        extern=False,
+        rtype=IR.VAR_TYPE,
+        paramtypes=[
+            IR.LAMBDA_CAPTURE_POINTER_TYPE,
             IR.c_int,
             IR.PointerType(IR.VAR_TYPE),
         ],
@@ -3495,6 +3705,7 @@ def C(ns):
             self.includes = self.out.spawn()
             self.static_fdecls = self.out.spawn()
             self.static_vars = self.out.spawn()
+            self.static_func_defs = self.out.spawn()
             self.next_temp_var_id = 0
 
             # Map of declared C local variables to their types
@@ -3529,6 +3740,23 @@ def C(ns):
             self._scope[cname] = t
             self._decls += f'{declare(t, cname)} = {init_expr_for(t)};'
             return cname
+
+        @contextlib.contextmanager
+        def enter_static_func_defs(self):
+            old_out = self.out
+            old_exit_jump_label = self._exit_jump_label
+            old_scope = self._scope
+
+            self.out = self.static_func_defs.spawn()
+            self._exit_jump_label = None
+            self._scope = collections.OrderedDict()
+
+            try:
+                yield
+            finally:
+                self.out = old_out
+                self._exit_jump_label = old_exit_jump_label
+                self._scope = old_scope
 
         @contextlib.contextmanager
         def retain_scope(self):
@@ -3770,7 +3998,8 @@ def C(ns):
                     fdecls += f'extern {proto_for(static_method)};'
 
                 for instance_method in defn.instance_methods:
-                    fdecls += f'extern {proto_for(instance_method)};'
+                    if not instance_method.extern:
+                        fdecls += f'extern {proto_for(instance_method)};'
             elif isinstance(defn, IR.GlobalVariableDefinition):
                 assert not defn.extern, defn
                 getter_proto = get_global_var_getter_proto(defn)
@@ -3953,11 +4182,24 @@ def C(ns):
             prefix=ENCODED_STATIC_METHOD_PREFIX,
         )
 
-    def get_instance_method_name(defn: IR.InstanceMethodDefinition):
-        assert isinstance(defn, IR.InstanceMethodDefinition), defn
+    get_instance_method_name = Multimethod('get_instance_method_name')
+
+    @get_instance_method_name.on(IR.NormalInstanceMethodDefinition)
+    def get_instance_method_name(defn):
         return encode(
             f'{defn.cls.module_name}#{defn.cls.short_name}#{defn.name}',
             prefix=ENCODED_INSTANCE_METHOD_PREFIX,
+        )
+
+    @get_instance_method_name.on(IR.ExternInstanceMethodDefinition)
+    def get_instance_method_name(defn):
+        return defn.c_function_name
+
+    def get_lambda_body_name(defn: IR.LambdaCode):
+        return qualify(
+            defn.module_name,
+            f'lambda{defn.lambda_id}',
+            prefix=ENCODED_LAMBDA_BODY_PREFIX,
         )
 
     def encode_param_names(paramlist: IR.ParameterList):
@@ -3998,9 +4240,9 @@ def C(ns):
     def cvarname(self):
         return get_static_method_name(self)
 
-    @cvarname.on(IR.InstanceMethodDefinition)
-    def cvarname(self):
-        return get_instance_method_name(self)
+    # @cvarname.on(IR.BaseInstanceMethodDefinition)
+    # def cvarname(self):
+    #     return get_instance_method_name(self)
 
     declare = Multimethod('declare')
 
@@ -4142,24 +4384,6 @@ def C(ns):
             ctx.out += f'{local_name} = {param_name};'
             ctx.retain(local_name)
 
-    get_global_defn_name = Multimethod('get_global_defn_name')
-
-    @get_global_defn_name.on(IR.FunctionDefinition)
-    def get_global_defn_name(self):
-        return f'{self.module_name}#{self.short_name}'
-
-    @get_global_defn_name.on(IR.ClassDefinition)
-    def get_global_defn_name(self):
-        return f'{self.module_name}#{self.short_name}'
-
-    @get_global_defn_name.on(IR.StaticMethodDefinition)
-    def get_global_defn_name(self):
-        return f'{get_global_defn_name(self.cls)}#{self.name}'
-
-    @get_global_defn_name.on(IR.InstanceMethodDefinition)
-    def get_global_defn_name(self):
-        return f'{get_global_defn_name(self.cls)}#{self.name}'
-
     @D.on(IR.FunctionDefinition)
     def D(self, ctx):
         if self.body is not None:
@@ -4296,7 +4520,8 @@ def C(ns):
             D(static_method, ctx)
 
         for instance_method in self.instance_methods:
-            D(instance_method, ctx)
+            if not instance_method.extern:
+                D(instance_method, ctx)
 
     def emit_trait_or_class_descriptor(self, ctx):
         assert isinstance(self, IR.TraitOrClassDefinition), self
@@ -4368,7 +4593,7 @@ def C(ns):
             body=self.body,
         )
 
-    @D.on(IR.InstanceMethodDefinition)
+    @D.on(IR.NormalInstanceMethodDefinition)
     def D(self, ctx):
         token = self.token
         this_type = self.this_type
@@ -4378,12 +4603,13 @@ def C(ns):
             proto=proto_for(self),
             extern=False,
             rtype=IR.VAR_TYPE,
-            start_callback=lambda ctx: copy_method_params_to_locals(
+            start_callback=lambda ctx: copy_dynamic_params_to_locals(
                 ctx=ctx,
                 token=self.token,
-                this_type=this_type,
-                paramtypes=[p.type for p in self.plist.params],
-                c_local_names=list(map(cvarname, self.plist.params)),
+                paramtypes=
+                    [this_type] + [p.type for p in self.plist.params],
+                c_local_names=
+                    [THIS_NAME] + list(map(cvarname, self.plist.params)),
             ),
             body=IR.Cast(
                 token,
@@ -4393,26 +4619,22 @@ def C(ns):
             ),
         )
 
-    def copy_method_params_to_locals(
-            ctx, token, this_type, paramtypes, c_local_names):
+    def copy_dynamic_params_to_locals(
+            ctx, token, paramtypes, c_local_names):
         assert len(paramtypes) == len(c_local_names), c_local_names
         argc = len(c_local_names)
-        ctx.out += f'if ({METHOD_PARAM_ARGC_NAME} != 1 + {argc})' '{'
+        ctx.out += f'if ({DYNAMIC_PARAM_ARGC_NAME} != {argc})' '{'
         with ctx.push_indent(1):
-            ctx.set_error_pointer(f'Method expected 1 + {argc} args')
+            ctx.out += (
+                f'{ERROR_POINTER_NAME} = '
+                f'KLC_errorf(0, {STACK_POINTER_NAME}, '
+                f'"Expected {argc} args but got %d", '
+                f'{DYNAMIC_PARAM_ARGC_NAME});'
+            )
+            # ctx.set_error_pointer(f'Expected {argc} args')
             ctx.jump_out_of_scope()
         ctx.out += '}'
-        ctx.declare(this_type, THIS_NAME)
-        converted_this_name = cast_c_name(
-            ctx=ctx,
-            token=token,
-            st=IR.VAR_TYPE,
-            dt=this_type,
-            c_name=f'{METHOD_PARAM_ARGV_NAME}[0]',
-        )
-        ctx.out += f'{THIS_NAME} = {converted_this_name};'
-        ctx.retain(THIS_NAME)
-        for i, (t, c_name) in enumerate(zip(paramtypes, c_local_names), 1):
+        for i, (t, c_name) in enumerate(zip(paramtypes, c_local_names)):
             ctx.declare(t, c_name)
             converted_name = cast_c_name(
                 ctx=ctx,
@@ -4442,12 +4664,22 @@ def C(ns):
             encode_param_names(self.plist),
         )
 
-    @proto_for.on(IR.InstanceMethodDefinition)
+    @proto_for.on(IR.NormalInstanceMethodDefinition)
     def proto_for(self):
         return declare(
             METHOD_TYPE,
-            cvarname(self),
-            [METHOD_PARAM_ARGC_NAME, METHOD_PARAM_ARGV_NAME],
+            get_instance_method_name(self),
+            [DYNAMIC_PARAM_ARGC_NAME, METHOD_PARAM_ARGV_NAME],
+        )
+
+    @proto_for.on(IR.LambdaCode)
+    def proto_for(self):
+        return declare(
+            LAMBDA_BODY_FUNCTION_TYPE,
+            get_lambda_body_name(self),
+            [LAMBDA_CAPTURES_NAME,
+             DYNAMIC_PARAM_ARGC_NAME,
+             METHOD_PARAM_ARGV_NAME],
         )
 
     # translate expressions
@@ -4512,6 +4744,19 @@ def C(ns):
     @E.on(IR.LocalName)
     def E(self, ctx):
         return cvarname(self.decl)
+
+    @E.on(IR.CaptureName)
+    def E(self, ctx):
+        index = self.decl.index
+        var_c_expr = (
+            f'(KLC_Lambda_capture_get({LAMBDA_CAPTURES_NAME}, {index}))'
+        )
+        c_expr = cast_c_name(
+            ctx, self.token, IR.VAR_TYPE, self.type, var_c_expr)
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = {c_expr};'
+        ctx.retain(retvar)
+        return retvar
 
     @E.on(IR.GlobalName)
     def E(self, ctx):
@@ -4932,6 +5177,45 @@ def C(ns):
             ctx.out += '}'
 
             E(self.body, ctx)
+
+    @E.on(IR.LambdaCaptures)
+    def E(self, ctx):
+        capture_vars = [E(capture.expr, ctx) for capture in self.captures]
+        count = len(capture_vars)
+
+        retvar = ctx.declare(IR.LAMBDA_CAPTURE_POINTER_TYPE)
+
+        if count:
+            args = f'{count}, {", ".join(capture_vars)}'
+            ctx.out += f'{retvar} = KLC_new_Lambda_capture({args});'
+
+        return retvar
+
+    @E.on(IR.LambdaCode)
+    def E(self, ctx):
+        with ctx.enter_static_func_defs():
+            proto = proto_for(self)
+            ctx.static_fdecls += f'static {proto};'
+            emit_function_body(
+                ctx=ctx,
+                debug_name=f'lambda:{self.lambda_id}',
+                proto=f'static {proto}',
+                extern=False,
+                rtype=self.rtype,
+                start_callback=lambda ctx: copy_dynamic_params_to_locals(
+                    ctx=ctx,
+                    token=self.token,
+                    paramtypes=[p.type for p in self.plist.params],
+                    c_local_names=list(map(cvarname, self.plist.params)),
+                ),
+                body=self.body,
+            )
+
+        lambda_body_name = get_lambda_body_name(self)
+        print(f'body_name = {lambda_body_name}')
+        retvar = ctx.declare(IR.LAMBDA_BODY_POINTER_TYPE)
+        ctx.out += f'{retvar} = {lambda_body_name};'
+        return retvar
 
     @E.on(IR.IdentityComparison)
     def E(self, ctx):

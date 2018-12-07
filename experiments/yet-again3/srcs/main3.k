@@ -64,6 +64,15 @@ extern c_int main() {
   ${
     var a = 10
     var b = 5
+    int ia = a
+
+    print(def(int c) {
+      a
+    })
+    print(def(int c) {
+      print('inside lambda function')
+      ia + c
+    }(196))
     printf(c'a is b = %d\n', static_cast(c_int, a is b))
     printf(c'a is not b = %d\n', static_cast(c_int, a is not b))
     printf(c'a is b = %d\n', static_cast(c_int, a is a))

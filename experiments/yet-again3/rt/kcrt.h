@@ -17,8 +17,11 @@ typedef struct KLC_Header KLC_Header;
 typedef struct KLC_MethodEntry KLC_MethodEntry;
 typedef struct KLC_Class KLC_Class;
 typedef struct KLC_var KLC_var;
+typedef struct KLC_Lambda_capture KLC_Lambda_capture;
 typedef void KLC_Deleter(KLC_Header*, KLC_Header**);
 typedef KLC_Error* KLC_Method(KLC_Stack*, KLC_var*, int, KLC_var*);
+typedef KLC_Error* KLC_Lambda_body(
+  KLC_Stack*, KLC_var*, KLC_Lambda_capture*, int, KLC_var*);
 
 struct KLC_Header {
   size_t refcnt;
@@ -50,6 +53,11 @@ struct KLC_var {
   } u;
 };
 
+struct KLC_Lambda_capture {
+  size_t size;
+  KLC_var* buffer;
+};
+
 extern KLC_Class KLC_type_class;
 
 char* KLC_CopyString(const char* s);
@@ -64,6 +72,7 @@ KLC_Error* KLC_new_error_with_message(KLC_Stack*, const char*);
 KLC_Error* KLC_errorf(size_t hint, KLC_Stack*, const char*, ...);
 void KLC_delete_error(KLC_Error*);
 const char* KLC_get_error_message(KLC_Error*);
+void KLC_panic(const char*);
 
 KLC_bool KLC_is(KLC_var left, KLC_var right);
 
@@ -83,6 +92,11 @@ void KLC_partial_release_var_array(
 void KLC_var_array_clear_range(void* buffer, size_t begin, size_t end);
 KLC_var KLC_var_array_get(void* buffer, size_t i);
 void KLC_var_array_set(void* buffer, size_t i, KLC_var value);
+
+KLC_Lambda_capture* KLC_new_Lambda_capture(size_t, ...);
+KLC_var KLC_Lambda_capture_get(KLC_Lambda_capture*, size_t);
+void KLC_free_lambda_capture(KLC_Lambda_capture*);
+KLC_Error* KLC_lambda_call(KLC_Stack*, KLC_var*, int, KLC_var*);
 
 KLC_var KLC_var_from_ptr(KLC_Header* p);
 KLC_var KLC_var_from_bool(KLC_bool b);

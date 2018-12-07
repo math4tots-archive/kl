@@ -30,6 +30,15 @@ struct KLC_RelaseOnExitQueue {
   KLC_Header** buffer;
 };
 
+/* This is kind of a hack having this here */
+/* This is repeated in the output of builtins.k */
+typedef struct KLCCSbuiltins_DLambda Lambda;
+struct KLCCSbuiltins_DLambda {
+  KLC_Header header;
+  KLC_Lambda_capture *KLCCF_Ucapture;
+  KLC_Lambda_body *KLCCF_Ubody;
+};
+
 static KLC_Error* KLC_type_method_repr(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_type_method_str(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 
@@ -181,6 +190,15 @@ const char* KLC_get_error_message(KLC_Error* error) {
   return error->message;
 }
 
+void KLC_panic(const char* message) {
+  int* nullp = NULL;
+  fprintf(stderr, "%s\n", message);
+  printf("Trigger segfault %d", *nullp);
+
+  /* If triggering segfault fails, explicitly exit */
+  exit(1);
+}
+
 KLC_bool KLC_is(KLC_var left, KLC_var right) {
   if (left.tag != right.tag) {
     return 0;
@@ -197,7 +215,7 @@ KLC_bool KLC_is(KLC_var left, KLC_var right) {
     case KLC_TAG_TYPE:
       return left.u.t == right.u.t;
   }
-  /* TODO: panic here */
+  KLC_panic("KLC_is, invalid tag");
   return 0;
 }
 
@@ -326,6 +344,42 @@ void KLC_var_array_set(void* buffer, size_t i, KLC_var value) {
   KLC_retain_var(value);
   KLC_release_var(arr[i]);
   arr[i] = value;
+}
+
+KLC_Lambda_capture* KLC_new_Lambda_capture(size_t size, ...) {
+  KLC_Lambda_capture* ret =
+    (KLC_Lambda_capture*) malloc(sizeof(KLC_Lambda_capture));
+  size_t i;
+  va_list args;
+  va_start(args, size);
+  ret->size = size;
+  ret->buffer = (KLC_var*) malloc(sizeof(KLC_var) * size);
+  for (i = 0; i < size; i++) {
+    ret->buffer[i] = va_arg(args, KLC_var);
+  }
+  return ret;
+}
+
+KLC_var KLC_Lambda_capture_get(KLC_Lambda_capture* c, size_t i) {
+  if (i >= c->size) {
+    KLC_panic("Lambda_capture_get index out of bounds");
+  }
+  return c->buffer[i];
+}
+
+void KLC_free_lambda_capture(KLC_Lambda_capture* c) {
+  size_t i;
+  for (i = 0; i < c->size; i++) {
+    KLC_release_var(c->buffer[i]);
+  }
+  free(c->buffer);
+  free(c);
+}
+
+KLC_Error* KLC_lambda_call(
+    KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  Lambda* p = (Lambda*) argv[0].u.p;
+  return p->KLCCF_Ubody(stack, out, p->KLCCF_Ucapture, argc - 1, argv + 1);
 }
 
 KLC_var KLC_var_from_ptr(KLC_Header* p) {
