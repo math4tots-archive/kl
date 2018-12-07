@@ -24,7 +24,7 @@ class SomeClass(SomeTrait, SomeOtherTrait) {
 String message = 'hello world'
 List items = []
 
-extern c_int main() {
+void main() {
   List list = List()
   c_long size = list.size
   print('list.size = ' + str(size))
@@ -69,10 +69,14 @@ extern c_int main() {
     print(def(int c) {
       a
     })
-    print(def(int c) {
+    print(def int(int c) {
       print('inside lambda function')
       ia + c
     }(196))
+
+    // var f = def int(int a, int b) = a + b
+    // print('f = ' + str(f))
+    // print(f(494, 489))
     printf(c'a is b = %d\n', static_cast(c_int, a is b))
     printf(c'a is not b = %d\n', static_cast(c_int, a is not b))
     printf(c'a is b = %d\n', static_cast(c_int, a is a))
@@ -100,7 +104,4 @@ extern c_int main() {
     sb.addString(String.fromCString(c"def"))
     print(sb)
   }
-
-  KLC_release_vars_queued_for_exit()
-  static_cast(c_int, 0)
 }

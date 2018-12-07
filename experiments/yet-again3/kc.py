@@ -3013,7 +3013,19 @@ def parser(ns):
             else:
                 rtype_promise = parse_type(lambda_scope)
             plist_promise = parse_param_list(lambda_scope)
-            body_promise = parse_body_with_type(lambda_scope, rtype_promise)
+            body_promise = (parse_body(lambda_scope)
+                .map(lambda body:
+                    lambda_scope.convert(body, rtype_promise.resolve()))
+                .map(lambda body:
+                    lambda_scope.convert(body, IR.VAR_TYPE))
+                .map(lambda body:
+                    promise_block(
+                        token=token,
+                        scope=lambda_scope,
+                        decl_promises=[],
+                        expr_promises=[Promise.value(body)],
+                    ).resolve())
+            )
             return promise_lambda(
                 lambda_scope,
                 token,

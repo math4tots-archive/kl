@@ -122,4 +122,7 @@ KLC_int KLC_get_type_tag();
 char const* KLC_get_type_module_name(KLC_Class* t);
 char const* KLC_get_type_short_name(KLC_Class* t);
 
+/* Expected entry point */
+KLC_Error *KLCFNmain_Dmain(KLC_Stack *KLC_stack, void *KLC_output_ptr);
+
 #endif/*kcrt_h*/

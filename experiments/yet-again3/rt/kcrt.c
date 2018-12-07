@@ -581,3 +581,14 @@ char const* KLC_get_type_module_name(KLC_Class* t) {
 char const* KLC_get_type_short_name(KLC_Class* t) {
   return t->short_name;
 }
+
+int main(int argc, char** argv) {
+  KLC_Stack* stack = KLC_new_stack();
+  KLC_Error* error = KLCFNmain_Dmain(stack, NULL);
+  KLC_release_vars_queued_for_exit();
+  KLC_delete_stack(stack);
+  if (error) {
+    KLC_panic_with_error(error);
+  }
+  return 0;
+}
