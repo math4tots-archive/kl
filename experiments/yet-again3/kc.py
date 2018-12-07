@@ -411,7 +411,7 @@ def lexer(ns):
     ns(KEYWORDS, 'KEYWORDS')
 
     SYMBOLS = tuple(reversed(sorted([
-      '\n',
+      '\n', '=>',
       '||', '&&', '|', '&', '<<', '>>', '~', '...', '$', '->',
       ';', '#', '?', ':', '!', '++', '--',  # '**',
       '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
@@ -2183,6 +2183,42 @@ def parser(ns):
                 token, [p.resolve() for p in paramps], vararg,
             ))
 
+        def parse_simplified_param_list(scope):
+            token = peek()
+            if consume('('):
+                with skipping_newlines(True):
+                    paramps = []
+                    while not consume(')'):
+                        ptok = peek()
+                        pname = expect_id()
+                        param_promise = pcall(
+                            IR.Parameter,
+                            ptok,
+                            IR.VAR_TYPE,
+                            pname,
+                        )
+                        scope.set_promise(ptok, pname, param_promise)
+                        paramps.append(param_promise)
+                        if not consume(','):
+                            expect(')')
+                            break
+            else:
+                ptok = peek()
+                pname = expect_id()
+                paramps = [Promise.value(pcall(
+                    IR.Parameter,
+                    ptok,
+                    IR.VAR_TYPE,
+                    pname,
+                ))]
+                scope.set_promise(ptok, pname, param_promise)
+            return Promise(lambda: IR.ParameterList(
+                token, [p.resolve() for p in paramps], False,
+            ))
+
+        def at_seq(seq):
+            return [t.type for t in tokens[i:i+len(seq)]] == seq
+
         def at_variable_declaration():
             if peek().type in ('bool', 'int', 'float', 'void', 'var'):
                 return True
@@ -2197,11 +2233,15 @@ def parser(ns):
                 ['NAME', '*', 'NAME', '\n'],
                 ['NAME', 'const'],
             ]
-            for seq in seqs:
-                if [t.type for t in tokens[i:i+len(seq)]] == seq:
-                    return True
+            return any(map(at_seq, seqs))
 
-            return False
+        def at_syntactic_sugar_lambda():
+            return any(map(at_seq, [
+                ['NAME', '=>'],
+                ['(', ')', '=>'],
+                ['(', 'NAME', ')', '=>'],
+                ['(', 'NAME', ',', ],
+            ]))
 
         def promise_truthy(scope, token, expr_promise):
             @Promise
@@ -2975,7 +3015,11 @@ def parser(ns):
                             f'supported in this context')
                 rtype = rtype_promise.resolve()
                 plist = plist_promise.resolve()
-                body = body_promise.resolve()
+                body = convert_body_type(
+                    scope,
+                    body_promise.resolve(),
+                    IR.VAR_TYPE,
+                )
                 lambda_id = next_lambda_id_ptr[0]
                 next_lambda_id_ptr[0] += 1
                 return promise_fcall(
@@ -3001,7 +3045,7 @@ def parser(ns):
                     token,
                     rtype,
                     plist,
-                    convert_body_type(scope, body, rtype),
+                    body,
                 )
             return promise
 
@@ -3013,19 +3057,7 @@ def parser(ns):
             else:
                 rtype_promise = parse_type(lambda_scope)
             plist_promise = parse_param_list(lambda_scope)
-            body_promise = (parse_body(lambda_scope)
-                .map(lambda body:
-                    lambda_scope.convert(body, rtype_promise.resolve()))
-                .map(lambda body:
-                    lambda_scope.convert(body, IR.VAR_TYPE))
-                .map(lambda body:
-                    promise_block(
-                        token=token,
-                        scope=lambda_scope,
-                        decl_promises=[],
-                        expr_promises=[Promise.value(body)],
-                    ).resolve())
-            )
+            body_promise = parse_body_with_type(lambda_scope, rtype_promise)
             return promise_lambda(
                 lambda_scope,
                 token,
@@ -3034,8 +3066,28 @@ def parser(ns):
                 body_promise,
             )
 
+        def parse_syntactic_sugar_lambda(outer_scope):
+            token = peek()
+            lambda_scope = LambdaScope(outer_scope)
+            plist_promise = parse_simplified_param_list(lambda_scope)
+            expect('=>')
+            body_promise = promise_block(token, lambda_scope, [], [
+                parse_expression(lambda_scope)
+                    .map(lambda expr:
+                        lambda_scope.convert(expr, IR.VAR_TYPE))
+            ])
+            return promise_lambda(
+                scope=lambda_scope,
+                token=token,
+                rtype_promise=Promise.value(IR.VAR_TYPE),
+                plist_promise=plist_promise,
+                body_promise=body_promise,
+            )
+
         def parse_primary(scope):
             token = peek()
+            if at_syntactic_sugar_lambda():
+                return parse_syntactic_sugar_lambda(scope)
             if at('if'):
                 return parse_if(scope)
             if at('while'):
@@ -5213,7 +5265,7 @@ def C(ns):
                 debug_name=f'lambda:{self.lambda_id}',
                 proto=f'static {proto}',
                 extern=False,
-                rtype=self.rtype,
+                rtype=IR.VAR_TYPE,
                 start_callback=lambda ctx: copy_dynamic_params_to_locals(
                     ctx=ctx,
                     token=self.token,

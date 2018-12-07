@@ -83,6 +83,12 @@ void main() {
   }
 
   ${
+    var g = (a, b) => a + b
+    print('g = ' + str(g))
+    print('g(8781, 498) = ' + str(g(8781, 498)))
+  }
+
+  ${
     print('a')
     int i = 0
     while (i < 10) {

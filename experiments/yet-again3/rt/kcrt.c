@@ -41,6 +41,7 @@ struct KLCCSbuiltins_DLambda {
 
 static KLC_Error* KLC_type_method_repr(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_type_method_str(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_int_method_add(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 
 static KLC_RelaseOnExitQueue exit_release_queue;
 
@@ -49,12 +50,24 @@ KLC_MethodEntry KLC_type_methods[] = {
   { "__str", KLC_type_method_str },
 };
 
+KLC_MethodEntry KLC_int_methods[] = {
+  { "__add", KLC_int_method_add },
+};
+
 KLC_Class KLC_type_class = {
   "builtins",
   "type",
   NULL,
   sizeof(KLC_type_methods) / sizeof(KLC_MethodEntry),
   KLC_type_methods,
+};
+
+KLC_Class KLC_int_class = {
+  "builtins",
+  "int",
+  NULL,
+  sizeof(KLC_int_methods) / sizeof(KLC_MethodEntry),
+  KLC_int_methods,
 };
 
 static const char* KLC_tag_to_str(int tag) {
@@ -73,12 +86,38 @@ static const char* KLC_tag_to_str(int tag) {
   return "INVALID";
 }
 
-static KLC_Error* KLC_type_method_repr(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+static KLC_Error* KLC_expect_argc(KLC_Stack* stack, int argc, int exp) {
+  if (argc != exp) {
+    return KLC_errorf(0, stack, "Expected %d args but got %d", exp, argc);
+  }
+  return NULL;
+}
+
+static KLC_Error* KLC_expect_tag(KLC_Stack* stack, KLC_var x, int tag) {
+  if (x.tag != tag) {
+    return KLC_errorf(0, stack, "Invalid type (wrong tag)");
+  }
+  return NULL;
+}
+
+static KLC_Error* KLC_type_method_repr(
+    KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
   return KLC_errorf(0, stack, "type.__repr TODO");
 }
 
-static KLC_Error* KLC_type_method_str(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+static KLC_Error* KLC_type_method_str(
+    KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
   return KLC_type_method_repr(stack, out, argc, argv);
+}
+
+static KLC_Error* KLC_int_method_add(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_INT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_INT); if (e) { return e; }
+  *out = KLC_var_from_int(argv[0].u.i + argv[1].u.i);
+  return NULL;
 }
 
 char* KLC_CopyString(const char* s) {
@@ -487,6 +526,8 @@ KLC_Class* KLC_get_class(KLC_var v) {
         return v.u.p->cls;
       }
       break;
+    case KLC_TAG_INT:
+      return &KLC_int_class;
     case KLC_TAG_TYPE:
       if (v.u.t) {
         return &KLC_type_class;

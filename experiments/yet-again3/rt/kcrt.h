@@ -59,6 +59,7 @@ struct KLC_Lambda_capture {
 };
 
 extern KLC_Class KLC_type_class;
+extern KLC_Class KLC_int_class;
 
 char* KLC_CopyString(const char* s);
 
