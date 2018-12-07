@@ -368,12 +368,14 @@ KLC_var KLC_Lambda_capture_get(KLC_Lambda_capture* c, size_t i) {
 }
 
 void KLC_free_lambda_capture(KLC_Lambda_capture* c) {
-  size_t i;
-  for (i = 0; i < c->size; i++) {
-    KLC_release_var(c->buffer[i]);
+  if (c) {
+    size_t i;
+    for (i = 0; i < c->size; i++) {
+      KLC_release_var(c->buffer[i]);
+    }
+    free(c->buffer);
+    free(c);
   }
-  free(c->buffer);
-  free(c);
 }
 
 KLC_Error* KLC_lambda_call(

@@ -5224,7 +5224,6 @@ def C(ns):
             )
 
         lambda_body_name = get_lambda_body_name(self)
-        print(f'body_name = {lambda_body_name}')
         retvar = ctx.declare(IR.LAMBDA_BODY_POINTER_TYPE)
         ctx.out += f'{retvar} = {lambda_body_name};'
         return retvar

@@ -74,9 +74,9 @@ void main() {
       ia + c
     }(196))
 
-    // var f = def int(int a, int b) = a + b
-    // print('f = ' + str(f))
-    // print(f(494, 489))
+    var f = def int(int a, int b) = a + b
+    print('f = ' + str(f))
+    print(f(494, 489))
     printf(c'a is b = %d\n', static_cast(c_int, a is b))
     printf(c'a is not b = %d\n', static_cast(c_int, a is not b))
     printf(c'a is b = %d\n', static_cast(c_int, a is a))
