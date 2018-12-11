@@ -26,11 +26,18 @@ List items = []
 
 void main() {
 
+  assert(true)
+  assert(!false)
+  assert(!!true)
   assert.equal(1, 1)
   assert.equal(1, 1.0)
   assert(1 is not 1.0)
   assert.equal(1.0, 1.0)
   assert(1.1 != 1.0)
+  assert('abc' == 'abc')
+  assert('abcd' != 'abce')
+  assert('abc' != 'abcd')
+  assert('abc' != 3)
 
   ${
     float f = if (1) {
@@ -41,6 +48,9 @@ void main() {
     assert(f is 2.0)
     assert(f is not 2)
   }
+
+  assert.equal(str(true), 'true')
+  assert.equal(str(false), 'false')
 
   List list = List()
   c_long size = list.size

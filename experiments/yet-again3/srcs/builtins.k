@@ -9,6 +9,7 @@ from c import cfree
 from c import crealloc
 from c import strcpy
 from c import strcat
+from c import strcmp
 
 extern c_char* KLC_CopyString(c_char const* s)
 
@@ -65,7 +66,7 @@ class assert() {
 
   static void equal(var left, var right) {
     if (left != right) {
-      throw 'expected ' + str(left) + ' to equal ' + str(right)
+      throw 'Expected ' + str(left) + ' to equal ' + str(right)
     }
   }
 }
@@ -152,6 +153,10 @@ class String(Object) {
 
   String __str() {
     this
+  }
+
+  bool __eq(String other) {
+    _size == other->_size && strcmp(_buffer, other->_buffer) is 0
   }
 
   delete {

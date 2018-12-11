@@ -28,3 +28,4 @@ extern c_char* crealloc(c_char* p, int size) {
 
 extern c_char* strcpy(c_char* dest, c_char const* src)
 extern c_char* strcat(c_char* dest, c_char const* src)
+extern c_int strcmp(c_char const* a, c_char const* b)

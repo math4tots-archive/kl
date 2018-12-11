@@ -1742,6 +1742,14 @@ def IR(ns):
             assert False, self.type
 
     @ns
+    class BoolLiteral(Expression):
+        type = BOOL
+
+        node_fields = (
+            ('value', bool),
+        )
+
+    @ns
     class IntLiteral(Expression):
         type = INT
 
@@ -3137,6 +3145,10 @@ def parser(ns):
             if consume('NAME'):
                 name = token.value
                 return promise_name(scope, token, name)
+            if consume('true'):
+                return Promise.value(IR.BoolLiteral(token, True))
+            if consume('false'):
+                return Promise.value(IR.BoolLiteral(token, False))
             if consume('INT'):
                 return Promise.value(IR.IntLiteral(token, token.value))
             if consume('FLOAT'):
@@ -5066,6 +5078,12 @@ def C(ns):
         retvar = ctx.declare(self.type)
         descriptor_name = get_class_descriptor_name(self.cls)
         ctx.out += f'{retvar} = &{descriptor_name};'
+        return retvar
+
+    @E.on(IR.BoolLiteral)
+    def E(self, ctx):
+        retvar = ctx.declare(IR.BOOL)
+        ctx.out += f'{retvar} = {1 if self.value else 0};'
         return retvar
 
     @E.on(IR.IntLiteral)
