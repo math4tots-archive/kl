@@ -28,8 +28,19 @@ void main() {
 
   assert.equal(1, 1)
   assert.equal(1, 1.0)
+  assert(1 is not 1.0)
   assert.equal(1.0, 1.0)
   assert(1.1 != 1.0)
+
+  ${
+    float f = if (1) {
+      2
+    } else {
+      1.5
+    }
+    assert(f is 2.0)
+    assert(f is not 2)
+  }
 
   List list = List()
   c_long size = list.size

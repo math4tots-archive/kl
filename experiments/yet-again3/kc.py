@@ -2937,6 +2937,11 @@ def parser(ns):
                 cond = cond_promise.resolve()
                 body = body_promise.resolve()
                 other = other_promise.resolve()
+                if (body.type != other.type and
+                        body.type != IR.VOID and
+                        other.type != IR.VOID):
+                    body = scope.convert(body, IR.VAR_TYPE)
+                    other = scope.convert(other, IR.VAR_TYPE)
                 return IR.If(token, cond, body, other)
             return promise
 
