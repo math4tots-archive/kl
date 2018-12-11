@@ -183,6 +183,11 @@ Lambda `%lambda`(KLC_Lambda_capture* capture, KLC_Lambda_body* body) {
 // normal string literals
 String `%str`(c_char const* cstr) = String.fromCString(cstr)
 
+String `%exception`(var s) = str(s)
+
+extern String KLC_str(c_char const* cstr) = String.fromCString(cstr)
+extern c_char const* KLC_cstr(String s) = s->_buffer
+
 class List(Iterable) {
   int _size
   int _cap

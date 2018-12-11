@@ -91,6 +91,8 @@ void main() {
     )
   }
 
+  throw 'hi ' + 'there: ' + str(1 + 15)
+
   ${
     print('a')
     int i = 0

@@ -123,6 +123,15 @@ KLC_int KLC_get_type_tag();
 char const* KLC_get_type_module_name(KLC_Class* t);
 char const* KLC_get_type_short_name(KLC_Class* t);
 
+/* Useful structs and functions that are defined by builtins.k */
+struct KLCCSbuiltins_DString;
+struct KLCCSbuiltins_DString* KLC_str(char const *KLCLPcstr);
+char const *KLC_cstr(struct KLCCSbuiltins_DString* KLCLPs);
+
+KLC_Error* KLC_new_error_from_string(
+  KLC_Stack* stack,
+  struct KLCCSbuiltins_DString*);
+
 /* Expected entry point */
 KLC_Error *KLCFNmain_Dmain(KLC_Stack *KLC_stack, void *KLC_output_ptr);
 

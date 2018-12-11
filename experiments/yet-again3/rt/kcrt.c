@@ -733,6 +733,12 @@ char const* KLC_get_type_short_name(KLC_Class* t) {
   return t->short_name;
 }
 
+
+KLC_Error* KLC_new_error_from_string(
+    KLC_Stack* stack, struct KLCCSbuiltins_DString* s) {
+  return KLC_new_error_with_message(stack, KLC_cstr(s));
+}
+
 int main(int argc, char** argv) {
   KLC_Stack* stack = KLC_new_stack();
   KLC_Error* error = KLCFNmain_Dmain(stack, NULL);

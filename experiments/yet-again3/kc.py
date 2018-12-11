@@ -1168,6 +1168,10 @@ def IR(ns):
     STRING_CONVERSION_FUNCTION_NAME = '%str'
     ns(STRING_CONVERSION_FUNCTION_NAME, 'STRING_CONVERSION_FUNCTION_NAME')
 
+    EXCEPTION_CONVERSION_FUNCTION_NAME = '%exception'
+    ns(EXCEPTION_CONVERSION_FUNCTION_NAME,
+       'EXCEPTION_CONVERSION_FUNCTION_NAME')
+
     NEW_LIST_FUNCTION_NAME = '%mklist'
     ns(NEW_LIST_FUNCTION_NAME, 'NEW_LIST_FUNCTION_NAME')
 
@@ -1764,11 +1768,11 @@ def IR(ns):
             return PointerType(ConstType(IR.c_char))
 
     @ns
-    class ThrowStringLiteral(Expression):
+    class Throw(Expression):
         type = VOID
 
         node_fields = (
-            ('value', str),
+            ('expr', Expression),  # Must be 'String' type
         )
 
     @ns
@@ -1969,6 +1973,7 @@ def parser(ns):
         IR.LAMBDA_FUNCTION_NAME,
         IR.VAR_EQ_FUNCTION_NAME,
         IR.VAR_NE_FUNCTION_NAME,
+        IR.EXCEPTION_CONVERSION_FUNCTION_NAME,
         IR.STRING_CONVERSION_FUNCTION_NAME,
         IR.NEW_LIST_FUNCTION_NAME,
         IR.LIST_PUSH_FUNCTION_NAME,
@@ -2861,14 +2866,29 @@ def parser(ns):
                     return convert_name_defn_to_expr(scope, token, defn)
             return promise
 
-        def promise_throw_string_literal(scope, token, value):
+        def promise_throw(scope, token, expr_promise):
             @Promise
             def promise():
                 if scope['@ec'].extern:
                     with scope.push(token):
                         raise scope.error(
                             f'You cannot throw from an extern context')
-                return IR.ThrowStringLiteral(token, value)
+                if IR.EXCEPTION_CONVERSION_FUNCTION_NAME in scope:
+                    return IR.Throw(token, promise_fcall(
+                        scope=scope,
+                        token=token,
+                        function_promise=promise_name(
+                            scope,
+                            token,
+                            IR.EXCEPTION_CONVERSION_FUNCTION_NAME,
+                        ),
+                        argsp=Promise(lambda: [expr_promise.resolve()]),
+                    ).resolve())
+                else:
+                    with scope.push(token):
+                        raise scope.error(
+                            f'Exceptions canot be thrown from this context'
+                        )
             return promise
 
         def promise_malloc(scope, token, type_promise):
@@ -3121,9 +3141,7 @@ def parser(ns):
             if consume('STRING'):
                 return promise_string_literal(token, scope, token.value)
             if consume('throw'):
-                # For now, only allow string literals
-                value = expect('STRING').value
-                return promise_throw_string_literal(scope, token, value)
+                return promise_throw(scope, token, parse_expression(scope))
             if consume('static_cast'):
                 expect('(')
                 with skipping_newlines(True):
@@ -3908,11 +3926,10 @@ def C(ns):
             finally:
                 self.out = old_out
 
-        def set_error_pointer(self, message):
-            escaped = escape_str(message)
+        def set_error(self, string_var):
             self.out += (
-                f'{ERROR_POINTER_NAME} = KLC_new_error_with_message('
-                f'{STACK_POINTER_NAME}, "{escaped}");'
+                f'{ERROR_POINTER_NAME} = KLC_new_error_from_string('
+                f'{STACK_POINTER_NAME}, {string_var});'
             )
 
     def _retain(type, cname):
@@ -4695,7 +4712,6 @@ def C(ns):
                 f'"Expected {argc} args but got %d", '
                 f'{DYNAMIC_PARAM_ARGC_NAME});'
             )
-            # ctx.set_error_pointer(f'Expected {argc} args')
             ctx.jump_out_of_scope()
         ctx.out += '}'
         for i, (t, c_name) in enumerate(zip(paramtypes, c_local_names)):
@@ -5333,9 +5349,11 @@ def C(ns):
         ctx.out += f'{retvar} = {malloc_name}();'
         return retvar
 
-    @E.on(IR.ThrowStringLiteral)
+    @E.on(IR.Throw)
     def E(self, ctx):
-        ctx.set_error_pointer(self.value)
+        string_var = E(self.expr, ctx)
+        with stack_trace_entry(ctx, self.token):
+            ctx.set_error(string_var)
         ctx.jump_out_of_scope()
 
     @E.on(IR.FunctionName)
