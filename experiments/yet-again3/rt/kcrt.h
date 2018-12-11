@@ -58,6 +58,7 @@ struct KLC_Lambda_capture {
   KLC_var* buffer;
 };
 
+extern KLC_var KLC_null;
 extern KLC_Class KLC_type_class;
 extern KLC_Class KLC_int_class;
 

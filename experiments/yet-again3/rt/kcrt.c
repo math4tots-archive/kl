@@ -70,6 +70,8 @@ static KLC_MethodEntry KLC_float_methods[] = {
   /* { "__mod", KLC_float_method_mod }, */
 };
 
+KLC_var KLC_null = {0};
+
 KLC_Class KLC_type_class = {
   "builtins",
   "type",
@@ -501,6 +503,7 @@ KLC_Lambda_capture* KLC_new_Lambda_capture(size_t size, ...) {
   ret->buffer = (KLC_var*) malloc(sizeof(KLC_var) * size);
   for (i = 0; i < size; i++) {
     ret->buffer[i] = va_arg(args, KLC_var);
+    KLC_retain_var(ret->buffer[i]);
   }
   return ret;
 }

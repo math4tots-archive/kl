@@ -2,6 +2,10 @@
 
 List a_global_list = []
 
+class StringPointer {
+  String s
+}
+
 void main() {
   assert(true)
   assert(!false)
@@ -38,5 +42,21 @@ void main() {
     var list = [1, 2, 3]
     list[0] = 15
     assert.equal(list, [15, 2, 3])
+  }
+
+  ${
+    // Tests that assigning to a class field
+    // properly increments reference count.
+    StringPointer sp = $(StringPointer)
+    sp->s = 'hi'
+  }
+
+  ${
+    var iter = [1, 2, 3].__iter()
+    var items = []
+    while (iter.__hasNext()) {
+      items.push(iter.__next())
+    }
+    assert.equal(items, [1, 2, 3])
   }
 }

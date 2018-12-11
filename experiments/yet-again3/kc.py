@@ -3966,7 +3966,13 @@ def C(ns):
                 if cmd:
                     out += cmd
                     if clear_var:
-                        out += f'{cname} = NULL;'
+                        type = self._scope[cname]
+                        if type == IR.VAR_TYPE:
+                            out += f'{cname} = KLC_null;'
+                        elif isinstance(type, IR.ClassDefinition):
+                            out += f'{cname} = NULL;'
+                        else:
+                            assert False, type
 
         @contextlib.contextmanager
         def push_indent(self, depth):
@@ -5099,10 +5105,10 @@ def C(ns):
 
         field_expr_str = f'{this_var}->{c_field_name}'
 
-        ctx.retain(retvar)
         ctx.out += f'{release_var} = {field_expr_str};'
-        ctx.release(release_var, clear_var=True)
         ctx.out += f'{retvar} = {val_var};'
+        ctx.retain(retvar)
+        ctx.release(release_var, clear_var=True)
         ctx.out += f'{field_expr_str} = {retvar};'
         ctx.retain(retvar)
         return retvar

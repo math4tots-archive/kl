@@ -54,7 +54,18 @@ trait Object() {
 trait Iterable(Object) {
 }
 
-trait Iterator(Object) {
+class Iterator(Object) {
+  var _hasNext
+  var _next
+
+  static Iterator new(var hasNext, var next) {
+    Iterator ret = $(Iterator)
+    ret->_hasNext = hasNext
+    ret->_next = next
+    ret
+  }
+  bool __hasNext() = _hasNext()
+  var __next() = _next()
 }
 
 class assert() {
@@ -191,6 +202,12 @@ String `%exception`(var s) = str(s)
 extern String KLC_str(c_char const* cstr) = String.fromCString(cstr)
 extern c_char const* KLC_cstr(String s) = s->_buffer
 
+class _ListIteratorState(Object) {
+  int i
+
+  static _ListIteratorState new() = $(_ListIteratorState)
+}
+
 class List(Iterable) {
   int _size
   int _cap
@@ -258,6 +275,19 @@ class List(Iterable) {
     }
     sb.add(']')
     str(sb)
+  }
+
+  Iterator __iter() {
+    _ListIteratorState state = _ListIteratorState()
+    state->i = 0
+    List list = this
+
+    Iterator(
+      () => state->i < list->_size,
+      () => ${
+        state->i = state->i + 1
+        list[state->i - 1]
+      })
   }
 
   List map(var f) {
