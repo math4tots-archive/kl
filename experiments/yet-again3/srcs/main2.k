@@ -16,10 +16,10 @@ extern c_int main(c_int argc, c_char** argv) {
   var vf = 1.4
   c_double f = vf
   String s3 = y
-  printf("2 + 3 = %d\n", static_cast(c_int, 2 + 3))
-  printf("2 + -3 = %d\n", static_cast(c_int, 2 + -3))
-  printf("2 < 3 = %d\n", static_cast(c_int, 2 < 3))
-  printf("2 > 3 = %d\n", static_cast(c_int, 2 > 3))
+  printf("2 + 3 = %d\n", dynamic_cast(c_int, 2 + 3))
+  printf("2 + -3 = %d\n", dynamic_cast(c_int, 2 + -3))
+  printf("2 < 3 = %d\n", dynamic_cast(c_int, 2 < 3))
+  printf("2 > 3 = %d\n", dynamic_cast(c_int, 2 > 3))
   printf("0 || 2 = %d\n", 0 || 2)
   printf("0 && 2 = %d\n", 0 && 2)
   bool b = 10
@@ -49,12 +49,12 @@ extern c_int main(c_int argc, c_char** argv) {
     Foo f3 = y
   }
   printf("After\n")
-  static_cast(c_int, 0)
+  dynamic_cast(c_int, 0)
 }
 
 void recursive_print(int i, int limit) {
   if (i < limit) {
-    printf("i = %d\n", static_cast(c_int, i))
+    printf("i = %d\n", dynamic_cast(c_int, i))
     recursive_print(i + 1, limit)
   }
 }

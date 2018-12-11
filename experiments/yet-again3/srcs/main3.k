@@ -25,8 +25,15 @@ String message = 'hello world'
 List items = []
 
 void main() {
+
+  assert.equal(1, 1)
+  assert.equal(1, 1.0)
+  assert.equal(1.0, 1.0)
+  assert(1.1 != 1.0)
+
   List list = List()
   c_long size = list.size
+  assert.equal(list.size, 0)
   print('list.size = ' + str(size))
   list.push(15)
   size = list.size
@@ -77,9 +84,9 @@ void main() {
     var f = def int(int a, int b) = a + b
     print('f = ' + str(f))
     print(f(494, 489))
-    printf(c'a is b = %d\n', static_cast(c_int, a is b))
-    printf(c'a is not b = %d\n', static_cast(c_int, a is not b))
-    printf(c'a is b = %d\n', static_cast(c_int, a is a))
+    printf(c'a is b = %d\n', dynamic_cast(c_int, a is b))
+    printf(c'a is not b = %d\n', dynamic_cast(c_int, a is not b))
+    printf(c'a is b = %d\n', dynamic_cast(c_int, a is a))
   }
 
   ${
@@ -90,8 +97,6 @@ void main() {
       ((a, b) => a * b)(5.5, 7.254)
     )
   }
-
-  throw 'hi ' + 'there: ' + str(1 + 15)
 
   ${
     print('a')

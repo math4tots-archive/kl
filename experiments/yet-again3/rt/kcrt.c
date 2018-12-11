@@ -608,11 +608,14 @@ KLC_Error* KLC_var_to_int(KLC_Stack* stack, KLC_int* out, KLC_var v) {
 }
 
 KLC_Error* KLC_var_to_float(KLC_Stack* stack, KLC_float* out, KLC_var v) {
-  if (v.tag != KLC_TAG_FLOAT) {
+  if (v.tag == KLC_TAG_INT) {
+    *out = (KLC_float) v.u.i;
+  } else if (v.tag == KLC_TAG_FLOAT) {
+    *out = v.u.f;
+  } else {
     return KLC_errorf(
       0, stack, "Expected FLOAT but got %s", KLC_tag_to_str(v.tag));
   }
-  *out = v.u.f;
   return NULL;
 }
 

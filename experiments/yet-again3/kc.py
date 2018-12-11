@@ -406,7 +406,7 @@ def lexer(ns):
         'for', 'if', 'else', 'while', 'break', 'continue', 'return',
         'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
         'except', 'case','switch', 'var', 'this',
-        'static_cast',
+        'dynamic_cast',
     } | set(C_KEYWORDS)
     ns(KEYWORDS, 'KEYWORDS')
 
@@ -1977,6 +1977,7 @@ def parser(ns):
         IR.STRING_CONVERSION_FUNCTION_NAME,
         IR.NEW_LIST_FUNCTION_NAME,
         IR.LIST_PUSH_FUNCTION_NAME,
+        'assert',
         'String',
         'StringBuilder',
         'List',
@@ -2559,8 +2560,7 @@ def parser(ns):
                         op,
                         right,
                     )
-                if (isinstance(left.type, IR.Retainable) and
-                        isinstance(right.type, IR.Retainable)):
+                if isinstance(left.type, IR.Retainable):
                     if op in _equality_op_table:
                         func_name = _equality_op_table[op]
                         if func_name in scope:
@@ -2915,8 +2915,8 @@ def parser(ns):
                     (type in IR.PRIMITIVE_TRUTHY_TYPES and
                         arg.type in IR.PRIMITIVE_TRUTHY_TYPES))):
                 return IR.Cast(token, arg, type)
-            with scope.push(token):
-                raise scope.error(f'Unsupported cast to {type}')
+            else:
+                return scope.convert(arg, type)
 
         def parse_if(scope):
             token = expect('if')
@@ -3142,7 +3142,7 @@ def parser(ns):
                 return promise_string_literal(token, scope, token.value)
             if consume('throw'):
                 return promise_throw(scope, token, parse_expression(scope))
-            if consume('static_cast'):
+            if consume('dynamic_cast'):
                 expect('(')
                 with skipping_newlines(True):
                     type_promise = parse_type(scope)
@@ -4900,6 +4900,8 @@ def C(ns):
             convert_func = 'KLC_var_from_int'
         elif st in IR.FLOAT_TYPES:
             convert_func = 'KLC_var_from_float'
+        elif st == IR.BOOL:
+            convert_func = 'KLC_var_from_bool'
         elif st == IR.TYPE:
             convert_func = f'KLC_var_from_type'
         else:

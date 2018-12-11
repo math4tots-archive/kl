@@ -65,9 +65,7 @@ class assert() {
 
   static void equal(var left, var right) {
     if (left != right) {
-      // TODO: Include 'left' and 'right'
-      // Into the error message
-      throw "assert equal failed"
+      throw 'expected ' + str(left) + ' to equal ' + str(right)
     }
   }
 }
@@ -113,7 +111,7 @@ class StringBuilder(Object) {
   }
 
   delete {
-    free(static_cast(void*, this->_buffer))
+    free(dynamic_cast(void*, this->_buffer))
   }
 }
 
@@ -157,7 +155,7 @@ class String(Object) {
   }
 
   delete {
-    free(static_cast(void*, this->_buffer))
+    free(dynamic_cast(void*, this->_buffer))
   }
 }
 
@@ -203,11 +201,11 @@ class List(Iterable) {
       _cap = _cap * 2 + 16
       _buffer = KLC_realloc_var_array(
         _buffer,
-        static_cast(size_t, old_cap),
-        static_cast(size_t, _cap),
+        dynamic_cast(size_t, old_cap),
+        dynamic_cast(size_t, _cap),
       )
     }
-    KLC_var_array_set(_buffer, static_cast(size_t, _size), x)
+    KLC_var_array_set(_buffer, dynamic_cast(size_t, _size), x)
     _size = _size + 1
   }
 
@@ -215,14 +213,14 @@ class List(Iterable) {
     if (i < 0 || i >= _size) {
       throw "Index out of bounds"
     }
-    KLC_var_array_get(_buffer, static_cast(size_t, i))
+    KLC_var_array_get(_buffer, dynamic_cast(size_t, i))
   }
 
   var __setitem(int i, var value) {
     if (i < 0 || i >= _size) {
       throw "Index out of bounds"
     }
-    KLC_var_array_set(_buffer, static_cast(size_t, i), value)
+    KLC_var_array_set(_buffer, dynamic_cast(size_t, i), value)
     value
   }
 
@@ -244,8 +242,8 @@ class List(Iterable) {
   delete {
     KLC_partial_release_var_array(
       _buffer,
-      static_cast(size_t, _size),
-      static_cast(size_t, _cap),
+      dynamic_cast(size_t, _size),
+      dynamic_cast(size_t, _cap),
       __delete_queue,
     )
   }
@@ -263,13 +261,28 @@ List `%listpush`(List list, var x) {
 bool `%eq`(var a, var b) {
   int tag_a = KLC_get_tag(a)
   int tag_b = KLC_get_tag(b)
-  if (tag_a != tag_b) {
-    static_cast(bool, 0)
-  } else if (tag_a == KLC_get_obj_tag()) {
-    bool r = a.__eq(b)
-    r
+  int obj_tag = KLC_get_obj_tag()
+  int int_tag = KLC_get_int_tag()
+  int float_tag = KLC_get_float_tag()
+  if (a is b) {
+    dynamic_cast(bool, 1)
+  } else if (tag_a is int_tag && tag_b is float_tag ||
+             tag_a is float_tag && tag_b is int_tag) {
+    float fa = a
+    float fb = b
+    fa is fb
+  } else if (tag_a != tag_b) {
+    dynamic_cast(bool, 0)
+  } else if (tag_a == obj_tag && tag_b == obj_tag) {
+    type ca = KLC_get_class(a)
+    type cb = KLC_get_class(b)
+    if (ca is cb) {
+      dynamic_cast(bool, a.__eq(b))
+    } else {
+      dynamic_cast(bool, 0)
+    }
   } else {
-    static_cast(bool, 1)
+    dynamic_cast(bool, 0)
   }
 }
 
@@ -303,6 +316,14 @@ String get_float_str(float x) {
   ret
 }
 
+String get_bool_str(bool x) {
+  if (x) {
+    "true"
+  } else {
+    "false"
+  }
+}
+
 String str(var x) {
   int tag = KLC_get_tag(x)
   if (tag == KLC_get_type_tag()) {
@@ -311,6 +332,8 @@ String str(var x) {
     get_int_str(x)
   } else if (tag == KLC_get_float_tag()) {
     get_float_str(x)
+  } else if (tag == KLC_get_bool_tag()) {
+    get_bool_str(x)
   } else {
     String s = x.__str()
     s
