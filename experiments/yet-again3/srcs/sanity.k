@@ -32,4 +32,6 @@ void main() {
   a_global_list.push(15)
   assert.equal(a_global_list, [15])
   assert(a_global_list != [16])
+
+  assert.equal([1, 2, 3].map(x => x + 1), [2, 3, 4])
 }

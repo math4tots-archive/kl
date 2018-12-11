@@ -2219,12 +2219,13 @@ def parser(ns):
             else:
                 ptok = peek()
                 pname = expect_id()
-                paramps = [Promise.value(pcall(
+                param_promise = pcall(
                     IR.Parameter,
                     ptok,
                     IR.VAR_TYPE,
                     pname,
-                ))]
+                )
+                paramps = [param_promise]
                 scope.set_promise(ptok, pname, param_promise)
             return Promise(lambda: IR.ParameterList(
                 token, [p.resolve() for p in paramps], False,

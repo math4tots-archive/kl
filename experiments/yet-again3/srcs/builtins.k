@@ -260,6 +260,18 @@ class List(Iterable) {
     str(sb)
   }
 
+  List map(var f) {
+    List ret = List()
+
+    int i = 0
+    while (i < _size) {
+      ret.push(f(this.__getitem(i)))
+      i = i + 1
+    }
+
+    ret
+  }
+
   delete {
     KLC_partial_release_var_array(
       _buffer,
