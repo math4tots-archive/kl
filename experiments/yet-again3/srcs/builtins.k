@@ -214,6 +214,22 @@ class List(Iterable) {
     _size = _size + 1
   }
 
+  bool __eq(List other) {
+    _size == other->_size && ${
+      int i = 0
+      bool result = true
+      while (i < _size) {
+        if (this.__getitem(i) == other.__getitem(i)) {
+          i = i + 1
+        } else {
+          result = false
+          i = i + 1
+        }
+      }
+      result
+    }
+  }
+
   var __getitem(int i) {
     if (i < 0 || i >= _size) {
       throw "Index out of bounds"

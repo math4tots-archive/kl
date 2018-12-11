@@ -1,4 +1,3 @@
-from builtins import KLC_release_vars_queued_for_exit
 from c import printf
 
 trait SomeTrait() {

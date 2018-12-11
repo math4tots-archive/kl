@@ -2568,7 +2568,8 @@ def parser(ns):
                         op,
                         right,
                     )
-                if isinstance(left.type, IR.Retainable):
+                if (isinstance(left.type, IR.Retainable) or
+                        isinstance(right.type, IR.Retainable)):
                     if op in _equality_op_table:
                         func_name = _equality_op_table[op]
                         if func_name in scope:
