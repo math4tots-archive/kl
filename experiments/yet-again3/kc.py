@@ -1317,6 +1317,13 @@ def IR(ns):
                 [expr.owner],
             )
 
+        if isinstance(expr, GetItem):
+            return IR.InstanceMethodCall(
+                expr.token,
+                '__getitem',
+                [expr.owner, expr.index],
+            )
+
         with scope.push(expr.token):
             raise scope.error(f'{expr} is not a value expression')
 
@@ -1726,6 +1733,13 @@ def IR(ns):
     class Malloc(Expression):
         node_fields = (
             ('type', Type),
+        )
+
+    @ns
+    class GetItem(PseudoExpression):
+        node_fields = (
+            ('owner', Expression.WITH_VAR_TYPE),
+            ('index', Expression.WITH_VAR_TYPE),
         )
 
     @ns
@@ -2835,6 +2849,14 @@ def parser(ns):
                     target.field_defn,
                     val,
                 )
+            elif isinstance(target, IR.GetItem):
+                return IR.InstanceMethodCall(
+                    token,
+                    '__setitem',
+                    [target.owner,
+                     target.index,
+                     scope.convert(val, IR.VAR_TYPE)],
+                )
             elif isinstance(target, IR.GlobalName):
                 with scope.push(token):
                     raise scope.error(
@@ -2861,6 +2883,16 @@ def parser(ns):
                     name = expect_id()
                     expr = promise_get_field_arrow(
                             scope, token, expr, name)
+                elif consume('['):
+                    index_expr_promise = parse_expression(scope)
+                    expect(']')
+                    expr = pcall(
+                        IR.GetItem,
+                        token,
+                        expr.map(lambda e: scope.convert(e, IR.VAR_TYPE)),
+                        index_expr_promise
+                            .map(lambda e: scope.convert(e, IR.VAR_TYPE)),
+                    )
                 elif consume('='):
                     valp = parse_expression(scope)
                     expr = pcall(process_assignment, scope, token, expr, valp)

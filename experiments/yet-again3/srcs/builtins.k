@@ -265,7 +265,7 @@ class List(Iterable) {
 
     int i = 0
     while (i < _size) {
-      ret.push(f(this.__getitem(i)))
+      ret.push(f(this[i]))
       i = i + 1
     }
 

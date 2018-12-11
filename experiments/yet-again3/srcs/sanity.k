@@ -34,4 +34,9 @@ void main() {
   assert(a_global_list != [16])
 
   assert.equal([1, 2, 3].map(x => x + 1), [2, 3, 4])
+  ${
+    var list = [1, 2, 3]
+    list[0] = 15
+    assert.equal(list, [15, 2, 3])
+  }
 }
