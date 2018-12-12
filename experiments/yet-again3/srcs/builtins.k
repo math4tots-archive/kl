@@ -213,6 +213,8 @@ class List(Iterable) {
   int _cap
   void* _buffer
 
+  class List unit(var x) = [x]
+
   static List new() = $(List)
 
   int __GETsize() = _size

@@ -883,22 +883,39 @@ def IR(ns):
         def static_methods(self):
             return [p.resolve() for p in self.static_method_promises]
 
+        @lazy(lambda: typeutil.List[ClassMethodDefinition])
+        def class_methods(self):
+            return [p.resolve() for p in self.class_method_promises]
+
+        @lazy(lambda: typeutil.List[ClassMethodDefinition])
+        def class_method_closure(self):
+            return self._collect_methods(
+                'class_methods',
+                'class_method_closure',
+            )
+
         @lazy(lambda: typeutil.List[BaseInstanceMethodDefinition])
         def instance_methods(self):
             return [p.resolve() for p in self.instance_method_promises]
 
         @lazy(lambda: typeutil.List[BaseInstanceMethodDefinition])
         def instance_method_closure(self):
+            return self._collect_methods(
+                'instance_methods',
+                'instance_method_closure',
+            )
+
+        def _collect_methods(self, methods_attr, closure_attr):
             methods = []
             seen = set()
 
-            for method in self.instance_methods:
+            for method in getattr(self, methods_attr):
                 if method.name not in seen:
                     methods.append(method)
                 seen.add(method.name)
 
             for trait in self.traits:
-                for method in trait.instance_method_closure:
+                for method in getattr(trait, closure_attr):
                     if method.name not in seen:
                         methods.append(method)
                     seen.add(method.name)
@@ -919,6 +936,7 @@ def IR(ns):
         node_fields = StructOrClassDefinition.node_fields + (
             ('delete_hook_promise', Promise),
             ('static_method_promises', typeutil.List[Promise]),
+            ('class_method_promises', typeutil.List[Promise]),
             ('instance_method_promises', typeutil.List[Promise]),
             ('traits_promise', Promise),
         )
@@ -939,12 +957,48 @@ def IR(ns):
             ('module_name', str),
             ('short_name', str),
             ('static_method_promises', typeutil.List[Promise]),
+            ('class_method_promises', typeutil.List[Promise]),
             ('instance_method_promises', typeutil.List[Promise]),
             ('traits_promise', Promise),
         )
 
     @ns
     class StaticMethodDefinition(Declaration):
+        node_fields = (
+            ('cls_promise', Promise),
+            ('rtype_promise', Promise),
+            ('name', str),
+            ('plist_promise', Promise),
+            ('body_promise', Promise),
+        )
+
+        @lazy(lambda: FunctionType)
+        def type(self):
+            return FunctionType(
+                extern=False,
+                rtype=self.rtype,
+                paramtypes=[p.type for p in self.plist.params],
+                vararg=self.plist.vararg,
+            )
+
+        @lazy(lambda: Type)
+        def rtype(self):
+            return self.rtype_promise.resolve()
+
+        @lazy(lambda: TraitOrClassDefinition)
+        def cls(self):
+            return self.cls_promise.resolve()
+
+        @lazy(lambda: ParameterList)
+        def plist(self):
+            return self.plist_promise.resolve()
+
+        @lazy(lambda: Block)
+        def body(self):
+            return self.body_promise.resolve()
+
+    @ns
+    class ClassMethodDefinition(Declaration):
         node_fields = (
             ('cls_promise', Promise),
             ('rtype_promise', Promise),
@@ -1259,6 +1313,16 @@ def IR(ns):
     ns(PRIMITIVE_TRUTHY_TYPES, 'PRIMITIVE_TRUTHY_TYPES')
 
     VAR_CONVERTIBLE_TYPES = {VOID, BOOL, TYPE} | NUMERIC_TYPES
+
+    STANDARD_PRIMITIVE_TYPES = {VOID, BOOL, INT, FLOAT, TYPE}
+
+    @ns
+    def is_standard_type(type):
+        return (
+            type == VAR_TYPE or
+            type in STANDARD_PRIMITIVE_TYPES or
+            isinstance(type, ClassDefinition)
+        )
 
     class VarType(Type, Retainable):
         pass
@@ -2729,21 +2793,35 @@ def parser(ns):
             field, = fields
             return field
 
-        def get_static_method(scope, token, cls, name):
+        def get_static_method_or_none(scope, token, cls, name):
             for method in cls.static_methods:
                 if method.name == name:
                     return method
-            with scope.push(token), scope.push(cls.token):
-                raise scope.error(
-                    f'No such static method with name {repr(name)}')
+
+        def get_static_method(scope, token, cls, name):
+            method = get_static_method_or_none(scope, token, cls, name)
+            if method:
+                return method
+            else:
+                with scope.push(token), scope.push(cls.token):
+                    raise scope.error(
+                        f'No such static method with name {repr(name)}')
 
         def promise_get_field(scope, token, exprp, fname):
             @Promise
             def promise():
                 expr = exprp.resolve()
                 if isinstance(expr, IR.TraitOrClassName):
-                    defn = get_static_method(scope, token, expr.cls, fname)
-                    return IR.StaticMethodName(token, defn)
+                    defn = get_static_method_or_none(
+                        scope, token, expr.cls, fname)
+                    if defn:
+                        return IR.StaticMethodName(token, defn)
+                    else:
+                        return IR.InstanceMethodReference(
+                            token,
+                            scope.convert(expr, IR.VAR_TYPE),
+                            fname,
+                        )
                 elif isinstance(expr.type, IR.StructDefinition):
                     defn = get_field_defn(scope, token, expr.type, fname)
                     return IR.GetStructField(
@@ -3336,6 +3414,7 @@ def parser(ns):
 
             field_promises = None if is_trait else []
             static_method_promises = []
+            class_method_promises = []
             instance_method_promises = []
 
             if is_trait:
@@ -3344,6 +3423,7 @@ def parser(ns):
                     module_name=module_name,
                     short_name=name,
                     static_method_promises=static_method_promises,
+                    class_method_promises=class_method_promises,
                     instance_method_promises=instance_method_promises,
                     traits_promise=traits_promise,
                 )
@@ -3356,6 +3436,7 @@ def parser(ns):
                     field_promises=field_promises,
                     delete_hook_promise=Promise(lambda: delete_hook_ptr[0]),
                     static_method_promises=static_method_promises,
+                    class_method_promises=class_method_promises,
                     instance_method_promises=instance_method_promises,
                     traits_promise=traits_promise,
                 )
@@ -3377,6 +3458,10 @@ def parser(ns):
                     )
                 elif consume('static'):
                     static_method_promises.append(parse_static_method(
+                        class_scope, member_token, defn,
+                    ))
+                elif consume('class'):
+                    class_method_promises.append(parse_class_method(
                         class_scope, member_token, defn,
                     ))
                 elif consume('extern'):
@@ -3492,6 +3577,28 @@ def parser(ns):
             )
             body_promise = parse_body(method_scope)
             defn_promise = Promise.value(IR.StaticMethodDefinition(
+                token,
+                Promise.value(cls),
+                rtype_promise,
+                name,
+                plist_promise,
+                body_promise,
+            ))
+            class_scope.set_promise(token, name, defn_promise)
+            return defn_promise
+
+        def parse_class_method(class_scope, token, cls):
+            rtype_promise = parse_type(class_scope)
+            method_scope = Scope(class_scope)
+            name = expect_id()
+            plist_promise = parse_param_list(method_scope)
+            method_scope['@ec'] = IR.ExpressionContext(
+                token=token,
+                extern=False,
+                this_type=IR.VAR_TYPE,
+            )
+            body_promise = parse_body(method_scope)
+            defn_promise = Promise.value(IR.ClassMethodDefinition(
                 token,
                 Promise.value(cls),
                 rtype_promise,
@@ -3699,13 +3806,15 @@ def C(ns):
     ENCODED_STRUCT_PREFIX = 'KLCST'
     ENCODED_STRUCT_FIELD_PREFIX = 'KLCSF'
     ENCODED_CLASS_DESCRIPTOR_PREFIX = 'KLCCP'
-    ENCODED_CLASS_MALLOC_PREFIX = 'KLCCM'
+    ENCODED_CLASS_MALLOC_PREFIX = 'KLCMM'
     ENCODED_CLASS_DELETE_HOOK_PREFIX = 'KLCDH'
     ENCODED_CLASS_DELETER_PREFIX = 'KLCCD'
     ENCODED_CLASS_STRUCT_PREFIX = 'KLCCS'
     ENCODED_CLASS_FIELD_PREFIX = 'KLCCF'
     ENCODED_METHOD_LIST_PREFIX = 'KLCML'
+    ENCODED_CLASS_METHOD_LIST_PREFIX = 'KLCCL'
     ENCODED_STATIC_METHOD_PREFIX = 'KLCSM'
+    ENCODED_CLASS_METHOD_PREFIX = 'KLCCM'
     ENCODED_INSTANCE_METHOD_PREFIX = 'KLCIM'
     ENCODED_LAMBDA_BODY_PREFIX = 'KLCLB'
     OUTPUT_PTR_NAME = 'KLC_output_ptr'
@@ -3741,6 +3850,7 @@ def C(ns):
         ],
         vararg=False,
     )
+    CLASS_METHOD_TYPE = METHOD_TYPE
     LAMBDA_BODY_FUNCTION_TYPE = IR.FunctionType(
         extern=False,
         rtype=IR.VAR_TYPE,
@@ -4135,9 +4245,13 @@ def C(ns):
                 for static_method in defn.static_methods:
                     fdecls += f'extern {proto_for(static_method)};'
 
+                for class_method in defn.class_methods:
+                    fdecls += f'extern {proto_for(class_method)};'
+
                 for instance_method in defn.instance_methods:
                     if not instance_method.extern:
                         fdecls += f'extern {proto_for(instance_method)};'
+
             elif isinstance(defn, IR.GlobalVariableDefinition):
                 assert not defn.extern, defn
                 getter_proto = get_global_var_getter_proto(defn)
@@ -4309,6 +4423,13 @@ def C(ns):
             prefix=ENCODED_METHOD_LIST_PREFIX,
         )
 
+    def get_class_method_list_name(defn: IR.ClassDefinition):
+        return qualify(
+            defn.module_name,
+            defn.short_name,
+            prefix=ENCODED_CLASS_METHOD_LIST_PREFIX,
+        )
+
     def get_class_c_struct_field_name(defn: IR.FieldDefinition):
         assert not defn.extern, defn
         return encode(defn.name, prefix=ENCODED_CLASS_FIELD_PREFIX)
@@ -4320,18 +4441,25 @@ def C(ns):
             prefix=ENCODED_STATIC_METHOD_PREFIX,
         )
 
-    get_instance_method_name = Multimethod('get_instance_method_name')
+    get_method_name = Multimethod('get_method_name')
 
-    @get_instance_method_name.on(IR.NormalInstanceMethodDefinition)
-    def get_instance_method_name(defn):
+    @get_method_name.on(IR.NormalInstanceMethodDefinition)
+    def get_method_name(defn):
         return encode(
             f'{defn.cls.module_name}#{defn.cls.short_name}#{defn.name}',
             prefix=ENCODED_INSTANCE_METHOD_PREFIX,
         )
 
-    @get_instance_method_name.on(IR.ExternInstanceMethodDefinition)
-    def get_instance_method_name(defn):
+    @get_method_name.on(IR.ExternInstanceMethodDefinition)
+    def get_method_name(defn):
         return defn.c_function_name
+
+    @get_method_name.on(IR.ClassMethodDefinition)
+    def get_method_name(defn):
+        return encode(
+            f'{defn.cls.module_name}#{defn.cls.short_name}#{defn.name}',
+            prefix=ENCODED_CLASS_METHOD_PREFIX,
+        )
 
     def get_lambda_body_name(defn: IR.LambdaCode):
         return qualify(
@@ -4380,7 +4508,7 @@ def C(ns):
 
     # @cvarname.on(IR.BaseInstanceMethodDefinition)
     # def cvarname(self):
-    #     return get_instance_method_name(self)
+    #     return get_method_name(self)
 
     declare = Multimethod('declare')
 
@@ -4657,32 +4785,56 @@ def C(ns):
         for static_method in self.static_methods:
             D(static_method, ctx)
 
+        for class_method in self.class_methods:
+            D(class_method, ctx)
+
         for instance_method in self.instance_methods:
             if not instance_method.extern:
                 D(instance_method, ctx)
 
+    def emit_method_list(ctx, method_list_name, method_closure):
+        sorted_methods = (
+            sorted(method_closure, key=lambda method: method.name)
+        )
+
+        if sorted_methods:
+            ctx.out += f'KLC_MethodEntry {method_list_name}[] = ' '{'
+            with ctx.push_indent(1):
+                for method in sorted_methods:
+                    ctx.out += '{'
+                    with ctx.push_indent(1):
+                        method_c_name = get_method_name(method)
+                        ctx.out += f'"{method.name}",'
+                        ctx.out += f'&{method_c_name},'
+                    ctx.out += '},'
+            ctx.out += '};'
+
+    def emit_method_list_in_descriptor(ctx, method_list_name, n):
+        if n:
+            ctx.out += f'sizeof({method_list_name})/sizeof(KLC_MethodEntry),'
+            ctx.out += f'{method_list_name},'
+        else:
+            ctx.out += '0,'
+            ctx.out += 'NULL,'
+
     def emit_trait_or_class_descriptor(self, ctx):
         assert isinstance(self, IR.TraitOrClassDefinition), self
         method_list_name = get_method_list_name(self)
+        class_method_list_name = get_class_method_list_name(self)
         descriptor_name = get_class_descriptor_name(self)
         sorted_instance_methods = sorted(
             self.instance_method_closure,
             key=lambda method: method.name,
         )
+        sorted_class_methods = sorted(
+            self.class_method_closure,
+            key=lambda method: method.name,
+        )
 
-        if sorted_instance_methods:
-            ctx.out += f'KLC_MethodEntry {method_list_name}[] = ' '{'
-            with ctx.push_indent(1):
-                for instance_method in sorted_instance_methods:
-                    ctx.out += '{'
-                    with ctx.push_indent(1):
-                        method_c_name = (
-                            get_instance_method_name(instance_method)
-                        )
-                        ctx.out += f'"{instance_method.name}",'
-                        ctx.out += f'&{method_c_name},'
-                    ctx.out += '},'
-            ctx.out += '};'
+        emit_method_list(
+            ctx, method_list_name, self.instance_method_closure)
+        emit_method_list(
+            ctx, class_method_list_name, self.class_method_closure)
 
         ctx.out += f'KLC_Class {descriptor_name} = ' '{'
         with ctx.push_indent(1):
@@ -4693,14 +4845,19 @@ def C(ns):
                 ctx.out += f'NULL,'
             else:
                 ctx.out += f'&{get_class_deleter_name(self)},'
-            if sorted_instance_methods:
-                ctx.out += (
-                    f'sizeof({method_list_name})/sizeof(KLC_MethodEntry),'
-                )
-                ctx.out += f'{method_list_name},'
-            else:
-                ctx.out += '0,'
-                ctx.out += 'NULL,'
+
+            emit_method_list_in_descriptor(
+                ctx,
+                method_list_name,
+                len(sorted_instance_methods),
+            )
+
+            emit_method_list_in_descriptor(
+                ctx,
+                class_method_list_name,
+                len(sorted_class_methods),
+            )
+
         ctx.out += '};'
 
     @D.on(IR.ClassDefinition)
@@ -4731,28 +4888,51 @@ def C(ns):
             body=self.body,
         )
 
-    @D.on(IR.NormalInstanceMethodDefinition)
+    @D.on(IR.ClassMethodDefinition)
     def D(self, ctx):
-        token = self.token
-        this_type = self.this_type
-        emit_function_body(
+        emit_dynamic_function_body(
             ctx=ctx,
+            token=self.token,
             debug_name=f'{self.cls.short_name}.{self.name}',
             proto=proto_for(self),
+            plist=self.plist,
+            this_type=IR.TYPE,
+            rtype=self.rtype,
+            body=self.body,
+        )
+
+    @D.on(IR.NormalInstanceMethodDefinition)
+    def D(self, ctx):
+        emit_dynamic_function_body(
+            ctx=ctx,
+            token=self.token,
+            debug_name=f'{self.cls.short_name}.{self.name}',
+            proto=proto_for(self),
+            plist=self.plist,
+            this_type=self.this_type,
+            rtype=self.rtype,
+            body=self.body,
+        )
+
+    def emit_dynamic_function_body(
+            *, ctx, token, debug_name, proto, plist, this_type, rtype, body):
+        emit_function_body(
+            ctx=ctx,
+            debug_name=debug_name,
+            proto=proto,
             extern=False,
             rtype=IR.VAR_TYPE,
             start_callback=lambda ctx: copy_dynamic_params_to_locals(
                 ctx=ctx,
-                token=self.token,
+                token=token,
                 paramtypes=
-                    [this_type] + [p.type for p in self.plist.params],
+                    [this_type] + [p.type for p in plist.params],
                 c_local_names=
-                    [THIS_NAME] + list(map(cvarname, self.plist.params)),
+                    [THIS_NAME] + list(map(cvarname, plist.params)),
             ),
             body=IR.Cast(
                 token,
-                self.body if self.rtype == IR.VOID else
-                    IR.Cast(token, self.body, self.rtype),
+                body if rtype == IR.VOID else IR.Cast(token, body, rtype),
                 IR.VAR_TYPE,
             ),
         )
@@ -4801,11 +4981,19 @@ def C(ns):
             encode_param_names(self.plist),
         )
 
+    @proto_for.on(IR.ClassMethodDefinition)
+    def proto_for(self):
+        return declare(
+            CLASS_METHOD_TYPE,
+            get_method_name(self),
+            [DYNAMIC_PARAM_ARGC_NAME, METHOD_PARAM_ARGV_NAME],
+        )
+
     @proto_for.on(IR.NormalInstanceMethodDefinition)
     def proto_for(self):
         return declare(
             METHOD_TYPE,
-            get_instance_method_name(self),
+            get_method_name(self),
             [DYNAMIC_PARAM_ARGC_NAME, METHOD_PARAM_ARGV_NAME],
         )
 

@@ -228,6 +228,29 @@ static KLC_Error* KLC_float_method_mod(KLC_Stack* stack, KLC_var* out, int argc,
 }
 */
 
+static KLC_MethodEntry* KLC_find_method_in_list(
+    KLC_MethodEntry* buf, size_t len, const char* name) {
+  size_t lower = 0;
+  size_t upper = len;
+  if (len == 0) {
+    return NULL;
+  }
+  for (;;) {
+    size_t mid = (lower + upper) / 2;
+    int cmp = strcmp(buf[mid].name, name);
+    if (cmp == 0) {
+      return buf + mid;
+    } else if (lower == mid) {
+      break;
+    } else if (cmp < 0) {
+      lower = mid;
+    } else {
+      upper = mid;
+    }
+  }
+  return NULL;
+}
+
 char* KLC_CopyString(const char* s) {
   char* ret = (char*) malloc(sizeof(char) * (strlen(s) + 1));
   strcpy(ret, s);
@@ -652,54 +675,60 @@ KLC_Class* KLC_get_class(KLC_var v) {
 }
 
 KLC_MethodEntry* KLC_find_method(KLC_Class* cls, const char* name) {
-  size_t lower = 0;
-  size_t upper = cls->number_of_methods;
-  if (cls->number_of_methods == 0) {
-    return NULL;
-  }
-  for (;;) {
-    size_t mid = (lower + upper) / 2;
-    int cmp = strcmp(cls->methods[mid].name, name);
-    if (cmp == 0) {
-      return cls->methods + mid;
-    } else if (lower == mid) {
-      break;
-    } else if (cmp < 0) {
-      lower = mid;
-    } else {
-      upper = mid;
-    }
-  }
-  return NULL;
+  return KLC_find_method_in_list(cls->methods, cls->number_of_methods, name);
+}
+
+KLC_MethodEntry* KLC_find_class_method(KLC_Class* cls, const char* name) {
+  return KLC_find_method_in_list(
+    cls->class_methods, cls->number_of_class_methods, name);
 }
 
 KLC_Error* KLC_call_method(
     KLC_Stack* stack, KLC_var* out, const char* name, int argc, KLC_var* argv) {
   KLC_Class* cls;
   KLC_MethodEntry* method_entry;
+  int is_class_method_call;
   if (argc < 1) {
     return KLC_errorf(
         0, stack, "FUBAR: KLC_call_method with argc < 1, argc = %d", argc);
   }
-  /* TODO: Method call for primitive types */
-  cls = KLC_get_class(argv[0]);
-  if (!cls) {
-    return KLC_errorf(
-      0,
-      stack,
-      "FUBAR: Could not get class for method call (tag = %s, method_name = %s)",
-      KLC_tag_to_str(argv[0].tag),
-      name
-    );
+  /* For types, we don't look up a method in its type type, but we search */
+  /* among its class methods. Strictly speaking, this kind of breaks */
+  /* orthogonality, but is also extremely convenient. */
+  is_class_method_call = (argv[0].tag == KLC_TAG_TYPE);
+
+  /* Determine which class to search method from */
+  if (is_class_method_call) {
+    cls = (KLC_Class*) argv[0].u.p;
+  } else {
+    cls = KLC_get_class(argv[0]);
+    if (!cls) {
+      return KLC_errorf(
+        0,
+        stack,
+        "FUBAR: Could not get class for method call (tag = %s, method_name = %s)",
+        KLC_tag_to_str(argv[0].tag),
+        name
+      );
+    }
   }
-  method_entry = KLC_find_method(cls, name);
+
+  /* Find the method entry */
+  if (is_class_method_call) {
+    method_entry = KLC_find_class_method(cls, name);
+  } else {
+    method_entry = KLC_find_method(cls, name);
+  }
+
   if (!method_entry) {
+    const char* method_type = is_class_method_call ? "Class method" : "Method";
     return KLC_errorf(
       strlen(name) +
         strlen(cls->module_name) +
         strlen(cls->short_name),
       stack,
-      "Method '%s' not found for '%s#%s'",
+      "%s '%s' not found for '%s#%s'",
+      method_type,
       name,
       cls->module_name,
       cls->short_name

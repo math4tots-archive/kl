@@ -40,6 +40,8 @@ struct KLC_Class {
   KLC_Deleter*const deleter;
   const size_t number_of_methods;
   KLC_MethodEntry* methods;
+  const size_t number_of_class_methods;
+  KLC_MethodEntry* class_methods;
 };
 
 struct KLC_var {
@@ -113,6 +115,7 @@ KLC_Error* KLC_var_to_type(KLC_Stack*, KLC_Class** out, KLC_var);
 
 KLC_Class* KLC_get_class(KLC_var);
 KLC_MethodEntry* KLC_find_method(KLC_Class*, const char*);
+KLC_MethodEntry* KLC_find_class_method(KLC_Class*, const char*);
 KLC_Error* KLC_call_method(KLC_Stack*, KLC_var*, const char*, int, KLC_var*);
 
 KLC_int KLC_get_tag(KLC_var x);

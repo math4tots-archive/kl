@@ -2,6 +2,13 @@
 
 List a_global_list = []
 
+trait SomeTrait {
+  class String someInheritedClassMethod() = 'someInheritedClassMethod result'
+}
+
+class SomeClass(SomeTrait) {
+}
+
 class StringPointer {
   String s
 }
@@ -59,4 +66,10 @@ void main() {
     }
     assert.equal(items, [1, 2, 3])
   }
+
+  // Test class methods
+  assert.equal(
+    SomeClass.someInheritedClassMethod(),
+    'someInheritedClassMethod result')
+  assert.equal(List.unit(10), [10])
 }
