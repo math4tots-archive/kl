@@ -61,14 +61,26 @@ void main() {
   ${
     var iter = [1, 2, 3].__iter()
     var items = []
-    while (iter.__hasNext()) {
-      items.push(iter.__next())
-    }
+    while (iter.__next(x => items.push(x))) {}
     assert.equal(items, [1, 2, 3])
   }
 
   assert.equal([1, 2, 3, 4, 5].filter(x => x < 3), [1, 2])
   assert.equal([1, 2, 3, 4, 5].filter(x => x > 3), [4, 5])
+
+  ${
+    int i = 0
+    var items = []
+    while (i < 100) {
+      items.push(str(i))
+      i = i + 1
+    }
+    assert.equal(items.size, 100)
+    assert.equal(items[0], '0')
+    assert.equal(items[-1], '99')
+    assert.equal(List.fromIterable(items), items)
+    assert(List.fromIterable(items) is not items)
+  }
 
   // Test class methods
   assert.equal(

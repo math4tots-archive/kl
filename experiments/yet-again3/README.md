@@ -11,4 +11,5 @@ This is all I'm shooting for right now.
 # TODO
 
 * Allow lambdas to capture 'this'
-* 'auto' variable declaration
+* (Maybe) Allow lambdas to take mutable captures of variables
+* 'auto' variable declarations (i.e. inferred type)

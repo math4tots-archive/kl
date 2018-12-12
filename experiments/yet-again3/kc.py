@@ -1219,6 +1219,9 @@ def IR(ns):
     VAR_NE_FUNCTION_NAME = '%ne'
     ns(VAR_NE_FUNCTION_NAME, 'VAR_NE_FUNCTION_NAME')
 
+    VAR_NOT_FUNCTION_NAME = '%not'
+    ns(VAR_NOT_FUNCTION_NAME, 'VAR_NOT_FUNCTION_NAME')
+
     STRING_CONVERSION_FUNCTION_NAME = '%str'
     ns(STRING_CONVERSION_FUNCTION_NAME, 'STRING_CONVERSION_FUNCTION_NAME')
 
@@ -2016,7 +2019,7 @@ def parser(ns):
         def get_this_type(self):
             this_type = self['@ec'].this_type
             if this_type is None:
-                raise scope.error(f'Not inside class instance context')
+                raise self.error(f'Not inside class instance context')
             return this_type
 
     class LambdaScope(Scope):
@@ -2060,6 +2063,7 @@ def parser(ns):
         IR.LAMBDA_FUNCTION_NAME,
         IR.VAR_EQ_FUNCTION_NAME,
         IR.VAR_NE_FUNCTION_NAME,
+        IR.VAR_NOT_FUNCTION_NAME,
         IR.EXCEPTION_CONVERSION_FUNCTION_NAME,
         IR.STRING_CONVERSION_FUNCTION_NAME,
         IR.NEW_LIST_FUNCTION_NAME,
@@ -2587,6 +2591,10 @@ def parser(ns):
             '!=': IR.VAR_NE_FUNCTION_NAME,
         }
 
+        _unary_op_table = {
+            '!': IR.VAR_NOT_FUNCTION_NAME,
+        }
+
         def promise_binop(scope, token, op, left_promise, right_promise):
             @Promise
             def promise():
@@ -2705,6 +2713,24 @@ def parser(ns):
                         op,
                         expr,
                     )
+                if op in _unary_op_table:
+                    func_name = _unary_op_table[op]
+                    if func_name in scope:
+                        return promise_fcall(
+                            scope=scope,
+                            token=token,
+                            function_promise=promise_name(
+                                scope,
+                                token,
+                                func_name,
+                            ),
+                            argsp=Promise(lambda: [expr]),
+                        ).resolve()
+                    else:
+                        with scope.push(token):
+                            raise scope.error(
+                                f'Unary operator {op} is not supported '
+                                f'in this context.')
                 with scope.push(token):
                     raise scope.error(f'Unsupported unary operation')
             return promise
@@ -4197,7 +4223,14 @@ def C(ns):
 
         for defn in module.definitions:
             if isinstance(defn, IR.FunctionDefinition):
-                fdecls += f'extern {proto_for(defn)};'
+                # While it is useful to explicitly specify the type
+                # of function for error checking purposes, sometimes
+                # extern functions are actually implemented as macros
+                # causing issues in the generated code.
+                # E.g. strcmp is perfectly fine with this on -O1,
+                # but fails to compile with this if -O3 is on.
+                if defn.body or not defn.extern:
+                    fdecls += f'extern {proto_for(defn)};'
             elif isinstance(defn, IR.PrimitiveTypeDefinition):
                 # These definitions are just to help the compiler,
                 # nothing actually needs to get emitted for this.
@@ -5060,7 +5093,7 @@ def C(ns):
     def E(self, ctx):
         assert self.type == IR.VOIDP
         retvar = ctx.declare(IR.VOIDP)
-        ctx.out == f'{retvar} = {DELETE_QUEUE_NAME};'
+        ctx.out += f'{retvar} = {DELETE_QUEUE_NAME};'
         return retvar
 
     @E.on(IR.SetLocalName)

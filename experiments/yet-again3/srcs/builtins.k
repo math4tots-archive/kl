@@ -88,8 +88,10 @@ class MappingIterator(Object) {
     ret
   }
 
-  bool __hasNext() = iterator.__hasNext()
-  var __next() = f(iterator.__next())
+  bool __next(var callback) {
+    MappingIterator that = this
+    iterator.__next(x => callback(that->f(x)))
+  }
 }
 
 class FilterIterator(Object) {
@@ -102,27 +104,22 @@ class FilterIterator(Object) {
     FilterIterator ret = $(FilterIterator)
     ret->iterator = iterator
     ret->f = f
-    ret._primeNext()
     ret
   }
 
-  void _primeNext() {
-    hasNext = false
-    while (iterator.__hasNext() && !hasNext) {
-      var x = iterator.__next()
-      if (f(x)) {
-        next = x
-        hasNext = true
+  bool __next(var callback) {
+    List found = [false]
+    FilterIterator that = this
+    var process = def(var x) {
+      if (that->f(x)) {
+        found[0] = true
+        callback(x)
       }
+      0
     }
-  }
-
-  bool __hasNext() = hasNext
-
-  var __next() {
-    var ret = next
-    _primeNext()
-    ret
+    while (!found[0] && iterator.__next(process)) {
+    }
+    found[0]
   }
 }
 
@@ -259,6 +256,14 @@ String `%str`(c_char const* cstr) = String.fromCString(cstr)
 
 String `%exception`(var s) = str(s)
 
+bool `%not`(var x) {
+  if (x) {
+    false
+  } else {
+    true
+  }
+}
+
 extern String KLC_str(c_char const* cstr) = String.fromCString(cstr)
 extern c_char const* KLC_cstr(String s) = s->_buffer
 
@@ -273,11 +278,14 @@ class ListIterator(Object) {
     ret
   }
 
-  bool __hasNext() = i < list->_size
-
-  var __next() {
-    i = i + 1
-    list[i - 1]
+  bool __next(var callback) {
+    if (i < list->_size) {
+      callback(list[i])
+      i = i + 1
+      true
+    } else {
+      false
+    }
   }
 }
 
@@ -291,8 +299,8 @@ class List(Iterable) {
   class List fromIterable(var iterable) {
     List ret = []
     var iterator = iterable.__iter()
-    while (iterator.__hasNext()) {
-      ret.push(iterator.__next())
+    var process = x => ret.push(x)
+    while (iterator.__next(process)) {
     }
     ret
   }
@@ -332,6 +340,9 @@ class List(Iterable) {
   }
 
   var __getitem(int i) {
+    if (i < 0) {
+      i = i + _size
+    }
     if (i < 0 || i >= _size) {
       throw "Index out of bounds"
     }
@@ -339,6 +350,9 @@ class List(Iterable) {
   }
 
   var __setitem(int i, var value) {
+    if (i < 0) {
+      i = i + _size
+    }
     if (i < 0 || i >= _size) {
       throw "Index out of bounds"
     }
