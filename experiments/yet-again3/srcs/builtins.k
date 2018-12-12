@@ -51,6 +51,12 @@ trait Object() {
   String __str() = this.__repr()
 }
 
+trait Iterator(Object) {
+  void forEachRemaining(var f) {
+    while (this.__next(f)) {}
+  }
+}
+
 trait Iterable(Object) {
   var map(var f) {
     var that = this
@@ -77,7 +83,7 @@ class ProxyIterable(Iterable) {
   var __iter() = newIterator()
 }
 
-class MappingIterator(Object) {
+class MappingIterator(Iterator) {
   var iterator
   var f
 
@@ -94,7 +100,7 @@ class MappingIterator(Object) {
   }
 }
 
-class FilterIterator(Object) {
+class FilterIterator(Iterator) {
   var iterator
   var f
   bool hasNext
@@ -267,7 +273,7 @@ bool `%not`(var x) {
 extern String KLC_str(c_char const* cstr) = String.fromCString(cstr)
 extern c_char const* KLC_cstr(String s) = s->_buffer
 
-class ListIterator(Object) {
+class ListIterator(Iterator) {
   List list
   int i
 
@@ -299,9 +305,7 @@ class List(Iterable) {
   class List fromIterable(var iterable) {
     List ret = []
     var iterator = iterable.__iter()
-    var process = x => ret.push(x)
-    while (iterator.__next(process)) {
-    }
+    iterator.forEachRemaining(x => ret.push(x))
     ret
   }
 
