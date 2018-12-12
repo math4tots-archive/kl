@@ -67,6 +67,9 @@ void main() {
     assert.equal(items, [1, 2, 3])
   }
 
+  assert.equal([1, 2, 3, 4, 5].filter(x => x < 3), [1, 2])
+  assert.equal([1, 2, 3, 4, 5].filter(x => x > 3), [4, 5])
+
   // Test class methods
   assert.equal(
     SomeClass.someInheritedClassMethod(),

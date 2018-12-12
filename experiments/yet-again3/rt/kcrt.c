@@ -44,10 +44,18 @@ static KLC_Error* KLC_int_method_sub(KLC_Stack* stack, KLC_var* out, int argc, K
 static KLC_Error* KLC_int_method_mul(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_int_method_div(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_int_method_mod(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_int_method_lt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_int_method_gt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_int_method_le(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_int_method_ge(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_add(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_sub(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_mul(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_div(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_float_method_lt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_float_method_gt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_float_method_le(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_float_method_ge(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 /*
 static KLC_Error* KLC_float_method_mod(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 */
@@ -56,17 +64,25 @@ static KLC_RelaseOnExitQueue exit_release_queue;
 
 static KLC_MethodEntry KLC_int_methods[] = {
   { "__add", KLC_int_method_add },
-  { "__sub", KLC_int_method_sub },
-  { "__mul", KLC_int_method_mul },
   { "__div", KLC_int_method_div },
+  { "__ge", KLC_int_method_ge },
+  { "__gt", KLC_int_method_gt },
+  { "__le", KLC_int_method_le },
+  { "__lt", KLC_int_method_lt },
   { "__mod", KLC_int_method_mod },
+  { "__mul", KLC_int_method_mul },
+  { "__sub", KLC_int_method_sub },
 };
 
 static KLC_MethodEntry KLC_float_methods[] = {
   { "__add", KLC_float_method_add },
-  { "__sub", KLC_float_method_sub },
-  { "__mul", KLC_float_method_mul },
   { "__div", KLC_float_method_div },
+  { "__ge", KLC_float_method_ge },
+  { "__gt", KLC_float_method_gt },
+  { "__le", KLC_float_method_le },
+  { "__lt", KLC_float_method_lt },
+  { "__mul", KLC_float_method_mul },
+  { "__sub", KLC_float_method_sub },
   /* { "__mod", KLC_float_method_mod }, */
 };
 
@@ -176,6 +192,46 @@ static KLC_Error* KLC_int_method_mod(KLC_Stack* stack, KLC_var* out, int argc, K
   return NULL;
 }
 
+static KLC_Error* KLC_int_method_lt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_INT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_INT); if (e) { return e; }
+  *out = KLC_var_from_bool(argv[0].u.i < argv[1].u.i);
+  return NULL;
+}
+
+static KLC_Error* KLC_int_method_gt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_INT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_INT); if (e) { return e; }
+  *out = KLC_var_from_bool(argv[0].u.i > argv[1].u.i);
+  return NULL;
+}
+
+static KLC_Error* KLC_int_method_le(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_INT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_INT); if (e) { return e; }
+  *out = KLC_var_from_bool(argv[0].u.i <= argv[1].u.i);
+  return NULL;
+}
+
+static KLC_Error* KLC_int_method_ge(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_INT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_INT); if (e) { return e; }
+  *out = KLC_var_from_bool(argv[0].u.i >= argv[1].u.i);
+  return NULL;
+}
+
 static KLC_Error* KLC_float_method_add(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
   KLC_var ret;
   KLC_Error* e;
@@ -213,6 +269,46 @@ static KLC_Error* KLC_float_method_div(KLC_Stack* stack, KLC_var* out, int argc,
   e = KLC_expect_tag(stack, argv[0], KLC_TAG_FLOAT); if (e) { return e; }
   e = KLC_expect_tag(stack, argv[1], KLC_TAG_FLOAT); if (e) { return e; }
   *out = KLC_var_from_float(argv[0].u.f / argv[1].u.f);
+  return NULL;
+}
+
+static KLC_Error* KLC_float_method_lt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_FLOAT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_FLOAT); if (e) { return e; }
+  *out = KLC_var_from_float(argv[0].u.f < argv[1].u.f);
+  return NULL;
+}
+
+static KLC_Error* KLC_float_method_gt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_FLOAT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_FLOAT); if (e) { return e; }
+  *out = KLC_var_from_float(argv[0].u.f > argv[1].u.f);
+  return NULL;
+}
+
+static KLC_Error* KLC_float_method_le(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_FLOAT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_FLOAT); if (e) { return e; }
+  *out = KLC_var_from_float(argv[0].u.f <= argv[1].u.f);
+  return NULL;
+}
+
+static KLC_Error* KLC_float_method_ge(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_FLOAT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_FLOAT); if (e) { return e; }
+  *out = KLC_var_from_float(argv[0].u.f >= argv[1].u.f);
   return NULL;
 }
 

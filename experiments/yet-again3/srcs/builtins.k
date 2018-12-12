@@ -57,6 +57,12 @@ trait Iterable(Object) {
     typeof(this).fromIterable(
       ProxyIterable(() => MappingIterator(that.__iter(), f)))
   }
+
+  var filter(var f) {
+    var that = this
+    typeof(this).fromIterable(
+      ProxyIterable(() => FilterIterator(that.__iter(), f)))
+  }
 }
 
 class ProxyIterable(Iterable) {
@@ -86,18 +92,38 @@ class MappingIterator(Object) {
   var __next() = f(iterator.__next())
 }
 
-class MappedIterable(Iterable) {
-  var iterable
+class FilterIterator(Object) {
+  var iterator
   var f
+  bool hasNext
+  var next
 
-  static MappedIterable new(var iterable, var f) {
-    MappedIterable ret = $(MappedIterable)
-    ret->iterable = iterable
+  static FilterIterator new(var iterator, var f) {
+    FilterIterator ret = $(FilterIterator)
+    ret->iterator = iterator
     ret->f = f
+    ret._primeNext()
     ret
   }
 
-  var __iter() = MappingIterator(iterable.__iter(), f)
+  void _primeNext() {
+    hasNext = false
+    while (iterator.__hasNext() && !hasNext) {
+      var x = iterator.__next()
+      if (f(x)) {
+        next = x
+        hasNext = true
+      }
+    }
+  }
+
+  bool __hasNext() = hasNext
+
+  var __next() {
+    var ret = next
+    _primeNext()
+    ret
+  }
 }
 
 extern type typeof(var x) = KLC_get_class(x)
