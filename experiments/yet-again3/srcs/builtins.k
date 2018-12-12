@@ -52,21 +52,55 @@ trait Object() {
 }
 
 trait Iterable(Object) {
+  var map(var f) {
+    var that = this
+    typeof(this).fromIterable(
+      ProxyIterable(() => MappingIterator(that.__iter(), f)))
+  }
 }
 
-class Iterator(Object) {
-  var _hasNext
-  var _next
+class ProxyIterable(Iterable) {
+  var newIterator
 
-  static Iterator new(var hasNext, var next) {
-    Iterator ret = $(Iterator)
-    ret->_hasNext = hasNext
-    ret->_next = next
+  static ProxyIterable new(var newIterator) {
+    ProxyIterable ret = $(ProxyIterable)
+    ret->newIterator = newIterator
     ret
   }
-  bool __hasNext() = _hasNext()
-  var __next() = _next()
+
+  var __iter() = newIterator()
 }
+
+class MappingIterator(Object) {
+  var iterator
+  var f
+
+  static MappingIterator new(var iterator, var f) {
+    MappingIterator ret = $(MappingIterator)
+    ret->iterator = iterator
+    ret->f = f
+    ret
+  }
+
+  bool __hasNext() = iterator.__hasNext()
+  var __next() = f(iterator.__next())
+}
+
+class MappedIterable(Iterable) {
+  var iterable
+  var f
+
+  static MappedIterable new(var iterable, var f) {
+    MappedIterable ret = $(MappedIterable)
+    ret->iterable = iterable
+    ret->f = f
+    ret
+  }
+
+  var __iter() = MappingIterator(iterable.__iter(), f)
+}
+
+extern type typeof(var x) = KLC_get_class(x)
 
 class assert() {
   static void new(bool cond) {
@@ -202,10 +236,23 @@ String `%exception`(var s) = str(s)
 extern String KLC_str(c_char const* cstr) = String.fromCString(cstr)
 extern c_char const* KLC_cstr(String s) = s->_buffer
 
-class _ListIteratorState(Object) {
+class ListIterator(Object) {
+  List list
   int i
 
-  static _ListIteratorState new() = $(_ListIteratorState)
+  static ListIterator new(List list) {
+    ListIterator ret = $(ListIterator)
+    ret->list = list
+    ret->i = 0
+    ret
+  }
+
+  bool __hasNext() = i < list->_size
+
+  var __next() {
+    i = i + 1
+    list[i - 1]
+  }
 }
 
 class List(Iterable) {
@@ -214,6 +261,15 @@ class List(Iterable) {
   void* _buffer
 
   class List unit(var x) = [x]
+
+  class List fromIterable(var iterable) {
+    List ret = []
+    var iterator = iterable.__iter()
+    while (iterator.__hasNext()) {
+      ret.push(iterator.__next())
+    }
+    ret
+  }
 
   static List new() = $(List)
 
@@ -279,30 +335,7 @@ class List(Iterable) {
     str(sb)
   }
 
-  Iterator __iter() {
-    _ListIteratorState state = _ListIteratorState()
-    state->i = 0
-    List list = this
-
-    Iterator(
-      () => state->i < list->_size,
-      () => ${
-        state->i = state->i + 1
-        list[state->i - 1]
-      })
-  }
-
-  List map(var f) {
-    List ret = List()
-
-    int i = 0
-    while (i < _size) {
-      ret.push(f(this[i]))
-      i = i + 1
-    }
-
-    ret
-  }
+  ListIterator __iter() = ListIterator(this)
 
   delete {
     KLC_partial_release_var_array(

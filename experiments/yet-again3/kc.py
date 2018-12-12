@@ -1951,7 +1951,8 @@ def parser(ns):
 
         def set_promise(self, token: Token, key: str, p: Promise):
             if key in self.table:
-                with self.push(token), self.push(self.table[key].token):
+                with self.push(token), self.push(
+                        self.table[key].resolve().token):
                     raise self.error(f'Duplicate definition of {repr(key)}')
             self.table[key] = p
 
@@ -2069,6 +2070,7 @@ def parser(ns):
         'List',
         'print',
         'str',
+        'typeof',
     )
 
     def promise_this(scope, token):
@@ -2829,8 +2831,7 @@ def parser(ns):
                         expr,
                         defn,
                     )
-                elif isinstance(expr.type, IR.ClassDefinition) or (
-                        expr.type == IR.VAR_TYPE):
+                elif IR.is_standard_type(expr.type):
                     return IR.InstanceMethodReference(
                         token,
                         scope.convert(expr, IR.VAR_TYPE),
@@ -3151,6 +3152,11 @@ def parser(ns):
         def promise_lambda(
                 scope, token, rtype_promise, plist_promise, body_promise):
             assert isinstance(scope, LambdaScope)
+            scope['@ec'] = IR.ExpressionContext(
+                token=token,
+                extern=False,
+                this_type=None,
+            )
             @Promise
             def promise():
                 if IR.LAMBDA_FUNCTION_NAME not in scope:
