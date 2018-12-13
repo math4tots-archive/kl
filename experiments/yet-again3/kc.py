@@ -1,10 +1,13 @@
+import abc
 import argparse
 import collections
 import contextlib
 import itertools
 import os
 import re
-import shutil
+import shlex
+import subprocess
+import sys
 import typing
 
 _scriptdir = os.path.dirname(os.path.realpath(__file__))
@@ -5728,6 +5731,108 @@ def C(ns):
 
 
 @Namespace
+def Platform(ns):
+    LIST = (
+        'linux',
+    )
+    ns(LIST, 'LIST')
+
+    @ns
+    def get_source_platform():
+        if sys.platform == 'linux':
+            return 'linux'
+        raise TypeError(f'Unrecognized platfrom {sys.platform}')
+
+    @ns
+    def get_default_binary_name(platform):
+        if platform == 'windows':
+            return 'a.exe'
+        else:
+            return 'a.out'
+
+    class Compiler(abc.ABC):
+        """
+        Base Compiler class.
+        Subclasses would implement specific features for
+        each platform.
+        """
+
+        @abc.abstractmethod
+        def compile(self, args, module_table):
+            pass
+
+    class SimpleCompiler(Compiler):
+        """
+        A simple compiler implementation that does
+        everything it needs to in one command.
+        """
+
+        def compile(self, args, module_table):
+            cmd = self.build_command(args, module_table)
+            subprocess.run(cmd, check=True)
+
+        @abc.abstractmethod
+        def build_command(self, args, module_table) -> typing.List[str]:
+            pass
+
+    class Linux(SimpleCompiler):
+        """
+        Basic compiler for Linux desktops,
+        assumes gcc is available.
+        """
+
+        def build_command(self, args, module_table):
+            cmd = [
+                'gcc',
+                '-std=c89',
+                '-Wall', '-Werror', '-Wpedantic',
+                '-Wno-unused-but-set-variable',
+                '-Wno-unused-function',
+                '-Wno-unused-label',
+                '-Wno-unused-variable',
+            ]
+
+            cmd.extend(['-o', args.binary_name])
+
+            if args.debugging_symbols:
+                cmd.append('-g')
+
+            if args.optimize:
+                cmd.append('-O3')
+
+            src_dirs = [os.path.abspath(path) for path in
+                [args.runtime_sources_directory] +
+                [args.out_srcs_dir]
+            ]
+
+            for src_dir in src_dirs:
+                quoted_path = shlex.quote(src_dir)
+                cmd.append(f'-I{quoted_path}')
+
+            for src_dir in src_dirs:
+                for file_name in os.listdir(src_dir):
+                    if file_name.endswith('.c'):
+                        file_path = os.path.join(src_dir, file_name)
+                        cmd.append(file_path)
+
+            # Link the standard math library.
+            # This has to come last
+            cmd.append('-lm')
+
+            return cmd
+
+    def get_compiler_for_platform(platform):
+        if platform == 'linux':
+            return Linux()
+        else:
+            raise TypeError(f'Unsupported compile platform {platform}')
+
+    @ns
+    def compile(*, args, module_table):
+        get_compiler_for_platform(args.platform).compile(args, module_table)
+
+
+@Namespace
 def Main(ns):
 
     aparser = argparse.ArgumentParser()
@@ -5753,7 +5858,10 @@ def Main(ns):
 
     def _set_parse_args(aparser):
         aparser.add_argument('filename')
-        aparser.add_argument('--search-dir', default='srcs')
+        aparser.add_argument(
+            '--search-dir',
+            default=os.path.join(_scriptdir, 'srcs'),
+        )
 
     def _parse(args):
         source = Source.from_name_and_path('main', args.filename)
@@ -5770,20 +5878,89 @@ def Main(ns):
 
     def _set_translate_args(aparser):
         _set_parse_args(aparser)
-        aparser.add_argument('--out-dir', default='out')
+        aparser.add_argument(
+            '--out-srcs-dir',
+            default=os.path.join(_scriptdir, 'out'),
+        )
 
     def _translate(args, module_table):
         tu_table = {
             name: C.translate(module) for name, module in module_table.items()
         }
         for tu in tu_table.values():
-            C.write_out(tu, out_dir=args.out_dir)
+            C.write_out(tu, out_dir=args.out_srcs_dir)
 
     @command
     def translate(aparser):
         _set_translate_args(aparser)
         args = yield
         _translate(args=args, module_table=_parse(args))
+
+    def _set_compile_args(aparser):
+        _set_translate_args(aparser)
+        aparser.add_argument('--platform', default=None)
+        aparser.add_argument('--binary-name', '-o', default=None)
+        aparser.add_argument(
+            '--runtime-sources-directory',
+            default=os.path.join(_scriptdir, 'rt'),
+        )
+        aparser.add_argument(
+            '--debugging-symbols', '-g',
+            action='store_true',
+            default=False,
+        )
+        aparser.add_argument(
+            '--optimize', '-O3',
+            action='store_true',
+            default=False,
+        )
+
+    def _process_compile_args(args):
+        if args.platform is None:
+            args.platform = Platform.get_source_platform()
+
+        if args.platform not in Platform.LIST:
+            raise TypeError(
+                f'{args.platform} is not a recognized platform; '
+                f'choose from one of {Platform.LIST}')
+
+        if args.binary_name is None:
+            args.binary_name = (
+                Platform.get_default_binary_name(args.platform)
+            )
+
+    def _compile(args, module_table):
+        Platform.compile(args=args, module_table=module_table)
+
+    @command
+    def compile(aparser):
+        _set_compile_args(aparser)
+        args = yield
+        _process_compile_args(args)
+        module_table = _parse(args)
+        _translate(args=args, module_table=module_table)
+        _compile(args=args, module_table=module_table)
+
+    def _set_run_args(aparser):
+        _set_compile_args(aparser)
+        aparser.add_argument('binary_args', nargs='*')
+
+    def _process_run_args(args):
+        _process_compile_args(args)
+
+    def _run(args):
+        bin_path = os.path.join(_scriptdir, args.binary_name)
+        subprocess.run([bin_path] + args.binary_args, check=True)
+
+    @command
+    def run(aparser):
+        _set_run_args(aparser)
+        args = yield
+        _process_run_args(args)
+        module_table = _parse(args)
+        _translate(args=args, module_table=module_table)
+        _compile(args=args, module_table=module_table)
+        _run(args=args)
 
 
 if __name__ == '__main__':
