@@ -1403,6 +1403,14 @@ def IR(ns):
         if value_expr.type == dest_type:
             return value_expr
 
+        if value_expr.type == VOID and dest_type == IR.VAR_TYPE:
+            token = expr.token
+            return IR.Block(
+                token,
+                [],
+                [value_expr, IR.NullLiteral(token)],
+            )
+
         if value_expr.type == VOID:
             with scope.push(expr.token):
                 scope.error(f'Got void type but expected {dest_type}')

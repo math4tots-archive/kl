@@ -96,4 +96,10 @@ void main() {
     SomeClass.someInheritedClassMethod(),
     'someInheritedClassMethod result')
   assert.equal(List.unit(10), [10])
+
+  // Test lambda functions that return void
+  ${
+    var f = def void() {}
+    assert.equal(f(), null)
+  }
 }

@@ -121,7 +121,6 @@ class FilterIterator(Iterator) {
         found[0] = true
         callback(x)
       }
-      0
     }
     while (!found[0] && iterator.__next(process)) {
     }
