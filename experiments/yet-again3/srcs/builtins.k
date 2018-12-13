@@ -58,29 +58,56 @@ trait Iterator(Object) {
 }
 
 trait Iterable(Object) {
+
+  Stream stream() = Stream.fromIterable(this)
+
+  var to(var collector) = collector.fromIterable(this)
+
   var map(var f) {
     var that = this
     typeof(this).fromIterable(
-      ProxyIterable(() => MappingIterator(that.__iter(), f)))
+      Stream(() => MappingIterator(that.__iter(), f)))
   }
 
   var filter(var f) {
     var that = this
     typeof(this).fromIterable(
-      ProxyIterable(() => FilterIterator(that.__iter(), f)))
+      Stream(() => FilterIterator(that.__iter(), f)))
+  }
+
+  void forEach(var f) {
+    this.__iter().forEachRemaining(f)
   }
 }
 
-class ProxyIterable(Iterable) {
+class Stream(Iterable) {
+  // A lazy Iterable defined by a function that knows
+  // how to produce new iterators.
+
   var newIterator
 
-  static ProxyIterable new(var newIterator) {
-    ProxyIterable ret = $(ProxyIterable)
+  class Stream fromIterable(var iterable) {
+    if (typeof(iterable) is Stream) {
+      iterable
+    } else {
+      Stream(() => iterable.__iter())
+    }
+  }
+
+  static Stream new(var newIterator) {
+    Stream ret = $(Stream)
     ret->newIterator = newIterator
     ret
   }
 
+  Stream stream() = this
+
   var __iter() = newIterator()
+
+  Stream take(int n) {
+    var iteratorFactory = newIterator
+    Stream(() => TakeIterator(iteratorFactory(), n))
+  }
 }
 
 class MappingIterator(Iterator) {
@@ -125,6 +152,58 @@ class FilterIterator(Iterator) {
     while (!found[0] && iterator.__next(process)) {
     }
     found[0]
+  }
+}
+
+Stream range(int start, int end) {
+  Stream(() => SimpleIntRangeIterator(start, end))
+}
+
+class SimpleIntRangeIterator(Iterator) {
+  int i
+  int limit
+
+  static SimpleIntRangeIterator new(int start, int end) {
+    SimpleIntRangeIterator iter = $(SimpleIntRangeIterator)
+    iter->i = start
+    iter->limit = end
+    iter
+  }
+
+  bool __next(var callback) {
+    if (i < limit) {
+      callback(i)
+      i = i + 1
+      true
+    } else {
+      false
+    }
+  }
+}
+
+class TakeIterator(Iterator) {
+  var iterator
+  int remaining
+
+  static TakeIterator new(var iterator, int remaining) {
+    TakeIterator ret = $(TakeIterator)
+    ret->iterator = iterator
+    ret->remaining = remaining
+    ret
+  }
+
+  bool __next(var callback) {
+    if (remaining > 0) {
+      if (iterator.__next(callback)) {
+        remaining = remaining - 1
+        true
+      } else {
+        remaining = 0
+        false
+      }
+    } else {
+      false
+    }
   }
 }
 

@@ -411,7 +411,7 @@ def lexer(ns):
     ns(KEYWORDS, 'KEYWORDS')
 
     SYMBOLS = tuple(reversed(sorted([
-      '\n', '=>',
+      '\n', '=>', '**',
       '||', '&&', '|', '&', '<<', '>>', '~', '...', '$', '->',
       ';', '#', '?', ':', '!', '++', '--',  # '**',
       '.', ',', '!', '@', '^', '&', '+', '-', '/', '%', '*', '.', '=', '==', '<',
@@ -2089,6 +2089,7 @@ def parser(ns):
         'print',
         'str',
         'typeof',
+        'range',
     )
 
     def promise_this(scope, token):
@@ -2579,12 +2580,12 @@ def parser(ns):
             return expr_promise
 
         def parse_multiplicative(scope):
-            expr_promise = parse_unary(scope)
+            expr_promise = parse_pow(scope)
             while True:
                 token = peek()
                 for op in ('*', '/', '%'):
                     if consume(op):
-                        right_promise = parse_unary(scope)
+                        right_promise = parse_pow(scope)
                         expr_promise = promise_binop(
                             scope,
                             token,
@@ -2603,6 +2604,7 @@ def parser(ns):
             '*': '__mul',
             '/': '__div',
             '%': '__mod',
+            '**': '__pow',
             '<': '__lt',
             '<=': '__le',
             '>': '__gt',
@@ -2680,8 +2682,8 @@ def parser(ns):
                         op,
                         right,
                     )
-                if (isinstance(left.type, IR.Retainable) or
-                        isinstance(right.type, IR.Retainable)):
+                if (IR.is_standard_type(left.type) or
+                        IR.is_standard_type(right.type)):
                     if op in _equality_op_table:
                         func_name = _equality_op_table[op]
                         if func_name in scope:
@@ -2757,6 +2759,20 @@ def parser(ns):
                 with scope.push(token):
                     raise scope.error(f'Unsupported unary operation')
             return promise
+
+        def parse_pow(scope):
+            expr_promise = parse_unary(scope)
+            token = peek()
+            if consume('**'):
+                return promise_binop(
+                    scope,
+                    token,
+                    '**',
+                    expr_promise,
+                    parse_pow(scope),
+                )
+            else:
+                return expr_promise
 
         def parse_unary(scope):
             token = peek()

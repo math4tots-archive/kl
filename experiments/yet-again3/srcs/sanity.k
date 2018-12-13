@@ -102,4 +102,22 @@ void main() {
     var f = def void() {}
     assert.equal(f(), null)
   }
+
+  // Test exponents
+  assert.equal(2 ** 0, 1)
+  assert(2 ** 0 is 1)
+  assert.equal(2 ** 10, 1024)
+  assert(2 ** 10 is not 1024.0)
+  assert.equal(9 ** 0.5, 3)
+  assert(2.0 ** 2 is 4.0)
+  assert(2 ** 2 is 4)
+
+  // Test streams
+  ${
+    assert.equal(range(10, 15).to(List), [10, 11, 12, 13, 14])
+    assert.equal(
+      range(0, 10 ** 9).take(5).to(List),
+      [0, 1, 2, 3, 4],
+    )
+  }
 }

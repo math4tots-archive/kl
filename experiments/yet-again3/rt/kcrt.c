@@ -1,4 +1,5 @@
 #include "kcrt.h"
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +45,7 @@ static KLC_Error* KLC_int_method_sub(KLC_Stack* stack, KLC_var* out, int argc, K
 static KLC_Error* KLC_int_method_mul(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_int_method_div(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_int_method_mod(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_int_method_pow(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_int_method_lt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_int_method_gt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_int_method_le(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
@@ -52,13 +54,12 @@ static KLC_Error* KLC_float_method_add(KLC_Stack* stack, KLC_var* out, int argc,
 static KLC_Error* KLC_float_method_sub(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_mul(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_div(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_float_method_mod(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
+static KLC_Error* KLC_float_method_pow(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_lt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_gt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_le(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
 static KLC_Error* KLC_float_method_ge(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
-/*
-static KLC_Error* KLC_float_method_mod(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv);
-*/
 
 static KLC_RelaseOnExitQueue exit_release_queue;
 
@@ -71,6 +72,7 @@ static KLC_MethodEntry KLC_int_methods[] = {
   { "__lt", KLC_int_method_lt },
   { "__mod", KLC_int_method_mod },
   { "__mul", KLC_int_method_mul },
+  { "__pow", KLC_int_method_pow },
   { "__sub", KLC_int_method_sub },
 };
 
@@ -81,9 +83,10 @@ static KLC_MethodEntry KLC_float_methods[] = {
   { "__gt", KLC_float_method_gt },
   { "__le", KLC_float_method_le },
   { "__lt", KLC_float_method_lt },
+  { "__mod", KLC_float_method_mod },
+  { "__pow", KLC_float_method_pow },
   { "__mul", KLC_float_method_mul },
   { "__sub", KLC_float_method_sub },
-  /* { "__mod", KLC_float_method_mod }, */
 };
 
 KLC_var KLC_null = {0};
@@ -137,7 +140,11 @@ static KLC_Error* KLC_expect_argc(KLC_Stack* stack, int argc, int exp) {
 
 static KLC_Error* KLC_expect_tag(KLC_Stack* stack, KLC_var x, int tag) {
   if (x.tag != tag) {
-    return KLC_errorf(0, stack, "Invalid type (wrong tag)");
+    return KLC_errorf(
+      0, stack, "Invalid type (wrong tag, expected %s but got %s)",
+      KLC_tag_to_str(tag),
+      KLC_tag_to_str(x.tag)
+    );
   }
   return NULL;
 }
@@ -189,6 +196,40 @@ static KLC_Error* KLC_int_method_mod(KLC_Stack* stack, KLC_var* out, int argc, K
   e = KLC_expect_tag(stack, argv[0], KLC_TAG_INT); if (e) { return e; }
   e = KLC_expect_tag(stack, argv[1], KLC_TAG_INT); if (e) { return e; }
   *out = KLC_var_from_int(argv[0].u.i % argv[1].u.i);
+  return NULL;
+}
+
+static KLC_int KLC_int_pow(KLC_int base, KLC_int exponent) {
+  /* TODO: Consider overflow */
+  /* TODO: Consider performance */
+  KLC_int result = 1;
+  while (exponent) {
+    if (exponent % 2) {
+      result *= base;
+    }
+    exponent /= 2;
+    base *= base;
+  }
+  return result;
+}
+
+static KLC_Error* KLC_int_method_pow(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_INT); if (e) { return e; }
+  /* It feels a little bad to be changing return type based on the */
+  /* value of an argument (i.e. exponent >= 0), but Python */
+  /* does this too. */
+  if (argv[1].tag == KLC_TAG_INT && argv[1].u.i >= 0) {
+    *out = KLC_var_from_int(KLC_int_pow(argv[0].u.i, argv[1].u.i));
+  } else if (argv[1].tag == KLC_TAG_INT) {
+    *out = KLC_var_from_float(pow(argv[0].u.i, argv[1].u.i));
+  } else if (argv[1].tag == KLC_TAG_FLOAT) {
+    *out = KLC_var_from_float(pow(argv[0].u.i, argv[1].u.f));
+  } else {
+    return KLC_expect_tag(stack, argv[1], KLC_TAG_INT);
+  }
   return NULL;
 }
 
@@ -272,6 +313,27 @@ static KLC_Error* KLC_float_method_div(KLC_Stack* stack, KLC_var* out, int argc,
   return NULL;
 }
 
+static KLC_Error* KLC_float_method_mod(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_FLOAT); if (e) { return e; }
+  e = KLC_expect_tag(stack, argv[1], KLC_TAG_FLOAT); if (e) { return e; }
+  *out = KLC_var_from_float(fmod(argv[0].u.f, argv[1].u.f));
+  return NULL;
+}
+
+static KLC_Error* KLC_float_method_pow(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
+  KLC_var ret;
+  KLC_Error* e;
+  KLC_float r;
+  e = KLC_expect_argc(stack, argc, 2);
+  e = KLC_expect_tag(stack, argv[0], KLC_TAG_FLOAT); if (e) { return e; }
+  e = KLC_var_to_float(stack, &r, argv[1]); if (e) { return e; }
+  *out = KLC_var_from_float(pow(argv[0].u.f, r));
+  return NULL;
+}
+
 static KLC_Error* KLC_float_method_lt(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
   KLC_var ret;
   KLC_Error* e;
@@ -311,18 +373,6 @@ static KLC_Error* KLC_float_method_ge(KLC_Stack* stack, KLC_var* out, int argc, 
   *out = KLC_var_from_float(argv[0].u.f >= argv[1].u.f);
   return NULL;
 }
-
-/*
-static KLC_Error* KLC_float_method_mod(KLC_Stack* stack, KLC_var* out, int argc, KLC_var* argv) {
-  KLC_var ret;
-  KLC_Error* e;
-  e = KLC_expect_argc(stack, argc, 2);
-  e = KLC_expect_tag(stack, argv[0], KLC_TAG_FLOAT); if (e) { return e; }
-  e = KLC_expect_tag(stack, argv[1], KLC_TAG_FLOAT); if (e) { return e; }
-  *out = KLC_var_from_float(argv[0].u.f % argv[1].u.f);
-  return NULL;
-}
-*/
 
 static KLC_MethodEntry* KLC_find_method_in_list(
     KLC_MethodEntry* buf, size_t len, const char* name) {
