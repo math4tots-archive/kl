@@ -5734,6 +5734,7 @@ def C(ns):
 def Platform(ns):
     LIST = (
         'linux',
+        'osx',
     )
     ns(LIST, 'LIST')
 
@@ -5741,6 +5742,8 @@ def Platform(ns):
     def get_source_platform():
         if sys.platform == 'linux':
             return 'linux'
+        elif sys.platform == 'darwin':
+            return 'osx'
         raise TypeError(f'Unrecognized platfrom {sys.platform}')
 
     @ns
@@ -5816,14 +5819,55 @@ def Platform(ns):
                         cmd.append(file_path)
 
             # Link the standard math library.
+            # Even though it's standard, in linux environments
+            # it's often not linked unless explicitly requested.
             # This has to come last
             cmd.append('-lm')
+
+            return cmd
+
+    class OSX(SimpleCompiler):
+        def build_command(self, args, module_table):
+            cmd = [
+                'clang',
+                '-std=c89',
+                '-Wall', '-Werror', '-Wpedantic',
+                '-Wno-unused-variable',
+                '-Wno-unused-label',
+                '-Wno-missing-braces',
+                '-Wno-unused-function',
+            ]
+
+            cmd.extend(['-o', args.binary_name])
+
+            if args.debugging_symbols:
+                cmd.append('-g')
+
+            if args.optimize:
+                cmd.append('-O3')
+
+            src_dirs = [os.path.abspath(path) for path in
+                [args.runtime_sources_directory] +
+                [args.out_srcs_dir]
+            ]
+
+            for src_dir in src_dirs:
+                quoted_path = shlex.quote(src_dir)
+                cmd.append(f'-I{quoted_path}')
+
+            for src_dir in src_dirs:
+                for file_name in os.listdir(src_dir):
+                    if file_name.endswith('.c'):
+                        file_path = os.path.join(src_dir, file_name)
+                        cmd.append(file_path)
 
             return cmd
 
     def get_compiler_for_platform(platform):
         if platform == 'linux':
             return Linux()
+        elif platform == 'osx':
+            return OSX()
         else:
             raise TypeError(f'Unsupported compile platform {platform}')
 
