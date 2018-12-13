@@ -7,6 +7,13 @@ trait SomeTrait {
 }
 
 class SomeClass(SomeTrait) {
+  static SomeClass new() = $(SomeClass)
+
+  class void foo(int x) {
+    if (x < 10) {
+      foo(x + 1)
+    }
+  }
 }
 
 class StringPointer {
@@ -81,6 +88,8 @@ void main() {
     assert.equal(List.fromIterable(items), items)
     assert(List.fromIterable(items) is not items)
   }
+
+  assert.equal(SomeClass.foo(1), null)
 
   // Test class methods
   assert.equal(

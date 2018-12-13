@@ -1823,6 +1823,12 @@ def IR(ns):
             assert False, self.type
 
     @ns
+    class NullLiteral(Expression):
+        type = VAR_TYPE
+
+        node_fields = ()
+
+    @ns
     class BoolLiteral(Expression):
         type = BOOL
 
@@ -2109,6 +2115,15 @@ def parser(ns):
             return IR.GlobalName(token, defn)
         if isinstance(defn, IR.StaticMethodDefinition):
             return IR.StaticMethodName(token, defn)
+        if isinstance(defn, IR.ClassMethodDefinition):
+            return IR.InstanceMethodReference(
+                token,
+                scope.convert(
+                    IR.TraitOrClassName(token, defn.cls),
+                    IR.VAR_TYPE,
+                ),
+                defn.name,
+            )
         if isinstance(defn, IR.BaseInstanceMethodDefinition):
             return IR.InstanceMethodReference(
                 token,
@@ -3289,6 +3304,8 @@ def parser(ns):
             if consume('NAME'):
                 name = token.value
                 return promise_name(scope, token, name)
+            if consume('null'):
+                return Promise.value(IR.NullLiteral(token))
             if consume('true'):
                 return Promise.value(IR.BoolLiteral(token, True))
             if consume('false'):
@@ -5346,6 +5363,10 @@ def C(ns):
         descriptor_name = get_class_descriptor_name(self.cls)
         ctx.out += f'{retvar} = &{descriptor_name};'
         return retvar
+
+    @E.on(IR.NullLiteral)
+    def E(self, ctx):
+        return ctx.declare(IR.VAR_TYPE)
 
     @E.on(IR.BoolLiteral)
     def E(self, ctx):
