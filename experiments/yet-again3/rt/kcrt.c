@@ -225,10 +225,9 @@ static KLC_Error* KLC_int_method_pow(KLC_Stack* stack, KLC_var* out, int argc, K
     *out = KLC_var_from_int(KLC_int_pow(argv[0].u.i, argv[1].u.i));
   } else if (argv[1].tag == KLC_TAG_INT) {
     *out = KLC_var_from_float(pow(argv[0].u.i, argv[1].u.i));
-  } else if (argv[1].tag == KLC_TAG_FLOAT) {
-    *out = KLC_var_from_float(pow(argv[0].u.i, argv[1].u.f));
   } else {
-    return KLC_expect_tag(stack, argv[1], KLC_TAG_INT);
+    e = KLC_expect_tag(stack, argv[1], KLC_TAG_FLOAT); if (e) { return e; }
+    *out = KLC_var_from_float(pow(argv[0].u.i, argv[1].u.f));
   }
   return NULL;
 }
