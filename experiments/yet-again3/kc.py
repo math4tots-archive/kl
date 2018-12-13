@@ -409,7 +409,7 @@ def lexer(ns):
         'for', 'if', 'else', 'while', 'break', 'continue', 'return',
         'with', 'from', 'import', 'as', 'try', 'catch', 'finally', 'raise',
         'except', 'case','switch', 'var', 'this',
-        'dynamic_cast',
+        'dynamic_cast', 'static_cast',
     } | set(C_KEYWORDS)
     ns(KEYWORDS, 'KEYWORDS')
 
@@ -1323,6 +1323,14 @@ def IR(ns):
     STANDARD_PRIMITIVE_TYPES = {VOID, BOOL, INT, FLOAT, TYPE}
 
     @ns
+    def is_pointable_type(type):
+        return isinstance(type, (PrimitiveTypeDefinition, PointerType))
+
+    @ns
+    def is_non_retainable_type(type):
+        return not isinstance(type, Retainable)
+
+    @ns
     def is_standard_type(type):
         return (
             type == VAR_TYPE or
@@ -1710,7 +1718,7 @@ def IR(ns):
     @ns
     class PrimitiveUnop(Expression):
         node_fields = (
-            ('type', PrimitiveTypeDefinition),
+            ('type', typeutil.Or[PrimitiveTypeDefinition, PointerType]),
             ('op', str),
             ('expr', Expression),
         )
@@ -1812,6 +1820,17 @@ def IR(ns):
         node_fields = (
             ('type', Type),
         )
+
+    @ns
+    class GetArrayItem(Expression):
+        node_fields = (
+            ('owner', Expression.WithTypeOfClass(PointerType)),
+            ('index', Expression.WithType(INT)),
+        )
+
+        @property
+        def type(self):
+            return self.owner.type.base
 
     @ns
     class GetItem(PseudoExpression):
@@ -2758,6 +2777,13 @@ def parser(ns):
                         op,
                         expr,
                     )
+                if op == '&' and IR.is_pointable_type(expr.type):
+                    return IR.PrimitiveUnop(
+                        token,
+                        IR.PointerType(expr.type),
+                        op,
+                        expr,
+                    )
                 if op in _unary_op_table:
                     func_name = _unary_op_table[op]
                     if func_name in scope:
@@ -2796,7 +2822,7 @@ def parser(ns):
 
         def parse_unary(scope):
             token = peek()
-            for op in ('+', '-', '!'):
+            for op in ('+', '-', '!', '&'):
                 if consume(op):
                     expr_promise = parse_unary(scope)
                     return promise_unop(scope, token, op, expr_promise)
@@ -3028,6 +3054,26 @@ def parser(ns):
             with scope.push(token):
                 raise scope.error(f'Not assignable')
 
+        def promise_getitem(scope, token, expr_promise, index_promise):
+            @Promise
+            def promise():
+                expr = expr_promise.resolve()
+                index = index_promise.resolve()
+
+                if (isinstance(expr.type, IR.PointerType) and
+                        expr.type != IR.VOIDP):
+                    return IR.GetArrayItem(
+                        token,
+                        expr,
+                        scope.convert(index, IR.INT),
+                    )
+                return IR.GetItem(
+                    token,
+                    scope.convert(expr, IR.VAR_TYPE),
+                    scope.convert(index, IR.VAR_TYPE),
+                )
+            return promise
+
         def parse_postfix(scope):
             expr = parse_primary(scope)
             while True:
@@ -3048,15 +3094,10 @@ def parser(ns):
                     expr = promise_get_field_arrow(
                             scope, token, expr, name)
                 elif consume('['):
-                    index_expr_promise = parse_expression(scope)
+                    index_promise = parse_expression(scope)
                     expect(']')
-                    expr = pcall(
-                        IR.GetItem,
-                        token,
-                        expr.map(lambda e: scope.convert(e, IR.VAR_TYPE)),
-                        index_expr_promise
-                            .map(lambda e: scope.convert(e, IR.VAR_TYPE)),
-                    )
+                    expr = promise_getitem(
+                        scope, token, expr, index_promise)
                 elif consume('='):
                     valp = parse_expression(scope)
                     expr = pcall(process_assignment, scope, token, expr, valp)
@@ -3123,6 +3164,26 @@ def parser(ns):
                 return IR.Cast(token, arg, type)
             else:
                 return scope.convert(arg, type)
+
+        def make_static_cast(scope, token, type, arg):
+
+            # Any pointer to pointer cast ok for static_cast.
+            # Caster really has to take responsibility here.
+            if (isinstance(type, IR.PointerType) and
+                    isinstance(arg.type, IR.PointerType)):
+                return IR.Cast(token, arg, type)
+
+            # Also, any primitive type to primitive type,
+            # I'm going to let through here.
+            # I'll let it up to the C compiler to catch any funny business.
+            if (isinstance(type, IR.PrimitiveTypeDefinition) and
+                    isinstance(arg.type, IR.PrimitiveTypeDefinition)):
+                return IR.Cast(token, arg, type)
+
+            with scope.push(token):
+                raise scope.error(
+                    f'Only pointer cast and primitive type casts '
+                    f'are supported for static_cast')
 
         def parse_if(scope):
             token = expect('if')
@@ -3373,6 +3434,20 @@ def parser(ns):
                     expect(')')
                     return pcall(
                         make_cast,
+                        scope,
+                        token,
+                        type_promise,
+                        arg_promise,
+                    )
+            if consume('static_cast'):
+                expect('(')
+                with skipping_newlines(True):
+                    type_promise = parse_type(scope)
+                    expect(',')
+                    arg_promise = parse_expression(scope)
+                    expect(')')
+                    return pcall(
+                        make_static_cast,
                         scope,
                         token,
                         type_promise,
@@ -5558,9 +5633,20 @@ def C(ns):
             c_function_name=CALL_METHOD_FUNCTION_NAME,
         )
 
+    @E.on(IR.GetArrayItem)
+    def E(self, ctx):
+        assert self.index.type == IR.INT, self.index.type
+        assert isinstance(self.owner.type, IR.PointerType)
+        assert IR.is_non_retainable_type(self.owner.type.base)
+        owner_var = E(self.owner, ctx)
+        index_var = E(self.index, ctx)
+        retvar = ctx.declare(self.type)
+        ctx.out += f'{retvar} = {owner_var}[{index_var}];'
+        return retvar
+
     @E.on(IR.PrimitiveUnop)
     def E(self, ctx):
-        assert isinstance(self.type, IR.PrimitiveTypeDefinition), self.type
+        assert IR.is_non_retainable_type(self.type), self.type
         exprvar = E(self.expr, ctx)
         retvar = ctx.declare(self.type)
         ctx.out += f'{retvar} = {self.op} {exprvar};'
@@ -5877,6 +5963,8 @@ def Platform(ns):
                     if file_name.endswith('.c'):
                         file_path = os.path.join(src_dir, file_name)
                         cmd.append(file_path)
+
+            cmd.append('-lobjc')
 
             return cmd
 
