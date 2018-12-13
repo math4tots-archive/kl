@@ -5721,8 +5721,7 @@ def Main(ns):
         _set_parse_args(aparser)
         aparser.add_argument('--out-dir', default='out')
 
-    def _translate(args):
-        module_table = _parse(args)
+    def _translate(args, module_table):
         tu_table = {
             name: C.translate(module) for name, module in module_table.items()
         }
@@ -5733,7 +5732,7 @@ def Main(ns):
     def translate(aparser):
         _set_translate_args(aparser)
         args = yield
-        _translate(args)
+        _translate(args=args, module_table=_parse(args))
 
 
 if __name__ == '__main__':
