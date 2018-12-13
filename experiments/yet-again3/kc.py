@@ -1924,15 +1924,19 @@ def IR(ns):
 def parser(ns):
 
     class Scope:
-        def __init__(self, parent, search_dir=None):
-            if search_dir is None:
-                search_dir = parent.search_dir
+        def __init__(self, parent, args=None):
+            if args is None:
+                args = parent.args
             self.parent = parent
             self.table = dict()
-            self.search_dir = search_dir
             self.root = self if parent is None else parent.root
             self.stack = [] if parent is None else parent.stack
             self.cache = dict() if parent is None else parent.cache
+            self.args = args
+
+        @property
+        def search_dirs(self):
+            return self.args.search_dirs
 
         def error(self, message):
             raise Error(self.stack, message)
@@ -1987,13 +1991,24 @@ def parser(ns):
                     f'by dots ({repr(module_name)} is not a valid '
                     f'module name)')
 
+        def _find_module_path(self, module_name):
+            self.args.debug(f'Searching for module {module_name}')
+            for search_dir in self.search_dirs:
+                for extension in [f'.{self.args.platform}.k', '.k']:
+                    path = os.path.join(
+                        search_dir,
+                        module_name.replace('.', os.path.sep) + extension,
+                    )
+                    self.args.debug(f'Checking {module_name} -> {path}')
+                    if os.path.exists(path):
+                        self.args.debug(f'Found! {module_name} -> {path}')
+                        return path
+            raise self.error(f'Could not find path for {module_name}')
+
         def _load(self, module_name) -> ('Scope', Promise):
             if module_name not in self.cache:
                 self.check_module_name(module_name)
-                path = os.path.join(
-                    self.search_dir,
-                    module_name.replace('.', os.path.sep) + '.k',
-                )
+                path = self._find_module_path(module_name)
                 try:
                     with open(path) as f:
                         data = f.read()
@@ -2150,8 +2165,10 @@ def parser(ns):
     @ns
     def parse(
             source: Source,
-            search_dir: str) -> typing.Dict[str, IR.Module]:
-        global_scope = Scope(None, search_dir=search_dir)
+            args) -> typing.Dict[str, IR.Module]:
+        args.debug('begining parse...')
+        args.debug(f'args.search_dirs = {args.search_dirs}')
+        global_scope = Scope(None, args=args)
         result = _parse(global_scope, source)
         global_scope.cache[source.name] = result
         return {
@@ -5900,22 +5917,49 @@ def Main(ns):
             # there are too many yields.
             raise TypeError()
 
+    def _bind_loggers(args):
+
+        def _printerr(type, msg):
+            sys.stderr.write(f'{type}: {msg}\n')
+
+        def _debug(msg):
+            if args.verbosity >= 3:
+                _printerr('DEBUG', msg)
+
+        def _info(msg):
+            if args.verbosity >= 2:
+                _printerr('INFO', msg)
+
+        def _warn(msg):
+            if args.verbosity >= 1:
+                _printerr('WARN', msg)
+
+        args.debug = _debug
+        args.info = _info
+        args.warn = _warn
+
     def _set_parse_args(aparser):
         aparser.add_argument('filename')
-        aparser.add_argument(
-            '--search-dir',
-            default=os.path.join(_scriptdir, 'srcs'),
-        )
+        aparser.add_argument('--search-dirs', nargs='*', default=[])
+        aparser.add_argument('--verbosity', '-v', type=int, default=1)
+
+    def _process_parse_args(args):
+        args.search_dirs.append(os.path.join(_scriptdir, 'srcs'))
+        _bind_loggers(args)
 
     def _parse(args):
         source = Source.from_name_and_path('main', args.filename)
-        module_table = parser.parse(source, search_dir=args.search_dir)
+        module_table = parser.parse(
+            source,
+            args=args,
+        )
         return module_table
 
     @command
     def parse(aparser):
         _set_parse_args(aparser)
         args = yield
+        _process_parse_args(args)
         module_table = _parse(args)
         for module in module_table.values():
             print(module.format())
@@ -5926,6 +5970,9 @@ def Main(ns):
             '--out-srcs-dir',
             default=os.path.join(_scriptdir, 'out'),
         )
+
+    def _process_translate_args(args):
+        _process_parse_args(args)
 
     def _translate(args, module_table):
         tu_table = {
@@ -5938,6 +5985,7 @@ def Main(ns):
     def translate(aparser):
         _set_translate_args(aparser)
         args = yield
+        _process_translate_args(args)
         _translate(args=args, module_table=_parse(args))
 
     def _set_compile_args(aparser):
@@ -5960,6 +6008,8 @@ def Main(ns):
         )
 
     def _process_compile_args(args):
+        _process_translate_args(args)
+
         if args.platform is None:
             args.platform = Platform.get_source_platform()
 
