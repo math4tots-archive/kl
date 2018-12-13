@@ -5676,34 +5676,66 @@ def C(ns):
         return '0'
 
 
-def main():
-    aparser = argparse.ArgumentParser()
-    aparser.add_argument('filename')
-    aparser.add_argument('--search-dir', default='srcs')
-    aparser.add_argument('--out-dir', default='out')
-    aparser.add_argument('--operation', '-p', default='translate', choices=(
-        'parse',
-        'translate',
-    ))
-    args = aparser.parse_args()
-    source = Source.from_name_and_path('main', args.filename)
-    module_table = parser.parse(source, search_dir=args.search_dir)
+@Namespace
+def Main(ns):
 
-    if args.operation == 'parse':
+    aparser = argparse.ArgumentParser()
+    subparsers = aparser.add_subparsers()
+
+    def command(f):
+        subparser = subparsers.add_parser(f.__name__)
+        gen = f(subparser)
+        next(gen)  # make sure subparser is initialized
+        subparser.set_defaults(_coroutine=gen)
+
+    @ns
+    def main():
+        args = aparser.parse_args()
+        try:
+            args._coroutine.send(args)
+        except StopIteration:
+            pass
+        else:
+            # If the above doesn't throw a StopIteration,
+            # there are too many yields.
+            raise TypeError()
+
+    def _set_parse_args(aparser):
+        aparser.add_argument('filename')
+        aparser.add_argument('--search-dir', default='srcs')
+
+    def _parse(args):
+        source = Source.from_name_and_path('main', args.filename)
+        module_table = parser.parse(source, search_dir=args.search_dir)
+        return module_table
+
+    @command
+    def parse(aparser):
+        _set_parse_args(aparser)
+        args = yield
+        module_table = _parse(args)
         for module in module_table.values():
             print(module.format())
 
-    tu_table = {
-        name: C.translate(module) for name, module in module_table.items()
-    }
+    def _set_translate_args(aparser):
+        _set_parse_args(aparser)
+        aparser.add_argument('--out-dir', default='out')
 
-    for tu in tu_table.values():
-        C.write_out(tu, out_dir=args.out_dir)
+    def _translate(args):
+        module_table = _parse(args)
+        tu_table = {
+            name: C.translate(module) for name, module in module_table.items()
+        }
+        for tu in tu_table.values():
+            C.write_out(tu, out_dir=args.out_dir)
 
-    if args.operation == 'translate':
-        return
+    @command
+    def translate(aparser):
+        _set_translate_args(aparser)
+        args = yield
+        _translate(args)
 
 
 if __name__ == '__main__':
-    main()
+    Main.main()
 
