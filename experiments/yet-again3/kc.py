@@ -4019,6 +4019,7 @@ def C(ns):
         def __init__(self):
             self.out = FractalStringBuilder(0)
             self.includes = self.out.spawn()
+            self.struct_defns = self.out.spawn()
             self.static_fdecls = self.out.spawn()
             self.static_vars = self.out.spawn()
             self.static_func_defs = self.out.spawn()
@@ -4307,18 +4308,6 @@ def C(ns):
                         f'typedef struct {struct_name} {struct_name};'
                     )
 
-                    structs += f'struct {struct_name} ' '{'
-                    fields_out = structs.spawn(1)
-                    fields_out += (
-                        f'{HEADER_STRUCT_NAME} {CLASS_HEADER_FIELD_NAME};'
-                    )
-                    for field in defn.fields:
-                        fields_out += declare(
-                            field.type,
-                            get_class_c_struct_field_name(field),
-                        ) + ';'
-                    structs += '};'
-
                 descriptor_name = get_class_descriptor_name(defn)
                 gvardecls += f'extern KLC_Class {descriptor_name};'
 
@@ -4604,7 +4593,7 @@ def C(ns):
     @declare.on(IR.ClassDefinition)
     def declare(self, name):
         struct_name = get_class_struct_name(self)
-        return f'{struct_name}* {name}'.strip()
+        return f'{struct_name} *{name}'.strip()
 
     @declare.on(type(IR.VAR_TYPE))
     def declare(self, name):
@@ -4612,7 +4601,7 @@ def C(ns):
 
     @declare.on(IR.PointerType)
     def declare(self, name):
-        return declare(self.base, f' *{name}'.strip())
+        return declare(self.base, f'*{name}'.strip())
 
     @declare.on(IR.ConstType)
     def declare(self, name):
@@ -4804,6 +4793,22 @@ def C(ns):
     def D(self, ctx):
         pass
 
+    def emit_class_struct(self, ctx):
+        assert isinstance(self, IR.ClassDefinition), self
+        struct_name = get_class_struct_name(self)
+
+        ctx.struct_defns += f'struct {struct_name} ' '{'
+        fields_out = ctx.struct_defns.spawn(1)
+        fields_out += (
+            f'{HEADER_STRUCT_NAME} {CLASS_HEADER_FIELD_NAME};'
+        )
+        for field in self.fields:
+            fields_out += declare(
+                field.type,
+                get_class_c_struct_field_name(field),
+            ) + ';'
+        ctx.struct_defns += '};'
+
     def emit_malloc_and_deleter(self, ctx):
         assert isinstance(self, IR.ClassDefinition), self
         descriptor_name = get_class_descriptor_name(self)
@@ -4942,6 +4947,7 @@ def C(ns):
 
     @D.on(IR.ClassDefinition)
     def D(self, ctx):
+        emit_class_struct(self, ctx)
         emit_malloc_and_deleter(self, ctx)
         emit_methods(self, ctx)
         emit_trait_or_class_descriptor(self, ctx)
