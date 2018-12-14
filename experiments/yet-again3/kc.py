@@ -12,6 +12,10 @@ import typing
 
 _scriptdir = os.path.dirname(os.path.realpath(__file__))
 
+ROOT_TRAIT_NAME = 'Object'
+BUILTINS_MODULE_NAME = 'builtins'
+MAIN_MODULE_NAME = 'main'
+
 
 class Namespace:
     def __init__(self, f):
@@ -432,7 +436,7 @@ def lexer(ns):
 
     @ns
     def lex_string(data: str):
-        return lex(Source('main', None, data))
+        return lex(Source(MAIN_MODULE_NAME, None, data))
 
     @ns
     def lex(source: Source):
@@ -2116,9 +2120,6 @@ def parser(ns):
                 return capture
             else:
                 return defn
-
-    BUILTINS_MODULE_NAME = 'builtins'
-    ROOT_TRAIT_NAME = 'Object'
 
     _builtins_export_names = (
         IR.LAMBDA_FUNCTION_NAME,
@@ -6055,41 +6056,80 @@ def Main(ns):
         args.info = _info
         args.warn = _warn
 
+    def _set_common_args(aparser):
+        aparser.add_argument(
+            '--verbosity', '-v', type=int, default=1, choices=(0, 1, 2, 3))
+
+        # Needed for resolving symbols across files when parsing.
+        aparser.add_argument('--search-dirs', nargs='*', default=[])
+
+        # Only used if actually need to generate translated C code,
+        # i.e. not used for parse.
+        aparser.add_argument(
+            '--out-srcs-dir',
+            default=os.path.join(_scriptdir, 'out'),
+        )
+
+        # args only needed if we're compiling
+        aparser.add_argument('--platform', default=None)
+        aparser.add_argument('--binary-name', '-o', default=None)
+        aparser.add_argument(
+            '--runtime-sources-directory',
+            default=os.path.join(_scriptdir, 'rt'),
+        )
+        aparser.add_argument(
+            '--debugging-symbols', '-g',
+            action='store_true',
+            default=False,
+        )
+        aparser.add_argument(
+            '--optimize', '-O3',
+            action='store_true',
+            default=False,
+        )
+
+        # Only needed for passing args to run
+        aparser.add_argument('binary_args', nargs='*')
+
+    def _process_common_args(args):
+        _bind_loggers(args)
+        args.search_dirs.append(os.path.join(_scriptdir, 'srcs'))
+        if args.platform is None:
+            args.platform = Platform.get_source_platform()
+        if args.platform not in Platform.LIST:
+            raise TypeError(
+                f'{args.platform} is not a recognized platform; '
+                f'choose from one of {Platform.LIST}')
+        if args.binary_name is None:
+            args.binary_name = (
+                Platform.get_default_binary_name(args.platform)
+            )
+
     def _set_parse_args(aparser):
         aparser.add_argument('filename')
-        aparser.add_argument('--search-dirs', nargs='*', default=[])
-        aparser.add_argument('--verbosity', '-v', type=int, default=1)
+        _set_common_args(aparser)
 
-    def _process_parse_args(args):
-        args.search_dirs.append(os.path.join(_scriptdir, 'srcs'))
-        _bind_loggers(args)
-
-    def _parse(args):
-        source = Source.from_name_and_path('main', args.filename)
+    def _parse_source(args, source):
+        assert isinstance(source, Source), source
         module_table = parser.parse(
             source,
             args=args,
         )
         return module_table
 
+    def _parse(args):
+        source = Source.from_name_and_path(MAIN_MODULE_NAME, args.filename)
+        return _parse_source(args, source)
+
     @command
     def parse(aparser):
-        _set_parse_args(aparser)
+        aparser.add_argument('filename')
+        _set_common_args(aparser)
         args = yield
-        _process_parse_args(args)
+        _process_common_args(args)
         module_table = _parse(args)
         for module in module_table.values():
             print(module.format())
-
-    def _set_translate_args(aparser):
-        _set_parse_args(aparser)
-        aparser.add_argument(
-            '--out-srcs-dir',
-            default=os.path.join(_scriptdir, 'out'),
-        )
-
-    def _process_translate_args(args):
-        _process_parse_args(args)
 
     def _translate(args, module_table):
         tu_table = {
@@ -6100,9 +6140,10 @@ def Main(ns):
 
     @command
     def translate(aparser):
-        _set_translate_args(aparser)
+        aparser.add_argument('filename')
+        _set_common_args(aparser)
         args = yield
-        _process_translate_args(args)
+        _process_common_args(args)
         _translate(args=args, module_table=_parse(args))
 
     def _set_compile_args(aparser):
@@ -6124,40 +6165,18 @@ def Main(ns):
             default=False,
         )
 
-    def _process_compile_args(args):
-        _process_translate_args(args)
-
-        if args.platform is None:
-            args.platform = Platform.get_source_platform()
-
-        if args.platform not in Platform.LIST:
-            raise TypeError(
-                f'{args.platform} is not a recognized platform; '
-                f'choose from one of {Platform.LIST}')
-
-        if args.binary_name is None:
-            args.binary_name = (
-                Platform.get_default_binary_name(args.platform)
-            )
-
     def _compile(args, module_table):
         Platform.compile(args=args, module_table=module_table)
 
     @command
     def compile(aparser):
-        _set_compile_args(aparser)
+        aparser.add_argument('filename')
+        _set_common_args(aparser)
         args = yield
-        _process_compile_args(args)
+        _process_common_args(args)
         module_table = _parse(args)
         _translate(args=args, module_table=module_table)
         _compile(args=args, module_table=module_table)
-
-    def _set_run_args(aparser):
-        _set_compile_args(aparser)
-        aparser.add_argument('binary_args', nargs='*')
-
-    def _process_run_args(args):
-        _process_compile_args(args)
 
     def _run(args):
         bin_path = os.path.join(_scriptdir, args.binary_name)
@@ -6165,13 +6184,21 @@ def Main(ns):
 
     @command
     def run(aparser):
-        _set_run_args(aparser)
+        aparser.add_argument('filename')
+        _set_common_args(aparser)
         args = yield
-        _process_run_args(args)
+        _process_common_args(args)
         module_table = _parse(args)
         _translate(args=args, module_table=module_table)
         _compile(args=args, module_table=module_table)
         _run(args=args)
+    #
+    # def _test(args):
+    #     pass
+    #
+    # @command
+    # def test(aparser):
+    #     aparser.add_argument('module')
 
 
 if __name__ == '__main__':
