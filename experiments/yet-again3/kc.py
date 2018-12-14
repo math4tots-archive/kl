@@ -1539,6 +1539,13 @@ def IR(ns):
     ]
 
     @ns
+    class ModuleName(PseudoExpression):
+        node_fields = (
+            ('name', str),
+            ('scope', object),  # the foreign module's scope
+        )
+
+    @ns
     class TraitOrClassName(Expression):
         type = TYPE
 
@@ -1922,7 +1929,19 @@ def IR(ns):
         )
 
     @ns
-    class FromImport(Node):
+    class BaseImport(Node):
+        pass
+
+    @ns
+    class ModuleImport(BaseImport, Declaration):
+        node_fields = (
+            ('module_name', str),
+            ('alias', str),
+            ('scope', object),
+        )
+
+    @ns
+    class FromImport(BaseImport):
         node_fields = (
             ('module_name', str),
             ('exported_name', str),
@@ -1946,7 +1965,7 @@ def IR(ns):
         node_fields = (
             ('name', str),
             ('includes', typeutil.List[Include]),
-            ('imports', typeutil.List[FromImport]),
+            ('imports', typeutil.List[BaseImport]),
             ('libs', typeutil.List[RequireLib]),
             ('frameworks', typeutil.List[RequireFramework]),
             ('definitions', typeutil.List[GlobalDefinition]),
@@ -2206,6 +2225,12 @@ def parser(ns):
                 ),
                 defn.name,
             )
+        if isinstance(defn, IR.ModuleImport):
+            return IR.ModuleName(
+                token=token,
+                name=defn.module_name,
+                scope=defn.scope,
+            )
         raise scope.error(f'{defn} is not a variable')
 
     @ns
@@ -2290,17 +2315,34 @@ def parser(ns):
         def expect_id():
             return expect('NAME').value
 
-        def parse_import(scope):
-            token = peek()
-            expect('from')
+        def expect_module_parts():
             parts = [expect_id()]
             while consume('.'):
                 parts.append(expect_id())
-            module_name = '.'.join(parts)
-            expect('import')
-            exported_name = expect_id()
-            alias = expect_id() if consume('as') else exported_name
-            return scope.from_import(token, module_name, exported_name, alias)
+            return parts
+
+        def parse_import(scope):
+            token = peek()
+            if consume('from'):
+                module_name = '.'.join(expect_module_parts())
+                expect('import')
+                exported_name = expect_id()
+                alias = expect_id() if consume('as') else exported_name
+                return scope.from_import(
+                    token, module_name, exported_name, alias)
+            else:
+                expect('import')
+                parts = expect_module_parts()
+                module_name = '.'.join(parts)
+                alias = expect_id() if consume('as') else parts[-1]
+                module_import = IR.ModuleImport(
+                    token=token,
+                    module_name=module_name,
+                    alias=alias,
+                    scope=scope.load_scope_for(module_name),
+                )
+                scope[alias] = module_import
+                return Promise.value(module_import)
 
         def at_name(name):
             return peek().type == 'NAME' and peek().value == name
@@ -2969,6 +3011,17 @@ def parser(ns):
                             scope.convert(expr, IR.VAR_TYPE),
                             fname,
                         )
+                if isinstance(expr, IR.ModuleName):
+                    if fname not in expr.scope:
+                        print(expr.scope.table.keys())
+                        with scope.push(token):
+                            raise scope.error(
+                                f'{fname} not defined in module {expr.name}')
+                    return convert_name_defn_to_expr(
+                        scope=expr.scope,
+                        token=token,
+                        defn=expr.scope[fname]
+                    )
                 elif isinstance(expr.type, IR.StructDefinition):
                     defn = get_field_defn(scope, token, expr.type, fname)
                     return IR.GetStructField(
@@ -4017,7 +4070,7 @@ def parser(ns):
                     alias=export_name,
                 ))
 
-        while at('from'):
+        while at('from') or at('import'):
             importps.append(parse_import(module_scope))
             consume_all('\n')
         while not at('EOF'):
