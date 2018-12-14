@@ -1135,6 +1135,10 @@ def IR(ns):
     class PrimitiveTypeDefinition(TypeDeclaration, GlobalDefinition):
         node_fields = (
             ('name', str),
+
+            # Types that this type can be converted to
+            # without an explicit static_cast or dynamic_cast.
+            ('related_types_promise', Promise),
         )
 
         def __repr__(self):
@@ -1145,6 +1149,10 @@ def IR(ns):
 
         def __hash__(self):
             return hash((type(self), self.name))
+
+        @lazy(lambda: typeutil.List[PrimitiveTypeDefinition])
+        def related_types(self):
+            return self.related_types_promise.resolve()
 
     class ProxyMixin:
         def __eq__(self, other):
@@ -1239,7 +1247,8 @@ def IR(ns):
     ns(LIST_PUSH_FUNCTION_NAME, 'LIST_PUSH_FUNCTION_NAME')
 
     def nptype(c_name):
-        return PrimitiveTypeDefinition(builtin_token, c_name)
+        return PrimitiveTypeDefinition(
+            builtin_token, c_name, Promise(lambda: []))
 
     VOID = nptype('void')
     ns(VOID, 'VOID')
@@ -1445,8 +1454,6 @@ def IR(ns):
         if dt == VOID:
             return Cast(expr.token, expr, dt)
 
-        pair = (st.name, dt.name)
-
         if st in NUMERIC_TYPES and dt == BOOL:
             # This is a bit of a hack, considering that '!!'
             # is actually two operators.
@@ -1465,6 +1472,9 @@ def IR(ns):
             return Cast(expr.token, expr, dt)
 
         if st in CHAR_TYPES and dt in CHAR_TYPES:
+            return Cast(expr.token, expr, dt)
+
+        if dt in st.related_types:
             return Cast(expr.token, expr, dt)
 
         raise convert_error(st, dt, expr, scope)
@@ -3883,23 +3893,42 @@ def parser(ns):
 
         def parse_global(scope):
             token = peek()
-            extern = bool(consume('extern'))
+
             if consume('typedef'):
                 expect('*')
                 name = expect_id()
-                scope[name] = defn = IR.PrimitiveTypeDefinition(token, name)
+                related_type_pairs = []
+                if consume('('):
+                    with skipping_newlines(True):
+                        while not consume(')'):
+                            related_type_pairs.append((peek(), expect_id()))
+                            if not consume(','):
+                                expect(')')
+                                break
+                @Promise
+                def related_types_promise():
+                    related_types = []
+                    for token, related_type_name in related_type_pairs:
+                        with scope.push(token):
+                            related_type = scope[related_type_name]
+                            if not isinstance(
+                                    related_type, IR.PrimitiveTypeDefinition):
+                                raise scope.error(
+                                    f'{related_type} is not a primitive type')
+                            related_types.append(related_type)
+                    return related_types
+                scope[name] = defn = IR.PrimitiveTypeDefinition(
+                    token, name, related_types_promise)
                 return Promise.value(defn)
-            elif consume('struct'):
-                return parse_struct(scope, token, extern)
             elif at('class') or at('trait'):
-                if extern:
-                    with scope.push(token):
-                        raise scope.error(
-                            f'Classes and traits cannot be extern')
                 is_trait = bool(consume('trait'))
                 if not is_trait:
                     expect('class')
                 return parse_class(is_trait, scope, token)
+
+            extern = bool(consume('extern'))
+            if consume('struct'):
+                return parse_struct(scope, token, extern)
             else:
                 type_promise = parse_type(scope)
                 name = expect_id()

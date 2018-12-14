@@ -8,6 +8,7 @@ from objc import asdf_dump_methods
 
 void main() {
   Class cls = objc_getClass(c"NSObject")
+  id idcls = cls
   // id clsid = dynamic_cast(id, cls)
   printf(c"class name = %s\n", class_getName(cls))
 

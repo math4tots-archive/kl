@@ -2,7 +2,7 @@
 #include "objc/objc-runtime.h"
 from c import printf
 typedef * id
-typedef * Class
+typedef * Class(id)
 typedef * Method
 typedef * BOOL
 typedef * SEL
