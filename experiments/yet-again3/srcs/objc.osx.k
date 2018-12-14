@@ -1,5 +1,6 @@
 // Objective C bindings
 #include "objc/objc-runtime.h"
+#lib objc
 from c import printf
 typedef * id
 typedef * Class(id)

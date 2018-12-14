@@ -5,7 +5,6 @@ import contextlib
 import itertools
 import os
 import re
-import shlex
 import subprocess
 import sys
 import typing
@@ -1930,11 +1929,25 @@ def IR(ns):
         )
 
     @ns
+    class RequireLib(Node):
+        node_fields = (
+            ('name', str),
+        )
+
+    @ns
+    class RequireFramework(Node):
+        node_fields = (
+            ('name', str),
+        )
+
+    @ns
     class Module(Node):
         node_fields = (
             ('name', str),
             ('includes', typeutil.List[Include]),
             ('imports', typeutil.List[FromImport]),
+            ('libs', typeutil.List[RequireLib]),
+            ('frameworks', typeutil.List[RequireFramework]),
             ('definitions', typeutil.List[GlobalDefinition]),
         )
 
@@ -2286,11 +2299,18 @@ def parser(ns):
             alias = expect_id() if consume('as') else exported_name
             return scope.from_import(token, module_name, exported_name, alias)
 
+        def at_name(name):
+            return peek().type == 'NAME' and peek().value == name
+
         def expect_name(name):
-            if peek().type != 'NAME' or peek().value != name:
+            if not at_name(name):
                 with module_scope.push(peek()):
                     raise module_scope.error(f'Expected name {name}')
             return gettok()
+
+        def consume_name(name):
+            if at_name(name):
+                return expect_name(name)
 
         def promise_type_from_name(scope, token, name):
             @Promise
@@ -3940,10 +3960,18 @@ def parser(ns):
                     return parse_global_var_defn(
                         scope, token, extern, type_promise, name)
 
+        def expect_string_or_name():
+            if at('STRING'):
+                return expect('STRING').value
+            else:
+                return expect_id()
+
         module_token = peek()
         includes = []
         importps = []
         defnps = []
+        libs = []
+        frameworks = []
 
         implicit_builtins = True
         consume_all('\n')
@@ -3952,6 +3980,11 @@ def parser(ns):
             if at('STRING') and peek().value == 'no builtins':
                 expect('STRING')
                 implicit_builtins = False
+            elif consume_name('lib'):
+                libs.append(IR.RequireLib(itoken, expect_string_or_name()))
+            elif consume_name('framework'):
+                frameworks.append(
+                    IR.RequireFramework(itoken, expect_string_or_name()))
             else:
                 expect_name('include')
                 use_quotes = at('STRING')
@@ -3983,11 +4016,13 @@ def parser(ns):
             consume_all('\n')
 
         return module_scope, Promise(lambda: IR.Module(
-            module_token,
-            module_name,
-            includes,
-            [p.resolve() for p in importps],
-            [p.resolve() for p in defnps],
+            token=module_token,
+            name=module_name,
+            includes=includes,
+            imports=[p.resolve() for p in importps],
+            libs=libs,
+            frameworks=frameworks,
+            definitions=[p.resolve() for p in defnps],
         ))
 
 
@@ -5905,28 +5940,28 @@ def Platform(ns):
 
         def compile(self, args, module_table):
             cmd = self.build_command(args, module_table)
+            args.debug(f'cmd = {cmd}')
             subprocess.run(cmd, check=True)
 
         @abc.abstractmethod
         def build_command(self, args, module_table) -> typing.List[str]:
             pass
 
-    class Linux(SimpleCompiler):
-        """
-        Basic compiler for Linux desktops,
-        assumes gcc is available.
-        """
+    class SimpleUnixCompiler(SimpleCompiler):
 
-        def build_command(self, args, module_table):
-            cmd = [
-                'gcc',
-                '-std=c89',
-                '-Wall', '-Werror', '-Wpedantic',
-                '-Wno-unused-but-set-variable',
+        @property
+        def warning_flags(self):
+            return [
                 '-Wno-unused-function',
                 '-Wno-unused-label',
                 '-Wno-unused-variable',
             ]
+
+        def add_common_args(self, cmd, args, module_table):
+            cmd.extend([
+                '-std=c89',
+                '-Wall', '-Werror', '-Wpedantic',
+            ] + self.warning_flags)
 
             cmd.extend(['-o', args.binary_name])
 
@@ -5941,15 +5976,41 @@ def Platform(ns):
                 [args.out_srcs_dir]
             ]
 
+            self.add_includes_and_sources(cmd, src_dirs)
+
+            libs = {
+                lib.name
+                for module in module_table.values()
+                for lib in module.libs
+            }
+
+            for lib in sorted(libs):
+                cmd.append(f'-l{lib}')
+
+        def add_includes_and_sources(self, cmd, src_dirs):
             for src_dir in src_dirs:
-                quoted_path = shlex.quote(src_dir)
-                cmd.append(f'-I{quoted_path}')
+                cmd.extend([f'-I', src_dir])
 
             for src_dir in src_dirs:
                 for file_name in os.listdir(src_dir):
                     if file_name.endswith('.c'):
                         file_path = os.path.join(src_dir, file_name)
                         cmd.append(file_path)
+
+    class Linux(SimpleUnixCompiler):
+        """
+        Basic compiler for Linux desktops,
+        assumes gcc is available.
+        """
+
+        @property
+        def warning_flags(self):
+            return super().warning_flags + ['-Wno-unused-but-set-variable']
+
+        def build_command(self, args, module_table):
+            cmd = ['gcc']
+
+            self.add_common_args(cmd, args, module_table)
 
             # Link the standard math library.
             # Even though it's standard, in linux environments
@@ -5959,42 +6020,25 @@ def Platform(ns):
 
             return cmd
 
-    class OSX(SimpleCompiler):
+    class OSX(SimpleUnixCompiler):
+
+        @property
+        def warning_flags(self):
+            return super().warning_flags + ['-Wno-missing-braces']
+
         def build_command(self, args, module_table):
-            cmd = [
-                'clang',
-                '-std=c89',
-                '-Wall', '-Werror', '-Wpedantic',
-                '-Wno-unused-variable',
-                '-Wno-unused-label',
-                '-Wno-missing-braces',
-                '-Wno-unused-function',
-            ]
+            cmd = ['clang']
 
-            cmd.extend(['-o', args.binary_name])
+            self.add_common_args(cmd, args, module_table)
 
-            if args.debugging_symbols:
-                cmd.append('-g')
+            frameworks = {
+                framework.name
+                for module in module_table.values()
+                for framework in module.frameworks
+            }
 
-            if args.optimize:
-                cmd.append('-O3')
-
-            src_dirs = [os.path.abspath(path) for path in
-                [args.runtime_sources_directory] +
-                [args.out_srcs_dir]
-            ]
-
-            for src_dir in src_dirs:
-                quoted_path = shlex.quote(src_dir)
-                cmd.append(f'-I{quoted_path}')
-
-            for src_dir in src_dirs:
-                for file_name in os.listdir(src_dir):
-                    if file_name.endswith('.c'):
-                        file_path = os.path.join(src_dir, file_name)
-                        cmd.append(file_path)
-
-            cmd.append('-lobjc')
+            for framework in sorted(frameworks):
+                cmd.extend(['-framework', framework])
 
             return cmd
 
