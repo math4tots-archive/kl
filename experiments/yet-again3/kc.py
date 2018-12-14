@@ -6047,7 +6047,7 @@ def Platform(ns):
                 for lib in module.libs
             }
 
-            for lib in sorted(libs):
+            for lib in sorted(set(libs)):
                 cmd.append(f'-l{lib}')
 
         def add_includes_and_sources(self, cmd, src_dirs):
@@ -6100,7 +6100,7 @@ def Platform(ns):
                 for framework in module.frameworks
             }
 
-            for framework in sorted(frameworks):
+            for framework in sorted(set(frameworks)):
                 cmd.extend(['-framework', framework])
 
             return cmd
