@@ -5,6 +5,7 @@ import contextlib
 import itertools
 import os
 import re
+import shutil
 import subprocess
 import sys
 import typing
@@ -1965,6 +1966,10 @@ def IR(ns):
                 typeutil.Optional[typeutil.Or[ClassDefinition, VarType]]),
         )
 
+    @ns
+    def extensions_for(args):
+        return (f'.{args.platform}.k', '.k')
+
 
 @Namespace
 def parser(ns):
@@ -2038,16 +2043,13 @@ def parser(ns):
                     f'module name)')
 
         def _find_module_path(self, module_name):
-            self.args.debug(f'Searching for module {module_name}')
             for search_dir in self.search_dirs:
-                for extension in [f'.{self.args.platform}.k', '.k']:
+                for extension in IR.extensions_for(self.args):
                     path = os.path.join(
                         search_dir,
                         module_name.replace('.', os.path.sep) + extension,
                     )
-                    self.args.debug(f'Checking {module_name} -> {path}')
                     if os.path.exists(path):
-                        self.args.debug(f'Found! {module_name} -> {path}')
                         return path
             raise self.error(f'Could not find path for {module_name}')
 
@@ -2055,6 +2057,7 @@ def parser(ns):
             if module_name not in self.cache:
                 self.check_module_name(module_name)
                 path = self._find_module_path(module_name)
+                self.args.debug(f'Found module {module_name} at {path}')
                 try:
                     with open(path) as f:
                         data = f.read()
@@ -3981,10 +3984,16 @@ def parser(ns):
                 expect('STRING')
                 implicit_builtins = False
             elif consume_name('lib'):
-                libs.append(IR.RequireLib(itoken, expect_string_or_name()))
+                value = expect_string_or_name()
+                global_scope.args.trace(
+                    f'{module_name} requires lib {value}')
+                libs.append(IR.RequireLib(itoken, value))
             elif consume_name('framework'):
+                value = expect_string_or_name()
+                global_scope.args.trace(
+                    f'{module_name} requires framework {value}')
                 frameworks.append(
-                    IR.RequireFramework(itoken, expect_string_or_name()))
+                    IR.RequireFramework(itoken, value))
             else:
                 expect_name('include')
                 use_quotes = at('STRING')
@@ -4124,10 +4133,11 @@ def C(ns):
         return prefix + ''.join(map(encode_char, name))
 
     def relative_header_path_from_name(module_name):
-        return module_name.replace('.', os.path.sep) + '.k.h'
+        assert Source.module_name_pattern.match(module_name)
+        return module_name + '.k.h'
 
     def relative_source_path_from_name(module_name):
-        return module_name.replace('.', os.path.sep) + '.k.c'
+        return module_name + '.k.c'
 
     class TranslationUnit(IR.Node):
         node_fields = (
@@ -6084,6 +6094,10 @@ def Main(ns):
         def _printerr(type, msg):
             sys.stderr.write(f'{type}: {msg}\n')
 
+        def _trace(msg):
+            if args.verbosity >= 4:
+                _printerr('TRACE', msg)
+
         def _debug(msg):
             if args.verbosity >= 3:
                 _printerr('DEBUG', msg)
@@ -6096,13 +6110,19 @@ def Main(ns):
             if args.verbosity >= 1:
                 _printerr('WARN', msg)
 
+        args.trace = _trace
         args.debug = _debug
         args.info = _info
         args.warn = _warn
 
     def _set_common_args(aparser):
         aparser.add_argument(
-            '--verbosity', '-v', type=int, default=1, choices=(0, 1, 2, 3))
+            '--verbosity',
+            '-v',
+            type=int,
+            default=1,
+            choices=(0, 1, 2, 3, 4),
+        )
 
         # Needed for resolving symbols across files when parsing.
         aparser.add_argument('--search-dirs', nargs='*', default=[])
@@ -6159,6 +6179,17 @@ def Main(ns):
             source,
             args=args,
         )
+        args.debug(f'parse finished~')
+        if args.verbosity >= 4:
+            args.trace(f'BEGIN: DUMPING SYMBOLS')
+            for module in module_table.values():
+                args.trace(module.name)
+                for defn in module.definitions:
+                    if hasattr(defn, 'short_name'):
+                        args.trace(f'  {defn.short_name}')
+                    else:
+                        args.trace(f'  {defn.name}')
+            args.trace(f'END: DUMPING MODULE NAMES')
         return module_table
 
     def _parse(args):
@@ -6176,9 +6207,11 @@ def Main(ns):
             print(module.format())
 
     def _translate(args, module_table):
+        args.trace(f'modules to be translated = {sorted(module_table)}')
         tu_table = {
             name: C.translate(module) for name, module in module_table.items()
         }
+        shutil.rmtree(args.out_srcs_dir)
         for tu in tu_table.values():
             C.write_out(tu, out_dir=args.out_srcs_dir)
 
@@ -6236,13 +6269,87 @@ def Main(ns):
         _translate(args=args, module_table=module_table)
         _compile(args=args, module_table=module_table)
         _run(args=args)
-    #
-    # def _test(args):
-    #     pass
-    #
-    # @command
-    # def test(aparser):
-    #     aparser.add_argument('module')
+
+    def _find_test_modules_in_dir(args, dir, search_dir):
+
+        exts = IR.extensions_for(args)
+        test_exts = tuple(f'_test{ext}' for ext in exts)
+
+        def module_name_from_path(path):
+            relpath = os.path.relpath(os.path.dirname(path), search_dir)
+            if relpath == '.' or not relpath:
+                prefix = ''
+            else:
+                prefix = relpath.replace(os.path.sep, '.') + '.'
+
+            ext = max(
+                (ext for ext in exts if filename.endswith(ext)),
+                key=lambda ext: len(ext)
+            )
+            short_name = filename[:-len(ext)]
+            name = f'{prefix}{short_name}'
+            args.debug(f'found test module from {search_dir}: {name}')
+            return name
+
+        for ext in test_exts:
+            path = dir + ext
+            if os.path.exists(path):
+                yield module_name_from_path(path)
+
+        for dirpath, dirnames, filenames in os.walk(dir):
+            for filename in filenames:
+                path = os.path.join(dirpath, filename)
+                if path.endswith(test_exts):
+                    yield module_name_from_path(path)
+
+    def _find_test_modules(args):
+        for search_dir in args.search_dirs:
+            for module_name in args.modules:
+                if module_name in ('*', ''):
+                    relpath = search_dir
+                else:
+                    relpath = os.path.join(
+                        search_dir, *module_name.split('.'))
+                yield from _find_test_modules_in_dir(
+                    args=args,
+                    dir=os.path.join(search_dir, relpath),
+                    search_dir=search_dir,
+                )
+
+    def _build_test_source(args, module_names):
+        sb = FractalStringBuilder(0)
+        sb += f'// AUTO-GENERATED MAIN FOR TEST'
+        for i, module_name in enumerate(module_names):
+            sb += f'from {module_name} import main as test{i}'
+        sb += 'void main() {'
+        body = sb.spawn(1)
+        sb += '}'
+
+        for i, module_name in enumerate(module_names):
+            body += f'print("Running {module_name}...")'
+            body += f'test{i}()'
+        body += f'print("All tests pass!")'
+
+        args.debug(str(sb))
+
+        return Source(MAIN_MODULE_NAME, '<test>', str(sb))
+
+    def _test(args):
+        module_names = sorted(_find_test_modules(args))
+        args.debug(f'test modules = {module_names}')
+        test_source = _build_test_source(args, module_names)
+        module_table = _parse_source(args, test_source)
+        _translate(args=args, module_table=module_table)
+        _compile(args=args, module_table=module_table)
+        _run(args=args)
+
+    @command
+    def test(aparser):
+        aparser.add_argument('modules', nargs='+')
+        _set_common_args(aparser)
+        args = yield
+        _process_common_args(args)
+        _test(args)
 
 
 if __name__ == '__main__':

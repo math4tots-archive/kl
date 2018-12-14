@@ -35,7 +35,7 @@ void asdf_dump_methods(Class cls) {
   while (i < n) {
     Method m = methods[i]
     printf(
-      c"method name = %s, type encoding = %s\n",
+      c"  method name = %s, type encoding = %s\n",
       sel_getName(method_getName(m)),
       method_getTypeEncoding(m),
     )
