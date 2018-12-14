@@ -18,6 +18,7 @@ extern Class class_getSuperclass(Class cls)
 extern BOOL class_isMetaClass(Class cls)
 extern size_t class_getInstanceSize(Class cls)
 extern Method* class_copyMethodList(Class cls, c_unsigned_int* outCount)
+extern Method class_getInstanceMethod(Class cls, SEL name)
 
 // Working with Selectors
 extern c_char const* sel_getName(SEL sel)
@@ -29,6 +30,11 @@ extern c_char const* method_getTypeEncoding(Method m)
 extern c_unsigned_int method_getNumberOfArguments(Method m)
 extern c_char* method_copyReturnType(Method m)
 extern c_char* method_copyArgumentType(Method m, c_unsigned_int index)
+extern id method_invoke(id receiver, Method m, ...)
+
+// Working with Instances
+extern Class object_getClass(id obj)
+
 
 void asdf_dump_methods(Class cls) {
   c_unsigned_int outCount

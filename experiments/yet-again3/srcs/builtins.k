@@ -287,6 +287,8 @@ class String(Object) {
     ret
   }
 
+  static c_char const* toCString(String s) = s->_buffer
+
   String __add(String other) {
     int new_size = _size + other->_size
     c_char* new_buffer = cmalloc(new_size + 1)
