@@ -137,46 +137,27 @@ def IR(ns):
     class Type(Node):
         pass
 
-    class PrimitiveType(Type):
+    class BuiltinType(Type):
         name: str
 
-    class ClassLike(Type):
-        name: str
+    VOID = BuiltinType('void')
+    BOOL = BuiltinType('bool')
+    INT = BuiltinType('int')
+    FLOAT = BuiltinType('float')
+    STRING = BuiltinType('String')
+    LIST = BuiltinType('List')
+    MAP = BuiltinType('Map')
+    FUNCTION = BuiltinType('Function')
 
     class Expression(Node):
         pass
-
-    class Field(Node):
-        cls: ClassLike
-        type: Type
-        name: str
 
     class Parameter(Node):
         type: Type
         name: str
 
-    class Method(Node):
-        cls: ClassLike
+    class Function(Node):
         return_type: Type
         name: str
         parameters: typing.List[Parameter] = lambda: []
         body: Expression
-
-    class _Trait(ClassLike):
-        pass
-
-    class Trait(ClassLike, _Trait):
-        traits: typing.List[_Trait] = lambda: []
-        methods: typing.Dict[str, Method] = lambda: {}
-
-    class _Class(ClassLike):
-        pass
-
-    @ns
-    class Class(_Class):
-        base: _Class
-        traits: typing.List[_Trait] = lambda: []
-        fields: typing.Dict[str, Field] = lambda: {}
-        methods: typing.Dict[str, Method] = lambda: {}
-
-    print(Class())
