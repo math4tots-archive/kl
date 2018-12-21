@@ -66,7 +66,21 @@ class Multimethod:
 
 
 @Namespace
-def IR(ns):
+def AST(ns):
+
+    @ns
+    class Source(typing.NamedTuple):
+        name: str
+        path: str
+        data: str
+
+    @ns
+    class Token(typing.NamedTuple):
+        source: Source
+        start: int
+        end: int
+        type: str
+        value: object
 
     class NodeMeta(type):
         def __new__(mcs, name, bases, d):
@@ -127,6 +141,7 @@ def IR(ns):
 
             return cls
 
+    @ns
     class Node(NodeMeta('Node', (), dict())):
         def __repr__(self):
             fields = getattr(type(self), '@fields')
@@ -134,30 +149,58 @@ def IR(ns):
                 f'{n}={repr(getattr(self, n))}' for n in fields)
             return f'{type(self).__name__}({argstr})'
 
-    class Type(Node):
-        pass
-
-    class BuiltinType(Type):
-        name: str
-
-    VOID = BuiltinType('void')
-    BOOL = BuiltinType('bool')
-    INT = BuiltinType('int')
-    FLOAT = BuiltinType('float')
-    STRING = BuiltinType('String')
-    LIST = BuiltinType('List')
-    MAP = BuiltinType('Map')
-    FUNCTION = BuiltinType('Function')
-
+    @ns
     class Expression(Node):
-        pass
+        token: Token
+        start: Token
+        end: Token
 
-    class Parameter(Node):
-        type: Type
+    @ns
+    class Module(Node):
+        name: str
+        vars: typing.Set[str]
+        exprs: typing.List[Expression]
+
+    @ns
+    class Literal(Expression):
+        value: object
+
+    @ns
+    class GetVar(Expression):
         name: str
 
-    class Function(Node):
-        return_type: Type
+    @ns
+    class SetVar(Expression):
         name: str
-        parameters: typing.List[Parameter] = lambda: []
+        expr: Expression
+
+    @ns
+    class GetField(Expression):
+        owner: Expression
+        name: str
+
+    @ns
+    class SetField(Expression):
+        owner: Expression
+        name: str
+        expr: Expression
+
+    @ns
+    class Block(Expression):
+        exprs: typing.List[Expression]
+
+    @ns
+    class FunctionCall(Expression):
+        f: Expression
+        args: typing.List[Expression]
+        vararg: typing.Optional[Expression]
+
+    @ns
+    class Function(Expression):
+        name: str
+        params: typing.List[str]
+        varparm: typing.Optional[str]
+        vars: typing.Set[str]
         body: Expression
+
+    print(Block())
