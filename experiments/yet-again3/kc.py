@@ -6020,6 +6020,10 @@ def Platform(ns):
                 '-Wno-unused-variable',
             ]
 
+        @property
+        def source_extensions(self):
+            return ('.c',)
+
         def add_common_args(self, cmd, args, module_table):
             cmd.extend([
                 '-std=c89',
@@ -6056,7 +6060,7 @@ def Platform(ns):
 
             for src_dir in src_dirs:
                 for file_name in os.listdir(src_dir):
-                    if file_name.endswith('.c'):
+                    if file_name.endswith(self.source_extensions):
                         file_path = os.path.join(src_dir, file_name)
                         cmd.append(file_path)
 
@@ -6088,6 +6092,10 @@ def Platform(ns):
         @property
         def warning_flags(self):
             return super().warning_flags + ['-Wno-missing-braces']
+
+        @property
+        def source_extensions(self):
+            return super().source_extensions + ('.m', )
 
         def build_command(self, args, module_table):
             cmd = ['clang']
@@ -6275,25 +6283,6 @@ def Main(ns):
         args = yield
         _process_common_args(args)
         _translate(args=args, module_table=_parse(args))
-
-    def _set_compile_args(aparser):
-        _set_translate_args(aparser)
-        aparser.add_argument('--platform', default=None)
-        aparser.add_argument('--binary-name', '-o', default=None)
-        aparser.add_argument(
-            '--runtime-sources-directory',
-            default=os.path.join(_scriptdir, 'rt'),
-        )
-        aparser.add_argument(
-            '--debugging-symbols', '-g',
-            action='store_true',
-            default=False,
-        )
-        aparser.add_argument(
-            '--optimize', '-O3',
-            action='store_true',
-            default=False,
-        )
 
     def _compile(args, module_table):
         Platform.compile(args=args, module_table=module_table)
