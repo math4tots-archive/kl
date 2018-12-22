@@ -3138,6 +3138,12 @@ def parser(ns):
                     target.field_defn,
                     val,
                 )
+            elif isinstance(target, IR.InstanceMethodReference):
+                return IR.InstanceMethodCall(
+                    token,
+                    f'__SET{target.name}',
+                    [target.owner, scope.convert(val, IR.VAR_TYPE)],
+                )
             elif isinstance(target, IR.GetItem):
                 return IR.InstanceMethodCall(
                     token,
@@ -6147,7 +6153,7 @@ def Platform(ns):
             return super().source_extensions + ('.m', )
 
         def build_command(self, args, module_table):
-            cmd = ['clang']
+            cmd = ['clang', '-fobjc-arc']
 
             self.add_common_args(cmd, args, module_table)
 
@@ -6390,7 +6396,8 @@ def Main(ns):
         for dirpath, dirnames, filenames in os.walk(dir):
             for filename in filenames:
                 path = os.path.join(dirpath, filename)
-                if path.endswith(test_exts):
+                if (path.endswith(test_exts) or
+                        filename in [f'test{ext}' for ext in exts]):
                     yield module_name_from_path(path)
 
     def _find_test_modules(args):

@@ -866,13 +866,23 @@ KLC_Class* KLC_get_class(KLC_var v) {
   return NULL;
 }
 
-KLC_MethodEntry* KLC_find_method(KLC_Class* cls, const char* name) {
+KLC_MethodEntry* KLC_find_instance_method(KLC_Class* cls, const char* name) {
   return KLC_find_method_in_list(cls->methods, cls->number_of_methods, name);
 }
 
 KLC_MethodEntry* KLC_find_class_method(KLC_Class* cls, const char* name) {
   return KLC_find_method_in_list(
     cls->class_methods, cls->number_of_class_methods, name);
+}
+
+KLC_bool KLC_has_method(KLC_var x, const char* name) {
+  if (x.tag == KLC_TAG_TYPE) {
+    KLC_Class* cls = (KLC_Class*) x.u.p;
+    return KLC_find_class_method(cls, name) != NULL;
+  } else {
+    KLC_Class* cls = KLC_get_class(x);
+    return cls && KLC_find_instance_method(cls, name) != NULL;
+  }
 }
 
 KLC_Error* KLC_call_method(
@@ -909,7 +919,7 @@ KLC_Error* KLC_call_method(
   if (is_class_method_call) {
     method_entry = KLC_find_class_method(cls, name);
   } else {
-    method_entry = KLC_find_method(cls, name);
+    method_entry = KLC_find_instance_method(cls, name);
   }
 
   if (!method_entry) {

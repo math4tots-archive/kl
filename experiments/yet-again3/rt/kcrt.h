@@ -114,8 +114,9 @@ KLC_Error* KLC_var_to_float(KLC_Stack*, KLC_float* out, KLC_var);
 KLC_Error* KLC_var_to_type(KLC_Stack*, KLC_Class** out, KLC_var);
 
 KLC_Class* KLC_get_class(KLC_var);
-KLC_MethodEntry* KLC_find_method(KLC_Class*, const char*);
+KLC_MethodEntry* KLC_find_instance_method(KLC_Class*, const char*);
 KLC_MethodEntry* KLC_find_class_method(KLC_Class*, const char*);
+KLC_bool KLC_has_method(KLC_var, const char*);
 KLC_Error* KLC_call_method(KLC_Stack*, KLC_var*, const char*, int, KLC_var*);
 
 KLC_int KLC_get_tag(KLC_var x);
@@ -135,6 +136,9 @@ char const *KLC_cstr(struct KLCCSbuiltins_DString* KLCLPs);
 KLC_Error* KLC_new_error_from_string(
   KLC_Stack* stack,
   struct KLCCSbuiltins_DString*);
+
+KLC_var KLC_mklist(); /* For building lists */
+void KLC_list_push(KLC_var list, KLC_var x);
 
 /* Expected entry point */
 KLC_Error *KLCFNmain_Dmain(KLC_Stack *KLC_stack, void *KLC_output_ptr);

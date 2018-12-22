@@ -565,3 +565,9 @@ String str(var x) {
 void print(var x) {
   printf(c"%s\n", str(x)->_buffer)
 }
+
+// For creating List instances from C
+extern var KLC_mklist() = []
+extern void KLC_list_push(var list, var x) {
+  list.push(x)
+}
