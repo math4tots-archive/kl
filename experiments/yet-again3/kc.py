@@ -1929,6 +1929,12 @@ def IR(ns):
         )
 
     @ns
+    class AdditionalSource(Node):
+        node_fields = (
+            ('path', str),
+        )
+
+    @ns
     class BaseImport(Node):
         pass
 
@@ -1965,9 +1971,10 @@ def IR(ns):
         node_fields = (
             ('name', str),
             ('includes', typeutil.List[Include]),
-            ('imports', typeutil.List[BaseImport]),
+            ('additional_sources', typeutil.List[AdditionalSource]),
             ('libs', typeutil.List[RequireLib]),
             ('frameworks', typeutil.List[RequireFramework]),
+            ('imports', typeutil.List[BaseImport]),
             ('definitions', typeutil.List[GlobalDefinition]),
         )
 
@@ -2267,6 +2274,11 @@ def parser(ns):
         assert global_scope.parent is None
         module_scope = Scope(global_scope)
         module_name = source.name
+        module_dirpath = (
+            os.path.dirname(source.filename) if source.filename else None
+        )
+        if module_dirpath:
+            assert os.path.isdir(module_dirpath), module_dirpath
         tokens = lexer.lex(source)
         i = 0
         indent_stack = []
@@ -4024,10 +4036,11 @@ def parser(ns):
 
         module_token = peek()
         includes = []
-        importps = []
-        defnps = []
+        additional_sources = []
         libs = []
         frameworks = []
+        importps = []
+        defnps = []
 
         implicit_builtins = True
         consume_all('\n')
@@ -4047,6 +4060,18 @@ def parser(ns):
                     f'{module_name} requires framework {value}')
                 frameworks.append(
                     IR.RequireFramework(itoken, value))
+            elif consume_name('source'):
+                assert module_dirpath, source.name
+                relpath = expect('STRING').value
+                abspath = os.path.abspath(
+                    os.path.join(module_dirpath, relpath)
+                )
+                if not os.path.isfile(abspath):
+                    with scope.push(itoken):
+                        raise scope.error(f'No such file {repr(abspath)}')
+                additional_sources.append(IR.AdditionalSource(
+                    itoken, abspath,
+                ))
             else:
                 expect_name('include')
                 use_quotes = at('STRING')
@@ -4081,9 +4106,10 @@ def parser(ns):
             token=module_token,
             name=module_name,
             includes=includes,
-            imports=[p.resolve() for p in importps],
+            additional_sources=additional_sources,
             libs=libs,
             frameworks=frameworks,
+            imports=[p.resolve() for p in importps],
             definitions=[p.resolve() for p in defnps],
         ))
 
@@ -6043,7 +6069,18 @@ def Platform(ns):
                 [args.out_srcs_dir]
             ]
 
-            self.add_includes_and_sources(cmd, src_dirs)
+            additional_source_paths = sorted({
+                additional_source.path
+                for module in module_table.values()
+                for additional_source in module.additional_sources
+            })
+
+            self._add_includes_and_sources(
+                cmd=cmd,
+                src_dirs=src_dirs,
+                additional_include_dirs=args.search_dirs,
+                additional_source_paths=additional_source_paths,
+            )
 
             libs = {
                 lib.name
@@ -6054,15 +6091,27 @@ def Platform(ns):
             for lib in sorted(set(libs)):
                 cmd.append(f'-l{lib}')
 
-        def add_includes_and_sources(self, cmd, src_dirs):
+        def _add_includes_and_sources(
+                self,
+                *,
+                cmd,
+                src_dirs,
+                additional_include_dirs,
+                additional_source_paths):
             for src_dir in src_dirs:
-                cmd.extend([f'-I', src_dir])
+                cmd.extend(['-I', src_dir])
+
+            for additional_include_dir in additional_include_dirs:
+                cmd.extend(['-I', additional_include_dir])
 
             for src_dir in src_dirs:
                 for file_name in os.listdir(src_dir):
                     if file_name.endswith(self.source_extensions):
                         file_path = os.path.join(src_dir, file_name)
                         cmd.append(file_path)
+
+            for additional_source_path in additional_source_paths:
+                cmd.append(additional_source_path)
 
     class Linux(SimpleUnixCompiler):
         """
