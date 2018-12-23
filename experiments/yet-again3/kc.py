@@ -6327,7 +6327,7 @@ def Main(ns):
         tu_table = {
             name: C.translate(module) for name, module in module_table.items()
         }
-        shutil.rmtree(args.out_srcs_dir)
+        shutil.rmtree(args.out_srcs_dir, ignore_errors=True)
         for tu in tu_table.values():
             C.write_out(tu, out_dir=args.out_srcs_dir)
 
