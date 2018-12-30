@@ -19,6 +19,11 @@
 #define KL_IF 305
 #define KL_WHILE 306
 #define KL_FUNCTION_DISPLAY 307
+
+#define KL_RETAINABLE_START 100
+#define KL_AST_START 300
+#define KL_AST_END 400
+
 typedef struct KL KL;
 typedef struct KL_Value KL_Value;
 typedef struct KL_Index KL_Index;
@@ -41,9 +46,12 @@ struct KL_Index {  /* For fast Scope lookup */
 KL *KL_new();
 void KL_delete(KL*);
 void KL_panic(KL*);
+void KL_panic_with_message(KL*, const char*);
 const char *KL_type_str(int);
+int KL_is_nil(KL*, KL_Value);
 int KL_is_type(KL*, KL_Value, int);
 int KL_is_type_ast(KL*, KL_Value);
+int KL_is_retainable(KL*, KL_Value);
 void KL_assert(KL*, int);
 void KL_assert_type(KL*, KL_Value, int);
 void KL_assert_type_ast(KL*, KL_Value);
@@ -54,7 +62,7 @@ KL_Value KL_new_number(KL*, double);
 KL_Value KL_new_string(KL*, const char*);
 KL_Value KL_new_list(KL*);
 KL_Value KL_new_function(KL*, KL_Value, KL_Value);
-KL_Value KL_new_builtin(KL*, KL_Value, KL_BF);
+KL_Value KL_new_builtin(KL*, KL_Value, KL_BF*);
 KL_Value KL_new_scope(KL*, KL_Value);
 KL_Value KL_new_source(KL*, KL_Value, KL_Value);
 KL_Value KL_new_token(KL*, KL_Value, size_t, KL_Value, KL_Value);
