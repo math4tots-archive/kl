@@ -168,6 +168,26 @@ static char *KL_strcpy(const char *cstr) {
   return ret;
 }
 
+static int KL_startswith(const char *s, const char *prefix, size_t i) {
+  s += i;
+  while (*s && *prefix) {
+    if (*s != *prefix) {
+      return 0;
+    }
+    s++;
+    prefix++;
+  }
+  return *s == *prefix;
+}
+
+static const char *KL_source_cstr(KL *kl, KL_Value source) {
+  KL_Value data;
+  KL_assert_type(kl, source, KL_SOURCE);
+  data = CAST(source, KL_Source).data;
+  KL_assert_type(kl, data, KL_STRING);
+  return CAST(data, KL_String).buffer;
+}
+
 KL *KL_new() {
   KL *kl = MALLOC(KL);
   kl->nilv.type = KL_NIL;
@@ -536,7 +556,6 @@ KL_Value KL_new_function_display(
   return ret;
 }
 
-
 void KL_retain(KL *kl, KL_Value value) {
   if (KL_is_retainable(kl, value)) {
     value.u.pointer->refcnt++;
@@ -742,8 +761,9 @@ int KL_truthy(KL *kl, KL_Value value) {
 
 KL_Value KL_lex(KL *kl, KL_Value source) {
   KL_Value tokens = KL_new_list(kl);
-  UNUSED(kl);
   UNUSED(source);
+  UNUSED(KL_startswith);
+  UNUSED(KL_source_cstr);
   KL_panic_with_message(kl, "TODO: KL_lex");
   return tokens;
 }
