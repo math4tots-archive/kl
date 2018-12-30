@@ -457,7 +457,7 @@ KL_Value KL_list_get(KL *kl, KL_Value list, size_t i) {
   KL_Value ret;
   KL_assert_list_bound(kl, list, i);
   ret = CAST(list, KL_List).buffer[i];
-  KL_release(kl, ret);
+  KL_retain(kl, ret);
   return ret;
 }
 
