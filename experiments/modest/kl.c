@@ -145,6 +145,7 @@ static void KL_init_retainable(KL *kl, KL_Retainable *r) {
 }
 
 static void KL_init_ast(KL *kl, KL_Ast *r, KL_Value token) {
+  KL_assert_type(kl, token, KL_TOKEN);
   KL_init_retainable(kl, (KL_Retainable*) r);
   KL_retain(kl, token);
   r->token = token;
@@ -158,6 +159,13 @@ static void KL_assert_list_bound(KL *kl, KL_Value list, size_t i) {
 static void KL_free(KL *kl, KL_Value value) {
   UNUSED(value);
   KL_panic_with_message(kl, "TODO: KL_free");
+}
+
+static char *KL_strcpy(const char *cstr) {
+  size_t size = strlen(cstr);
+  char *ret = MALLOC_STR(size + 1);
+  strcpy(ret, cstr);
+  return ret;
 }
 
 KL *KL_new() {
@@ -318,8 +326,7 @@ KL_Value KL_new_string(KL *kl, const char *cstr) {
   ret.u.pointer = (KL_Retainable*) s;
   KL_init_retainable(kl, ret.u.pointer);
   s->size = len;
-  s->buffer = MALLOC_STR(len + 1);
-  strcpy(s->buffer, cstr);
+  s->buffer = KL_strcpy(cstr);
   return ret;
 }
 
@@ -416,7 +423,6 @@ KL_Value KL_new_token(
 KL_Value KL_new_literal(KL *kl, KL_Value token, KL_Value value) {
   KL_Value ret;
   KL_Literal *lit = MALLOC(KL_Literal);
-  KL_assert_type(kl, token, KL_TOKEN);
   ret.type = KL_LITERAL;
   ret.u.pointer = (KL_Retainable*) lit;
   KL_init_ast(kl, (KL_Ast*) lit, token);
@@ -425,13 +431,111 @@ KL_Value KL_new_literal(KL *kl, KL_Value token, KL_Value value) {
   return ret;
 }
 
-KL_Value KL_new_get_var(KL*, KL_Value, const char*);
-KL_Value KL_new_set_var(KL*, KL_Value, const char*, KL_Value);
-KL_Value KL_new_block(KL*, KL_Value, KL_Value);
-KL_Value KL_new_function_call(KL*, KL_Value, KL_Value, KL_Value);
-KL_Value KL_new_if(KL*, KL_Value, KL_Value, KL_Value, KL_Value);
-KL_Value KL_new_while(KL*, KL_Value, KL_Value, KL_Value);
-KL_Value KL_new_function_display(KL*, KL_Value, KL_Value, KL_Value, KL_Value);
+KL_Value KL_new_get_var(KL *kl, KL_Value token, const char *name) {
+  KL_Value ret;
+  KL_GetVar *gv = MALLOC(KL_GetVar);
+  ret.type = KL_GET_VAR;
+  ret.u.pointer = (KL_Retainable*) gv;
+  KL_init_ast(kl, (KL_Ast*) gv, token);
+  gv->name = KL_strcpy(name);
+  return ret;
+}
+
+KL_Value KL_new_set_var(
+    KL *kl, KL_Value token, const char *name, KL_Value expr) {
+  KL_Value ret;
+  KL_SetVar *sv = MALLOC(KL_SetVar);
+  KL_assert_type_ast(kl, expr);
+  ret.type = KL_SET_VAR;
+  ret.u.pointer = (KL_Retainable*) sv;
+  KL_init_ast(kl, (KL_Ast*) sv, token);
+  KL_retain(kl, expr);
+  sv->name = KL_strcpy(name);
+  sv->expr = expr;
+  return ret;
+}
+
+KL_Value KL_new_block(KL *kl, KL_Value token, KL_Value exprs) {
+  KL_Value ret;
+  KL_Block *b = MALLOC(KL_Block);
+  KL_assert_type_list_of_ast(kl, exprs);
+  ret.type = KL_BLOCK;
+  ret.u.pointer = (KL_Retainable*) b;
+  KL_init_ast(kl, (KL_Ast*) b, token);
+  KL_retain(kl, exprs);
+  b->exprs = exprs;
+  return ret;
+}
+
+KL_Value KL_new_function_call(
+    KL *kl, KL_Value token, KL_Value fexpr, KL_Value argexprs) {
+  KL_Value ret;
+  KL_FunctionCall *p = MALLOC(KL_FunctionCall);
+  KL_assert_type_ast(kl, fexpr);
+  KL_assert_type_list_of_ast(kl, argexprs);
+  ret.type = KL_FUNCTION_CALL;
+  ret.u.pointer = (KL_Retainable*) p;
+  KL_init_ast(kl, (KL_Ast*) p, token);
+  KL_retain(kl, fexpr);
+  KL_retain(kl, argexprs);
+  p->fexpr = fexpr;
+  p->argexprs = argexprs;
+  return ret;
+}
+
+KL_Value KL_new_if(
+    KL *kl, KL_Value token, KL_Value cond, KL_Value body, KL_Value other) {
+  KL_Value ret;
+  KL_If *p = MALLOC(KL_If);
+  KL_assert_type_ast(kl, cond);
+  KL_assert_type_ast(kl, body);
+  KL_assert_type_ast(kl, other);
+  ret.type = KL_IF;
+  ret.u.pointer = (KL_Retainable*) p;
+  KL_init_ast(kl, (KL_Ast*) p, token);
+  KL_retain(kl, cond);
+  KL_retain(kl, body);
+  KL_retain(kl, other);
+  p->cond = cond;
+  p->body = body;
+  p->other = other;
+  return ret;
+}
+
+KL_Value KL_new_while(KL *kl, KL_Value token, KL_Value cond, KL_Value body) {
+  KL_Value ret;
+  KL_While *p = MALLOC(KL_While);
+  KL_assert_type_ast(kl, cond);
+  KL_assert_type_ast(kl, body);
+  ret.type = KL_WHILE;
+  ret.u.pointer = (KL_Retainable*) p;
+  KL_init_ast(kl, (KL_Ast*) p, token);
+  KL_retain(kl, cond);
+  KL_retain(kl, body);
+  p->cond = cond;
+  p->body = body;
+  return ret;
+}
+
+KL_Value KL_new_function_display(
+    KL *kl, KL_Value token, KL_Value name, KL_Value argnames, KL_Value body) {
+  KL_Value ret;
+  KL_FunctionDisplay *p = MALLOC(KL_FunctionDisplay);
+  KL_assert_type(kl, name, KL_STRING);
+  KL_assert_type_list_of(kl, argnames, KL_STRING);
+  KL_assert_type_ast(kl, body);
+  ret.type = KL_FUNCTION_DISPLAY;
+  ret.u.pointer = (KL_Retainable*) p;
+  KL_init_ast(kl, (KL_Ast*) p, token);
+  KL_retain(kl, name);
+  KL_retain(kl, argnames);
+  KL_retain(kl, body);
+  p->name = name;
+  p->argnames = argnames;
+  p->body = body;
+  return ret;
+}
+
 
 void KL_retain(KL *kl, KL_Value value) {
   if (KL_is_retainable(kl, value)) {
@@ -457,8 +561,15 @@ void KL_release(KL *kl, KL_Value value) {
   KL_panic_with_message(kl, "TODO: KL_release");
 }
 
-double KL_number_get(KL*, KL_Value);
-const char *KL_string_get(KL*, KL_Value);
+double KL_number_get(KL *kl, KL_Value value) {
+  KL_assert_type(kl, value, KL_NUMBER);
+  return value.u.number;
+}
+
+const char *KL_string_get(KL *kl, KL_Value value) {
+  KL_assert_type(kl, value, KL_STRING);
+  return CAST(value, KL_String).buffer;
+}
 
 size_t KL_list_size(KL *kl, KL_Value list) {
   KL_assert_type(kl, list, KL_LIST);
@@ -473,19 +584,161 @@ KL_Value KL_list_get(KL *kl, KL_Value list, size_t i) {
   return ret;
 }
 
-void KL_list_set(KL*, KL_Value, size_t, KL_Value);
-void KL_list_push(KL*, KL_Value, KL_Value);
-KL_Value KL_list_pop(KL*, KL_Value);
-KL_Value KL_function_invoke(KL*, KL_Value, KL_Value);
-KL_Value KL_builtin_invoke(KL*, KL_Value, KL_Value);
-size_t KL_scope_size(KL*, KL_Value);
-int KL_scope_find(KL*, KL_Value, const char*, KL_Index*);
-KL_Value KL_scope_fast_get(KL*, KL_Value, KL_Index);
-void KL_scope_fast_set(KL*, KL_Value, KL_Index, KL_Value);
-KL_Value KL_scope_get(KL*, KL_Value, const char*);
-KL_Value KL_scope_set(KL*, KL_Value, const char*, KL_Value);
-KL_Value KL_invoke(KL*, KL_Value, KL_Value);
-int KL_truthy(KL*, KL_Value);
+void KL_list_set(KL *kl, KL_Value list, size_t i, KL_Value val) {
+  KL_assert_list_bound(kl, list, i);
+  KL_retain(kl, val);
+  KL_release(kl, CAST(list, KL_List).buffer[i]);
+  CAST(list, KL_List).buffer[i] = val;
+}
+
+void KL_list_push(KL *kl, KL_Value list, KL_Value val) {
+  KL_List *p;
+  KL_assert_type(kl, list, KL_LIST);
+  p = &CAST(list, KL_List);
+  if (p->size >= p->cap) {
+    p->cap = p->cap + p->size + 16;
+    p->buffer = (KL_Value*) realloc(p->buffer, sizeof(KL_Value) * p->cap);
+  }
+  KL_retain(kl, val);
+  p->buffer[p->size++] = val;
+}
+
+KL_Value KL_list_pop(KL *kl, KL_Value list) {
+  KL_List *p;
+  KL_assert_type(kl, list, KL_LIST);
+  p = &CAST(list, KL_List);
+  if (p->size == 0) {
+    KL_panic_with_message(kl, "pop from empty list");
+  }
+  return p->buffer[--p->size];
+}
+
+KL_Value KL_function_invoke(KL *kl, KL_Value f, KL_Value args) {
+  KL_assert_type(kl, f, KL_FUNCTION);
+  UNUSED(args);
+  KL_panic_with_message(kl, "TODO: KL_function_invoke");
+  return KL_nil(kl);
+}
+
+KL_Value KL_builtin_invoke(KL *kl, KL_Value f, KL_Value args) {
+  KL_assert_type(kl, f, KL_BUILTIN);
+  return CAST(f, KL_Builtin).bf(kl, args);
+}
+
+size_t KL_scope_size(KL *kl, KL_Value scope) {
+  KL_assert_type(kl, scope, KL_SCOPE);
+  return CAST(scope, KL_Scope).size;
+}
+
+static int KL_scope_find_here(
+    KL *kl, KL_Value scope, const char *key, KL_Index *index) {
+  KL_Scope *p;
+  size_t i;
+  KL_assert_type(kl, scope, KL_SCOPE);
+  p = &CAST(scope, KL_Scope);
+  for (i = 0; i < p->size; i++) {
+    if (strcmp(key, p->keys[i]) == 0) {
+      index->depth = 0;
+      index->index = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+int KL_scope_find(KL *kl, KL_Value scope, const char *key, KL_Index *index) {
+  KL_Scope *p;
+  KL_assert_type(kl, scope, KL_SCOPE);
+  p = &CAST(scope, KL_Scope);
+  if (KL_scope_find_here(kl, scope, key, index)) {
+    return 1;
+  } else if (!KL_is_nil(kl, p->parent)) {
+    return 0;
+  } else if (KL_scope_find(kl, scope, key, index)) {
+    index->depth++;
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+KL_Value KL_scope_fast_get(KL *kl, KL_Value scope, KL_Index index) {
+  KL_Scope *p;
+  while (index.depth) {
+    KL_assert_type(kl, scope, KL_SCOPE);
+    scope = CAST(scope, KL_Scope).parent;
+    index.depth--;
+  }
+  KL_assert_type(kl, scope, KL_SCOPE);
+  p = &CAST(scope, KL_Scope);
+  KL_retain(kl, p->values[index.index]);
+  return p->values[index.index];
+}
+
+void KL_scope_fast_set(KL *kl, KL_Value scope, KL_Index index, KL_Value val) {
+  KL_Scope *p;
+  while (index.depth) {
+    KL_assert_type(kl, scope, KL_SCOPE);
+    scope = CAST(scope, KL_Scope).parent;
+    index.depth--;
+  }
+  KL_assert_type(kl, scope, KL_SCOPE);
+  p = &CAST(scope, KL_Scope);
+  KL_retain(kl, val);
+  KL_release(kl, p->values[index.index]);
+  p->values[index.index] = val;
+}
+
+KL_Value KL_scope_get(KL *kl, KL_Value scope, const char *key) {
+  KL_Index index;
+  if (KL_scope_find(kl, scope, key, &index)) {
+    return KL_scope_fast_get(kl, scope, index);
+  } else {
+    KL_panic_with_message(kl, "scope_get no such key");
+    return KL_nil(kl);
+  }
+}
+
+void KL_scope_set(KL *kl, KL_Value scope, const char *key, KL_Value val) {
+  KL_Index index;
+  if (KL_scope_find_here(kl, scope, key, &index)) {
+    KL_scope_fast_set(kl, scope, index, val);
+  } else {
+    KL_Scope *p;
+    KL_assert_type(kl, scope, KL_SCOPE);
+    p = &CAST(scope, KL_Scope);
+    if (p->size >= p->cap) {
+      p->cap = p->cap + p->size + 16;
+      p->keys = (char**) realloc(p->keys, sizeof(char*) * p->cap);
+      p->values = (KL_Value*) realloc(p->values, sizeof(KL_Value) * p->cap);
+    }
+    p->keys[p->size] = KL_strcpy(key);
+    p->values[p->size] = val;
+  }
+}
+
+KL_Value KL_invoke(KL *kl, KL_Value f, KL_Value args) {
+  switch (f.type) {
+    case KL_FUNCTION:
+      return KL_function_invoke(kl, f, args);
+    case KL_BUILTIN:
+      return KL_builtin_invoke(kl, f, args);
+  }
+  KL_panic_with_message(kl, "Tried to invoke non-function");
+  return KL_nil(kl);
+}
+
+int KL_truthy(KL *kl, KL_Value value) {
+  switch (value.type) {
+    case KL_NIL:
+      return 0;
+    case KL_NUMBER:
+      return KL_number_get(kl, value) != 0;
+    case KL_LIST:
+      return KL_list_size(kl, value) != 0;
+  }
+  return 1;
+}
 
 KL_Value KL_lex(KL *kl, KL_Value source) {
   KL_Value tokens = KL_new_list(kl);
@@ -495,10 +748,13 @@ KL_Value KL_lex(KL *kl, KL_Value source) {
   return tokens;
 }
 
-KL_Value KL_parse(KL*, KL_Value);
+KL_Value KL_parse(KL *kl, KL_Value source) {
+  UNUSED(source);
+  KL_panic_with_message(kl, "TODO: KL_parse");
+  return KL_nil(kl);
+}
 
 KL_Value KL_eval(KL *kl, KL_Value scope, KL_Value ast) {
-  UNUSED(kl);
   UNUSED(scope);
   UNUSED(ast);
   KL_panic_with_message(kl, "TODO: KL_eval");

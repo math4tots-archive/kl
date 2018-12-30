@@ -90,7 +90,7 @@ int KL_scope_find(KL*, KL_Value, const char*, KL_Index*);
 KL_Value KL_scope_fast_get(KL*, KL_Value, KL_Index);
 void KL_scope_fast_set(KL*, KL_Value, KL_Index, KL_Value);
 KL_Value KL_scope_get(KL*, KL_Value, const char*);
-KL_Value KL_scope_set(KL*, KL_Value, const char*, KL_Value);
+void KL_scope_set(KL*, KL_Value, const char*, KL_Value);
 KL_Value KL_invoke(KL*, KL_Value, KL_Value);
 int KL_truthy(KL*, KL_Value);
 KL_Value KL_lex(KL*, KL_Value);
