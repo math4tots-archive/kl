@@ -155,6 +155,11 @@ static void KL_assert_list_bound(KL *kl, KL_Value list, size_t i) {
   KL_assert(kl, i < size);
 }
 
+static void KL_free(KL *kl, KL_Value value) {
+  UNUSED(value);
+  KL_panic_with_message(kl, "TODO: KL_free");
+}
+
 KL *KL_new() {
   KL *kl = MALLOC(KL);
   kl->nilv.type = KL_NIL;
@@ -435,6 +440,13 @@ void KL_retain(KL *kl, KL_Value value) {
 }
 
 void KL_release(KL *kl, KL_Value value) {
+  if (KL_is_retainable(kl, value)) {
+    if (value.u.pointer->refcnt) {
+      value.u.pointer->refcnt--;
+    } else {
+      KL_free(kl, value);
+    }
+  }
   if (!KL_is_retainable(kl, value)) {
     return;
   }
@@ -474,6 +486,22 @@ KL_Value KL_scope_get(KL*, KL_Value, const char*);
 KL_Value KL_scope_set(KL*, KL_Value, const char*, KL_Value);
 KL_Value KL_invoke(KL*, KL_Value, KL_Value);
 int KL_truthy(KL*, KL_Value);
+
+KL_Value KL_lex(KL *kl, KL_Value source) {
+  KL_Value tokens = KL_new_list(kl);
+  UNUSED(kl);
+  UNUSED(source);
+  KL_panic_with_message(kl, "TODO: KL_lex");
+  return tokens;
+}
+
 KL_Value KL_parse(KL*, KL_Value);
-KL_Value KL_eval(KL*, KL_Value);
+
+KL_Value KL_eval(KL *kl, KL_Value scope, KL_Value ast) {
+  UNUSED(kl);
+  UNUSED(scope);
+  UNUSED(ast);
+  KL_panic_with_message(kl, "TODO: KL_eval");
+  return KL_nil(kl);
+}
 
