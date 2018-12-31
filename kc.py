@@ -6185,7 +6185,8 @@ def Platform(ns):
 def Main(ns):
 
     aparser = argparse.ArgumentParser()
-    subparsers = aparser.add_subparsers()
+    subparsers = aparser.add_subparsers(dest='cmd')
+    subparsers.required = True
 
     def command(f):
         subparser = subparsers.add_parser(f.__name__)
