@@ -6,3 +6,4 @@
 c/generated_*.c
 klc_os.cc
 experimental/gen/
+out/
