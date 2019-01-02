@@ -4274,6 +4274,7 @@ def C(ns):
         def __init__(self):
             self.out = FractalStringBuilder(0)
             self.includes = self.out.spawn()
+            self.pragma_libs = self.out.spawn()  # windows only
             self.struct_defns = self.out.spawn()
             self.static_fdecls = self.out.spawn()
             self.static_vars = self.out.spawn()
@@ -4480,12 +4481,13 @@ def C(ns):
             f.write(tu.c)
 
     @ns
-    def translate(module: IR.Module) -> TranslationUnit:
+    def translate(args, module: IR.Module) -> TranslationUnit:
+        assert isinstance(module, IR.Module), module
         return TranslationUnit(
             module.token,
             module.name,
-            translate_header(module),
-            translate_source(module),
+            _translate_header(module),
+            _translate_source(args, module),
         )
 
     def _get_includes(module):
@@ -4506,7 +4508,7 @@ def C(ns):
         # remove duplicates
         return tuple(collections.OrderedDict.fromkeys(incs))
 
-    def translate_header(module: IR.Module) -> str:
+    def _translate_header(module: IR.Module) -> str:
         guard_name = (
             relative_header_path_from_name(module.name)
                 .replace('.', '_')
@@ -4593,11 +4595,15 @@ def C(ns):
 
         return str(msb)
 
-    def translate_source(module: IR.Module) -> str:
+    def _translate_source(args, module: IR.Module) -> str:
+        assert isinstance(module, IR.Module), module
         ctx = Context()
         ctx.includes += (
             f'#include "{relative_header_path_from_name(module.name)}"'
         )
+        if args.platform == 'win':
+            for lib in module.libs:
+                ctx.pragma_libs += f'#pragma comment(lib, "{lib.name}")'
         debug_filename = module.token.source.filename.replace('\\', '\\\\')
         ctx.static_vars += (
             f'static const char* {DEBUG_FILE_NAME_NAME} = '
@@ -6394,7 +6400,8 @@ def Main(ns):
     def _translate(args, module_table):
         args.trace(f'modules to be translated = {sorted(module_table)}')
         tu_table = {
-            name: C.translate(module) for name, module in module_table.items()
+            name: C.translate(args, module)
+            for name, module in module_table.items()
         }
         shutil.rmtree(args.out_srcs_dir, ignore_errors=True)
         for tu in tu_table.values():
