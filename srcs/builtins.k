@@ -523,7 +523,8 @@ String get_type_str(type t) = (
 String get_int_str(int x) {
   // TODO: Make implementation more portable
   c_char* buffer = cmalloc(64)
-  sprintf(buffer, c"%lu", x)
+  c_long lx = static_cast(c_long, x)
+  sprintf(buffer, c"%ld", lx)
   String ret = String.fromCString(buffer)
   cfree(buffer)
   ret

@@ -4465,7 +4465,15 @@ def C(ns):
             out_dir,
             relative_source_path_from_name(tu.name),
         )
-        os.makedirs(out_dir, exist_ok=True)
+
+        # Windows is flakey about creating/deleting directories
+        # Being explicit about permissions seem to fix it.
+        try:
+            mask = os.umask(0)
+            os.makedirs(out_dir, 0o777, exist_ok=True)
+        finally:
+            os.umask(mask)
+
         with open(header_path, 'w') as f:
             f.write(tu.h)
         with open(source_path, 'w') as f:
@@ -4590,9 +4598,10 @@ def C(ns):
         ctx.includes += (
             f'#include "{relative_header_path_from_name(module.name)}"'
         )
+        debug_filename = module.token.source.filename.replace('\\', '\\\\')
         ctx.static_vars += (
             f'static const char* {DEBUG_FILE_NAME_NAME} = '
-            f'"{module.token.source.filename}";'
+            f'"{debug_filename}";'
         )
         for defn in module.definitions:
             D(defn, ctx)
@@ -5998,6 +6007,7 @@ def Platform(ns):
     LIST = (
         'linux',
         'osx',
+        'windows',
     )
     ns(LIST, 'LIST')
 
@@ -6007,6 +6017,8 @@ def Platform(ns):
             return 'linux'
         elif sys.platform == 'darwin':
             return 'osx'
+        elif sys.platform == 'win32':
+            return 'windows'
         raise TypeError(f'Unrecognized platfrom {sys.platform}')
 
     @ns
@@ -6026,6 +6038,79 @@ def Platform(ns):
         @abc.abstractmethod
         def compile(self, args, module_table):
             pass
+
+        @property
+        def source_extensions(self):
+            return ('.c',)
+
+        def _get_include_dirs_and_source_paths(self, *, args, module_table):
+            include_dirs = set()
+            sources = set()
+
+            src_dirs = [os.path.abspath(path) for path in
+                [args.runtime_sources_directory] +
+                [args.out_srcs_dir]
+            ]
+
+            include_dirs.update(src_dirs)
+            include_dirs.update(args.search_dirs)
+
+            for src_dir in src_dirs:
+                for file_name in os.listdir(src_dir):
+                    if file_name.endswith(self.source_extensions):
+                        file_path = os.path.join(src_dir, file_name)
+                        sources.add(file_path)
+
+            sources.update(
+                additional_source.path
+                for module in module_table.values()
+                for additional_source in module.additional_sources
+            )
+
+            return tuple(sorted(include_dirs)), tuple(sorted(sources))
+
+    class Windows(Compiler):
+
+        vcvars_path = (
+            r'C:\Program Files (x86)\Microsoft Visual Studio'
+            r'\2017\Community\VC\Auxiliary\Build\vcvars64.bat'
+        )
+
+        def compile(self, args, module_table):
+            include_dirs, srcs = self._get_include_dirs_and_source_paths(
+                args=args,
+                module_table=module_table,
+            )
+            srcsstr = ' '.join(f'"{p}"' for p in srcs)
+            incstr = ' '.join(f'-I"{p}"' for p in include_dirs)
+
+            if args.debugging_symbols:
+                debugstr = '/Zi /DEBUG '
+            else:
+                debugstr = ''
+
+            if args.optimize:
+                optstr = '/O2 '
+            else:
+                optstr = ''
+
+            compile_cmd = (
+                f'"{self.vcvars_path}" x64 2> NUL > NUL && '
+                f'cl {srcsstr} {incstr} {optstr} '
+                f'{debugstr}/Fe{args.binary_name} /WX'
+            )
+            quiet_compile = f'{compile_cmd} 2> NUL > NUL'
+
+            args.debug(f'compile-command = {compile_cmd}')
+
+            try:
+                subprocess.run(
+                    f'{quiet_compile} > NUL',
+                    check=True,
+                    shell=True,
+                )
+            except subprocess.CalledProcessError:
+                exit(subprocess.run(compile_cmd, shell=True).returncode)
 
     class SimpleCompiler(Compiler):
         """
@@ -6052,10 +6137,6 @@ def Platform(ns):
                 '-Wno-unused-variable',
             ]
 
-        @property
-        def source_extensions(self):
-            return ('.c',)
-
         def add_common_args(self, cmd, args, module_table):
             cmd.extend([
                 '-std=c89',
@@ -6070,22 +6151,10 @@ def Platform(ns):
             if args.optimize:
                 cmd.append('-O3')
 
-            src_dirs = [os.path.abspath(path) for path in
-                [args.runtime_sources_directory] +
-                [args.out_srcs_dir]
-            ]
-
-            additional_source_paths = sorted({
-                additional_source.path
-                for module in module_table.values()
-                for additional_source in module.additional_sources
-            })
-
             self._add_includes_and_sources(
                 cmd=cmd,
-                src_dirs=src_dirs,
-                additional_include_dirs=args.search_dirs,
-                additional_source_paths=additional_source_paths,
+                args=args,
+                module_table=module_table,
             )
 
             libs = {
@@ -6104,20 +6173,17 @@ def Platform(ns):
                 src_dirs,
                 additional_include_dirs,
                 additional_source_paths):
-            for src_dir in src_dirs:
-                cmd.extend(['-I', src_dir])
 
-            for additional_include_dir in additional_include_dirs:
-                cmd.extend(['-I', additional_include_dir])
+            include_dirs, sources = self._get_include_dirs_and_source_paths(
+                args=args,
+                module_table=module_table,
+            )
 
-            for src_dir in src_dirs:
-                for file_name in os.listdir(src_dir):
-                    if file_name.endswith(self.source_extensions):
-                        file_path = os.path.join(src_dir, file_name)
-                        cmd.append(file_path)
+            for include_dir in include_dirs:
+                cmd.extend(['-I', include_dir])
 
-            for additional_source_path in additional_source_paths:
-                cmd.append(additional_source_path)
+            for source in sources:
+                cmd.append(source)
 
     class Linux(SimpleUnixCompiler):
         """
@@ -6173,6 +6239,8 @@ def Platform(ns):
             return Linux()
         elif platform == 'osx':
             return OSX()
+        elif platform == 'windows':
+            return Windows()
         else:
             raise TypeError(f'Unsupported compile platform {platform}')
 
