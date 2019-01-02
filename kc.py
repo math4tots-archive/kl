@@ -6007,7 +6007,7 @@ def Platform(ns):
     LIST = (
         'linux',
         'osx',
-        'windows',
+        'win',
     )
     ns(LIST, 'LIST')
 
@@ -6018,12 +6018,12 @@ def Platform(ns):
         elif sys.platform == 'darwin':
             return 'osx'
         elif sys.platform == 'win32':
-            return 'windows'
+            return 'win'
         raise TypeError(f'Unrecognized platfrom {sys.platform}')
 
     @ns
     def get_default_binary_name(platform):
-        if platform == 'windows':
+        if platform == 'win':
             return 'a.exe'
         else:
             return 'a.out'
@@ -6239,7 +6239,7 @@ def Platform(ns):
             return Linux()
         elif platform == 'osx':
             return OSX()
-        elif platform == 'windows':
+        elif platform == 'win':
             return Windows()
         else:
             raise TypeError(f'Unsupported compile platform {platform}')
