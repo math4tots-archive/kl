@@ -791,7 +791,16 @@ KLC_Error* KLC_var_to_ptr(
         "Expected class type but got %s",
         KLC_tag_to_str(v.tag));
   }
-  if (v.u.p->cls != cls) {
+  if (!v.u.p || !v.u.p->cls) {
+    return KLC_errorf(
+      strlen(cls->module_name) +
+        strlen(cls->short_name),
+      stack,
+      "Tried to cast null instance to %s#%s",
+      cls->module_name,
+      cls->short_name
+    );
+  } else if (v.u.p->cls != cls) {
     return KLC_errorf(
         strlen(v.u.p->cls->module_name) +
           strlen(v.u.p->cls->short_name) +

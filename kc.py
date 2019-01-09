@@ -6203,9 +6203,8 @@ def Platform(ns):
                 self,
                 *,
                 cmd,
-                src_dirs,
-                additional_include_dirs,
-                additional_source_paths):
+                args,
+                module_table):
 
             include_dirs, sources = self._get_include_dirs_and_source_paths(
                 args=args,

@@ -1,3 +1,4 @@
+// test variable declaration related issues
 
 void used_before_declared_int() {
   // Unfortunately, a variable can be used in a scope in which it is
@@ -11,9 +12,10 @@ void used_before_declared_int() {
 
 
 void used_before_declared_str() {
-  // print(s)  // this should throw
-  String s = 'hi'
+  // print(s)  // this should throw at rt (cannot use s before set)
+  // String s = null  // this should throw at rt (String cannot be null)
   // String s  // this should throw error at compile time (must initialize)
+  String s = 'hi'
 }
 
 
