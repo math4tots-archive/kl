@@ -2547,11 +2547,12 @@ def parser(ns):
                         )
                         expect('\n')
                         consume_all('\n')
-                        decl_promise = pcall(
-                            IR.LocalVariableDeclaration,
-                            decl_token,
-                            decl_type_promise,
-                            decl_name,
+                        decl_promise = _promise_local_variable_decl(
+                            scope=scope,
+                            token=decl_token,
+                            type_promise=decl_type_promise,
+                            name=decl_name,
+                            has_expr=expr_promise is not None,
                         )
                         decl_promises.append(decl_promise)
                         scope.set_promise(
@@ -2573,6 +2574,20 @@ def parser(ns):
                 decl_promises=decl_promises,
                 expr_promises=expr_promises,
             )
+
+        def _promise_local_variable_decl(
+                scope, token, type_promise, name, has_expr):
+            @Promise
+            def promise():
+                decl_type = type_promise.resolve()
+                if isinstance(decl_type, IR.ClassDefinition):
+                    if not has_expr:
+                        with scope.push(token):
+                            raise scope.error(
+                                f'Class variable declarations '
+                                f'must be initialized')
+                return IR.LocalVariableDeclaration(token, decl_type, name)
+            return promise
 
         def _check_has_expression_context(scope):
             assert isinstance(scope['@ec'], IR.ExpressionContext)
@@ -5424,7 +5439,19 @@ def C(ns):
 
     @E.on(IR.LocalName)
     def E(self, ctx):
-        return cvarname(self.decl)
+        name = cvarname(self.decl)
+        if isinstance(self.type, IR.ClassDefinition):
+            ctx.out += f'if (!{name}) ' '{'
+            with ctx.push_indent(1):
+                ctx.out += (
+                    f'{ERROR_POINTER_NAME} = '
+                    f'KLC_errorf(0, {STACK_POINTER_NAME}, '
+                    f'"Variable {repr(self.decl.name)[1:-1]} '
+                    f'used before set");'
+                )
+                ctx.jump_out_of_scope()
+            ctx.out += '}'
+        return name
 
     @E.on(IR.CaptureName)
     def E(self, ctx):
